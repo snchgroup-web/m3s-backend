@@ -1,0 +1,4 @@
+# Placeholder file to ensure config/ directory is created
+#
+# Place your credentials.json here:
+# ./credentials.json  (downloaded from GCP Console)

@@ -1,0 +1,56 @@
+╔════════════════════════════════════════════════════════════════╗
+║  🚀 M3S BACKEND - QUICK REFERENCE                              ║
+║                                                                ║
+║  Location: ./backend-setup/                                   ║
+║  Status: ✅ PRÊT À UTILISER                                   ║
+╚════════════════════════════════════════════════════════════════╝
+
+📋 FICHIERS INCLUS:
+  ✓ server.js                 Express + BigQuery server
+  ✓ package.json              Dépendances npm
+  ✓ .env                      Configuration (À VÉRIFIER)
+  ✓ .gitignore               Pour Git
+  ✓ config/                  Dossier pour credentials
+  ✓ START-HERE.md            Lire ça en premier!
+  ✓ SETUP-INSTRUCTIONS.md    Guide détaillé
+  ✓ README.md                Vue d'ensemble
+
+🎯 3 COMMANDES POUR DÉMARRER:
+
+  1. npm install              (install dépendances)
+  2. [Télécharger credentials.json depuis GCP]
+  3. npm start                (lancer le serveur)
+
+⏱️  TEMPS TOTAL: ~10 minutes!
+
+📊 ENDPOINTS DISPONIBLES:
+  ✓ /api/documents           (5,143 documents!)
+  ✓ /api/documents/count     (compte)
+  ✓ /api/documents/stats     (statistiques)
+  ✓ /api/search              (recherche full-text)
+  ✓ /api/finance/dashboard   (finance KPIs)
+  ✓ /api/finance/transactions (transactions)
+  ✓ /api/rh/dashboard        (RH KPIs)
+  ✓ /api/rh/employees        (employés)
+  ✓ /api/crm/dashboard       (CRM KPIs)
+  ✓ /api/crm/prospects       (prospects)
+  ✓ /api/production/dashboard (production KPIs)
+  ✓ /api/production/inventory (inventaire)
+  ✓ /api/health              (health check)
+  ✓ /api/info                (tous les endpoints)
+  ✓ /api/tables              (lister tables BigQuery)
+
+🧪 TESTER:
+  curl http://localhost:3001/api/health
+  curl http://localhost:3001/api/documents/count
+  curl http://localhost:3001/api/finance/dashboard
+
+📚 LIRE D'ABORD:
+  → START-HERE.md (résumé rapide)
+  → SETUP-INSTRUCTIONS.md (guide complet)
+
+⚠️  IMPORTANT:
+  Sans credentials.json, le serveur ne fonctionnera pas!
+  Télécharger depuis GCP Console et placer dans: ./config/
+
+✨ C'EST PRÊT! Suivez START-HERE.md!
