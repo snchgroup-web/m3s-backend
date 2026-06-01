@@ -22,15 +22,62 @@ const { BigQuery } = require('@google-cloud/bigquery');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const PROJECT_ID = process.env.PROJECT_ID || 'mon-projet-data-2sg';
-const DATASET_ID = process.env.DATASET_ID || 'm3s_2sg';
+const PROJECT_ID = process.env.BIGQUERY_PROJECT || process.env.PROJECT_ID || 'mon-projet-data-2sg';
+const DATASET_ID = process.env.BIGQUERY_DATASET || process.env.DATASET_ID || 'm3s_2sg';
 
-// BigQuery client
-const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
-const bigquery = new BigQuery({
-  projectId: PROJECT_ID,
-  keyFilename: credentialsPath
-});
+// BigQuery client - Use GOOGLE_CREDENTIALS from Railway OR local credentials.json
+let bigquery;
+try {
+  if (process.env.GOOGLE_CREDENTIALS) {
+    // ✅ USE RAILWAY ENVIRONMENT VARIABLE
+    try {
+      console.log('🔍 DEBUG: Tentative de parsing GOOGLE_CREDENTIALS...');
+      console.log('🔍 DEBUG: Longueur:', process.env.GOOGLE_CREDENTIALS.length);
+      console.log('🔍 DEBUG: Premiers 100 chars:', process.env.GOOGLE_CREDENTIALS.substring(0, 100));
+
+      const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+
+      bigquery = new BigQuery({
+        projectId: PROJECT_ID,
+        credentials: credentials
+      });
+      console.log('✅ BigQuery: Using GOOGLE_CREDENTIALS from Railway environment');
+    } catch (parseError) {
+      console.error('❌ JSON.parse error:', parseError.message);
+      console.error('❌ Problème possible:');
+      console.error('   - Guillemets mal échappés dans Railway');
+      console.error('   - JSON invalide');
+      console.error('   - Variable vide ou malformée');
+      console.error('');
+      console.error('📌 SOLUTION: Vérifier Railway Variables dashboard:');
+      console.error('   https://railway.app/project/1e96f996-ea2d-442e-a319-098b81cdcef6');
+      console.error('');
+
+      // FALLBACK: essayer avec local credentials.json
+      console.log('⚠️  Tentative fallback: local credentials.json...');
+      const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
+      bigquery = new BigQuery({
+        projectId: PROJECT_ID,
+        keyFilename: credentialsPath
+      });
+      console.log('✅ BigQuery: Fallback to local credentials.json successful');
+    }
+  } else {
+    // ✅ USE LOCAL credentials.json (for development)
+    console.log('ℹ️  GOOGLE_CREDENTIALS not set in environment');
+    const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
+    bigquery = new BigQuery({
+      projectId: PROJECT_ID,
+      keyFilename: credentialsPath
+    });
+    console.log('✅ BigQuery: Using local credentials.json');
+  }
+} catch (error) {
+  console.error('❌ BigQuery initialization FATAL error:', error.message);
+  console.error('❌ Stack:', error.stack);
+  process.exit(1);
+}
+
 const DATASET_LOCATION = 'US';
 const dataset = bigquery.dataset(DATASET_ID, { location: DATASET_LOCATION });
 
