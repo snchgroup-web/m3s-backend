@@ -41,6 +41,45 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', version: '3.0', project: PROJECT_ID, dataset: DATASET_ID });
 });
 
+/**
+ * DIAGNOSTIC - Retourner les vrais noms de colonnes
+ */
+app.get('/api/debug/expenses-schema', async (req, res) => {
+  try {
+    const query = `SELECT * FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\` LIMIT 1`;
+    const [rows] = await bigquery.query({ query, location: 'US' });
+
+    if (rows.length === 0) {
+      return res.json({
+        success: false,
+        message: 'No data in expenses table',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const columns = Object.keys(rows[0]);
+    const firstRow = rows[0];
+
+    res.json({
+      success: true,
+      columns: columns,
+      firstRow: firstRow,
+      sampleData: {
+        column1: columns[0] && firstRow[columns[0]],
+        column2: columns[1] && firstRow[columns[1]],
+        column3: columns[2] && firstRow[columns[2]],
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // TEST IMMÉDIAT - Retourner test data
 app.get('/api/test', async (req, res) => {
   res.json({
