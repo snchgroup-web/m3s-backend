@@ -89,15 +89,16 @@ app.get('/api/debug/sample', async (req, res) => {
   }
 });
 
-// FINANCE DASHBOARD - AVEC VRAIS NOMS DE COLONNES
+// FINANCE DASHBOARD - VRAIES DONNÉES
 app.get('/api/finance/dashboard', async (req, res) => {
   try {
     const query = `
       SELECT
-        SUM(CAST(chf AS FLOAT64)) as total_expenses,
-        COUNT(DISTINCT nr_ref) as total_transactions,
-        AVG(CAST(chf AS FLOAT64)) as avg_transaction
+        SUM(CAST(string_field_4 AS FLOAT64)) as total_expenses,
+        COUNT(DISTINCT string_field_1) as total_transactions,
+        AVG(CAST(string_field_4 AS FLOAT64)) as avg_transaction
       FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`
+      WHERE string_field_1 NOT IN ('Nr REF', '', 'nr ref')
     `;
     const options = { query, location: 'US' };
     const [rows] = await bigquery.query(options);
@@ -115,7 +116,7 @@ app.get('/api/finance/dashboard', async (req, res) => {
   }
 });
 
-// FINANCE EXPENSES - AVEC VRAIS NOMS
+// FINANCE EXPENSES - VRAIES DONNÉES
 app.get('/api/finance/expenses', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
@@ -123,14 +124,15 @@ app.get('/api/finance/expenses', async (req, res) => {
 
     const query = `
       SELECT
-        nr_ref as id,
-        designation as description,
-        chf as amount,
-        rubrique_dep as category,
-        paiement as status,
-        date as created_at
+        string_field_1 as id,
+        string_field_3 as description,
+        CAST(string_field_4 AS FLOAT64) as amount,
+        string_field_9 as category,
+        string_field_6 as status,
+        string_field_2 as created_at
       FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`
-      ORDER BY date DESC
+      WHERE string_field_1 NOT IN ('Nr REF', '', 'nr ref')
+      ORDER BY string_field_2 DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
     const options = { query, location: 'US' };
@@ -148,7 +150,7 @@ app.get('/api/finance/expenses', async (req, res) => {
   }
 });
 
-// FINANCE INCOME - AVEC VRAIS NOMS
+// FINANCE INCOME - VRAIES DONNÉES
 app.get('/api/finance/income', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
@@ -156,14 +158,15 @@ app.get('/api/finance/income', async (req, res) => {
 
     const query = `
       SELECT
-        id_recette as id,
-        designation as description,
-        montant_chf as amount,
-        nature_recette as category,
-        mode_encaissement as status,
-        date as created_at
+        string_field_1 as id,
+        string_field_3 as description,
+        CAST(string_field_6 AS FLOAT64) as amount,
+        string_field_10 as category,
+        string_field_8 as status,
+        string_field_2 as created_at
       FROM \`${PROJECT_ID}.${DATASET_ID}.income\`
-      ORDER BY date DESC
+      WHERE string_field_1 NOT IN ('ID_RECETTE', '', 'id_recette')
+      ORDER BY string_field_2 DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
     const options = { query, location: 'US' };
