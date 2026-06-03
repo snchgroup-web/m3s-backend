@@ -150,13 +150,13 @@ app.get('/api/finance/income', async (req, res) => {
   try {
     const query = `
       SELECT
-        \`Nr REF\` as id,
+        ID_RECETTE as id,
         DESIGNATION as description,
-        CHF as amount,
-        NATURE as category,
+        MONTANT_CHF as amount,
+        NATURE_RECETTE as category,
         DATE as created_at
       FROM \`${PROJECT_ID}.${DATASET_ID}.income\`
-      WHERE \`Nr REF\` IS NOT NULL
+      WHERE ID_RECETTE IS NOT NULL
       ORDER BY DATE DESC
       LIMIT 500
     `;
