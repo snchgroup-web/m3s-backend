@@ -206,7 +206,7 @@ app.get('/api/finance/fx-history', async (req, res) => {
         taux_buy,
         taux_sell,
         taux_mid as rate,
-        date_taux as date,
+        CAST(date_taux AS STRING) as date,
         source,
         is_active as active
       FROM \`${PROJECT_ID}.${DATASET_ID}.historique_fx\`
