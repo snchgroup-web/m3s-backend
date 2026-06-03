@@ -99,8 +99,14 @@ app.get('/api/finance/expenses', async (req, res) => {
   try {
     const query = `
       SELECT
-        *
-      FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`
+        depense_id as id,
+        description as description,
+        CAST(montant_chf AS FLOAT64) as amount,
+        categorie_depense as category,
+        date_transaction as created_at
+      FROM \`${PROJECT_ID}.${DATASET_ID}.depenses\`
+      WHERE depense_id IS NOT NULL
+      ORDER BY date_transaction DESC
       LIMIT 500
     `;
 
@@ -144,8 +150,14 @@ app.get('/api/finance/income', async (req, res) => {
   try {
     const query = `
       SELECT
-        *
-      FROM \`${PROJECT_ID}.${DATASET_ID}.income\`
+        recette_id as id,
+        description as description,
+        CAST(montant_chf AS FLOAT64) as amount,
+        nature_recette as category,
+        date_transaction as created_at
+      FROM \`${PROJECT_ID}.${DATASET_ID}.recettes\`
+      WHERE recette_id IS NOT NULL
+      ORDER BY date_transaction DESC
       LIMIT 500
     `;
 
