@@ -101,7 +101,7 @@ app.get('/api/finance/expenses', async (req, res) => {
       SELECT
         depense_id as id,
         description as description,
-        SAFE.FLOAT64(montant_chf) as amount,
+        CAST(montant_chf AS FLOAT64) as amount,
         rubrique_depense as category,
         date_transaction as created_at
       FROM \`${PROJECT_ID}.${DATASET_ID}.depenses\`
@@ -152,7 +152,7 @@ app.get('/api/finance/income', async (req, res) => {
       SELECT
         recette_id as id,
         description as description,
-        SAFE.FLOAT64(montant_chf) as amount,
+        CAST(montant_chf AS FLOAT64) as amount,
         nature_recette as category,
         date_transaction as created_at
       FROM \`${PROJECT_ID}.${DATASET_ID}.recettes\`
