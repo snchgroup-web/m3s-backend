@@ -80,6 +80,40 @@ app.get('/api/debug/expenses-schema', async (req, res) => {
   }
 });
 
+// DIAGNOSTIC - Vérifier les vrais noms de colonnes pour FX History
+app.get('/api/debug/fx-schema', async (req, res) => {
+  try {
+    const query = `SELECT * FROM \`${PROJECT_ID}.${DATASET_ID}.historique_fx\` LIMIT 1`;
+    const [rows] = await bigquery.query({ query, location: 'US' });
+
+    if (rows.length === 0) {
+      return res.json({
+        success: false,
+        message: 'No data in historique_fx table',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const columns = Object.keys(rows[0]);
+    const firstRow = rows[0];
+
+    res.json({
+      success: true,
+      table: 'historique_fx',
+      columns: columns,
+      columnCount: columns.length,
+      firstRow: firstRow,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // TEST IMMÉDIAT - Retourner test data
 app.get('/api/test', async (req, res) => {
   res.json({
