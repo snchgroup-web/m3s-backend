@@ -9,6 +9,7 @@
 
 require('dotenv').config();
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const { BigQuery } = require('@google-cloud/bigquery');
@@ -19,9 +20,15 @@ const { BigQuery } = require('@google-cloud/bigquery');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const PROJECT_ID = 'mon-projet-data-2sg';
-const DATASET_ID = 'm3s_2sg';
+const PROJECT_ID = process.env.BIGQUERY_PROJECT || 'mon-projet-data-2sg';
+const DATASET_ID = process.env.BIGQUERY_DATASET || 'm3s_2sg';
 const DATASET_LOCATION = 'US';
+const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:3001')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const AUTH_SECRET = process.env.JWT_SECRET || 'm3s-development-secret-change-me';
+const API_REQUIRE_AUTH = process.env.API_REQUIRE_AUTH === 'true';
 
 // BigQuery client
 const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
@@ -35,7 +42,7 @@ const bigquery = new BigQuery({
 // ============================================================================
 
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001'],
+  origin: CORS_ORIGINS,
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
@@ -46,6 +53,127 @@ app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
+
+// ============================================================================
+// AUTH HELPERS
+// ============================================================================
+
+const base64Url = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+
+const signToken = (payload) => {
+  const header = base64Url({ alg: 'HS256', typ: 'JWT' });
+  const body = base64Url({
+    ...payload,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 12
+  });
+  const signature = crypto
+    .createHmac('sha256', AUTH_SECRET)
+    .update(`${header}.${body}`)
+    .digest('base64url');
+
+  return `${header}.${body}.${signature}`;
+};
+
+const parseToken = (token) => {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  const [header, body, signature] = parts;
+  const expectedSignature = crypto
+    .createHmac('sha256', AUTH_SECRET)
+    .update(`${header}.${body}`)
+    .digest('base64url');
+  const signatureBuffer = Buffer.from(signature);
+  const expectedSignatureBuffer = Buffer.from(expectedSignature);
+
+  if (
+    signatureBuffer.length !== expectedSignatureBuffer.length ||
+    !crypto.timingSafeEqual(signatureBuffer, expectedSignatureBuffer)
+  ) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+};
+
+const requireAuth = (req, res, next) => {
+  if (!API_REQUIRE_AUTH) return next();
+  if (req.path === '/api/auth/login' || req.path === '/api/health' || req.path === '/api/info') {
+    return next();
+  }
+
+  const authHeader = req.get('authorization') || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const payload = token ? parseToken(token) : null;
+
+  if (!payload) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentification requise'
+    });
+  }
+
+  req.user = payload;
+  return next();
+};
+
+const getConfiguredUsers = () => {
+  if (!process.env.M3S_AUTH_USERS_JSON) return [];
+
+  try {
+    const users = JSON.parse(process.env.M3S_AUTH_USERS_JSON);
+    return Array.isArray(users) ? users : [];
+  } catch (error) {
+    console.error('Invalid M3S_AUTH_USERS_JSON:', error.message);
+    return [];
+  }
+};
+
+// ============================================================================
+// AUTH ROUTES
+// ============================================================================
+
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body || {};
+
+  if (!email || !password) {
+    return res.status(400).json({
+      success: false,
+      error: 'Email et mot de passe requis'
+    });
+  }
+
+  const users = getConfiguredUsers();
+  const account = users.find((candidate) => candidate.email === email);
+
+  if (!account || account.password !== password) {
+    return res.status(401).json({
+      success: false,
+      error: 'Email ou mot de passe incorrect'
+    });
+  }
+
+  const user = {
+    email: account.email,
+    name: account.name || account.email,
+    role: account.role || 'Utilisateur'
+  };
+
+  res.json({
+    success: true,
+    token: signToken(user),
+    user
+  });
+});
+
+app.use('/api', requireAuth);
 
 // ============================================================================
 // HEALTH CHECK
@@ -450,6 +578,9 @@ app.get('/api/info', (req, res) => {
     service: 'M3S Backend API',
     version: '2.0',
     endpoints: {
+      auth: [
+        'POST /api/auth/login'
+      ],
       finance: [
         'GET /api/finance/expenses?limit=100&offset=0',
         'GET /api/finance/income?limit=100&offset=0',
