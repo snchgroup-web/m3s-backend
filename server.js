@@ -132,7 +132,12 @@ const parseToken = (token) => {
 
 const requireAuth = (req, res, next) => {
   if (!API_REQUIRE_AUTH) return next();
-  if (req.path === '/api/auth/login' || req.path === '/api/health' || req.path === '/api/info') {
+  if (
+    req.path === '/api/auth/login' ||
+    req.path === '/api/health' ||
+    req.path === '/api/info' ||
+    req.path === '/api/debug/config'
+  ) {
     return next();
   }
 
@@ -248,6 +253,22 @@ app.get('/api/health', async (req, res) => {
       error: error.message
     });
   }
+});
+
+app.get('/api/debug/config', (req, res) => {
+  res.json({
+    service: 'M3S Backend',
+    environment: process.env.NODE_ENV || 'development',
+    project: PROJECT_ID,
+    dataset: DATASET_ID,
+    datasetLocation: DATASET_LOCATION,
+    corsOrigins: CORS_ORIGINS,
+    apiRequireAuth: API_REQUIRE_AUTH,
+    hasGoogleCredentialsEnv: Boolean(process.env.GOOGLE_CREDENTIALS),
+    googleCredentialsParsed: Boolean(googleCredentials),
+    hasLocalCredentialsPath: !googleCredentials,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // ============================================================================
