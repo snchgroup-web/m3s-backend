@@ -138,7 +138,8 @@ const requireAuth = (req, res, next) => {
     req.path === '/api/health' ||
     req.path === '/api/info' ||
     req.path === '/api/debug/config' ||
-    req.path === '/api/debug/bigquery'
+    req.path === '/api/debug/bigquery' ||
+    req.path === '/api/debug/documents'
   ) {
     return next();
   }
@@ -237,7 +238,7 @@ app.use('/api', requireAuth);
 
 app.get('/api/health', async (req, res) => {
   try {
-    const query = `SELECT COUNT(*) as count FROM \`${PROJECT_ID}.${DATASET_ID}.documents\` LIMIT 1`;
+    const query = 'SELECT 1 AS ok';
     await bigquery.query({ query, location: DATASET_LOCATION });
 
     res.json({
@@ -263,6 +264,39 @@ app.get('/api/health', async (req, res) => {
       project: PROJECT_ID,
       dataset: DATASET_ID,
       datasetLocation: DATASET_LOCATION,
+      error: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason || null,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+app.get('/api/debug/documents', async (req, res) => {
+  try {
+    const query = `SELECT COUNT(*) as count FROM \`${PROJECT_ID}.${DATASET_ID}.documents\``;
+    const [rows] = await bigquery.query({ query, location: DATASET_LOCATION });
+
+    res.json({
+      success: true,
+      service: 'M3S Backend',
+      revision: APP_REVISION,
+      table: `${PROJECT_ID}.${DATASET_ID}.documents`,
+      count: rows[0]?.count || 0,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Debug documents table error:', {
+      message: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason
+    });
+
+    res.status(500).json({
+      success: false,
+      service: 'M3S Backend',
+      revision: APP_REVISION,
+      table: `${PROJECT_ID}.${DATASET_ID}.documents`,
       error: error.message,
       code: error.code,
       reason: error.errors?.[0]?.reason || null,
