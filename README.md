@@ -124,10 +124,13 @@ Variables requises :
 ```env
 JWT_SECRET=une_valeur_longue_et_aleatoire
 API_REQUIRE_AUTH=true
+GOOGLE_CREDENTIALS={"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}
 M3S_AUTH_USERS_JSON=[{"email":"admin@example.com","name":"Admin","role":"Administrateur","passwordHash":"base64_hash","passwordSalt":"base64_salt","passwordIterations":120000}]
 ```
 
 En production Railway, définir ces variables dans le tableau de bord Railway, pas dans GitHub.
+
+`GOOGLE_CREDENTIALS` peut contenir le JSON complet du service account Google, ou ce même JSON encodé en base64. En local, si cette variable est absente, le backend utilise `config/credentials.json`.
 
 Quand `API_REQUIRE_AUTH=true`, tous les endpoints `/api/*` demandent un token `Authorization: Bearer ...`, sauf `/api/auth/login`, `/api/health` et `/api/info`.
 

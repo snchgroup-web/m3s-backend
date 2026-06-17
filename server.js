@@ -30,12 +30,39 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://l
 const AUTH_SECRET = process.env.JWT_SECRET || 'm3s-development-secret-change-me';
 const API_REQUIRE_AUTH = process.env.API_REQUIRE_AUTH === 'true';
 
-// BigQuery client
-const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
-const bigquery = new BigQuery({
-  projectId: PROJECT_ID,
-  keyFilename: credentialsPath
-});
+const parseGoogleCredentials = () => {
+  const rawCredentials = process.env.GOOGLE_CREDENTIALS;
+  if (!rawCredentials) return null;
+
+  const candidates = [rawCredentials];
+  try {
+    candidates.push(Buffer.from(rawCredentials, 'base64').toString('utf8'));
+  } catch {
+    // Keep the raw candidate only.
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const credentials = JSON.parse(candidate);
+      if (credentials.client_email && credentials.private_key) {
+        return credentials;
+      }
+    } catch {
+      // Try the next representation.
+    }
+  }
+
+  console.warn('GOOGLE_CREDENTIALS is set but could not be parsed as service account JSON');
+  return null;
+};
+
+// BigQuery client. Railway uses GOOGLE_CREDENTIALS; local setup can keep config/credentials.json.
+const googleCredentials = parseGoogleCredentials();
+const bigquery = new BigQuery(
+  googleCredentials
+    ? { projectId: PROJECT_ID, credentials: googleCredentials }
+    : { projectId: PROJECT_ID, keyFilename: path.join(__dirname, 'config', 'credentials.json') }
+);
 
 // ============================================================================
 // MIDDLEWARE
