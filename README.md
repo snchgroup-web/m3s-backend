@@ -124,12 +124,20 @@ Variables requises :
 ```env
 JWT_SECRET=une_valeur_longue_et_aleatoire
 API_REQUIRE_AUTH=true
-M3S_AUTH_USERS_JSON=[{"email":"admin@example.com","password":"mot_de_passe","name":"Admin","role":"Administrateur"}]
+M3S_AUTH_USERS_JSON=[{"email":"admin@example.com","name":"Admin","role":"Administrateur","passwordHash":"base64_hash","passwordSalt":"base64_salt","passwordIterations":120000}]
 ```
 
 En production Railway, définir ces variables dans le tableau de bord Railway, pas dans GitHub.
 
 Quand `API_REQUIRE_AUTH=true`, tous les endpoints `/api/*` demandent un token `Authorization: Bearer ...`, sauf `/api/auth/login`, `/api/health` et `/api/info`.
+
+Pour générer l'entrée `M3S_AUTH_USERS_JSON` sans stocker le mot de passe en clair :
+
+```bash
+npm run auth:hash -- admin@example.com "mot_de_passe_fort" "Admin" "Administrateur"
+```
+
+Copier uniquement le JSON généré dans Railway. Le mot de passe en clair ne doit pas être commité.
 
 ---
 

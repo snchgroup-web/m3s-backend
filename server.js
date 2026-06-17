@@ -136,6 +136,28 @@ const getConfiguredUsers = () => {
   }
 };
 
+const verifyPassword = (account, password) => {
+  if (account.passwordHash && account.passwordSalt) {
+    const iterations = Number(account.passwordIterations) || 120000;
+    const expectedHash = Buffer.from(account.passwordHash, 'base64');
+    const actualHash = crypto.pbkdf2Sync(
+      password,
+      account.passwordSalt,
+      iterations,
+      expectedHash.length,
+      'sha256'
+    );
+
+    return (
+      actualHash.length === expectedHash.length &&
+      crypto.timingSafeEqual(actualHash, expectedHash)
+    );
+  }
+
+  // Compatibility fallback for temporary local/demo configs.
+  return Boolean(account.password && account.password === password);
+};
+
 // ============================================================================
 // AUTH ROUTES
 // ============================================================================
@@ -153,7 +175,7 @@ app.post('/api/auth/login', (req, res) => {
   const users = getConfiguredUsers();
   const account = users.find((candidate) => candidate.email === email);
 
-  if (!account || account.password !== password) {
+  if (!account || !verifyPassword(account, password)) {
     return res.status(401).json({
       success: false,
       error: 'Email ou mot de passe incorrect'
