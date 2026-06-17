@@ -29,6 +29,7 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://l
   .filter(Boolean);
 const AUTH_SECRET = process.env.JWT_SECRET || 'm3s-development-secret-change-me';
 const API_REQUIRE_AUTH = process.env.API_REQUIRE_AUTH === 'true';
+const APP_REVISION = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.APP_REVISION || 'local';
 
 const parseGoogleCredentials = () => {
   const rawCredentials = process.env.GOOGLE_CREDENTIALS;
@@ -136,7 +137,8 @@ const requireAuth = (req, res, next) => {
     req.path === '/api/auth/login' ||
     req.path === '/api/health' ||
     req.path === '/api/info' ||
-    req.path === '/api/debug/config'
+    req.path === '/api/debug/config' ||
+    req.path === '/api/debug/bigquery'
   ) {
     return next();
   }
@@ -272,6 +274,7 @@ app.get('/api/health', async (req, res) => {
 app.get('/api/debug/config', (req, res) => {
   res.json({
     service: 'M3S Backend',
+    revision: APP_REVISION,
     environment: process.env.NODE_ENV || 'development',
     project: PROJECT_ID,
     dataset: DATASET_ID,
@@ -283,6 +286,45 @@ app.get('/api/debug/config', (req, res) => {
     hasLocalCredentialsPath: !googleCredentials,
     timestamp: new Date().toISOString()
   });
+});
+
+app.get('/api/debug/bigquery', async (req, res) => {
+  try {
+    const [rows] = await bigquery.query({
+      query: 'SELECT 1 AS ok',
+      location: DATASET_LOCATION
+    });
+
+    res.json({
+      success: true,
+      service: 'M3S Backend',
+      revision: APP_REVISION,
+      project: PROJECT_ID,
+      dataset: DATASET_ID,
+      datasetLocation: DATASET_LOCATION,
+      result: rows[0] || null,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Debug BigQuery error:', {
+      message: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason
+    });
+
+    res.status(500).json({
+      success: false,
+      service: 'M3S Backend',
+      revision: APP_REVISION,
+      project: PROJECT_ID,
+      dataset: DATASET_ID,
+      datasetLocation: DATASET_LOCATION,
+      error: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason || null,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // ============================================================================
