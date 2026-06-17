@@ -248,9 +248,23 @@ app.get('/api/health', async (req, res) => {
       dataset: DATASET_ID
     });
   } catch (error) {
+    console.error('Health check BigQuery error:', {
+      message: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason
+    });
+
     res.status(500).json({
       status: 'error',
-      error: error.message
+      service: 'M3S Backend',
+      bigquery: 'error',
+      project: PROJECT_ID,
+      dataset: DATASET_ID,
+      datasetLocation: DATASET_LOCATION,
+      error: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason || null,
+      timestamp: new Date().toISOString()
     });
   }
 });
