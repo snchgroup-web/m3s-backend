@@ -851,7 +851,10 @@ app.get('/api/users', async (req, res) => {
         \`Poste\` as position,
         \`Team\` as department,
         'Actif' as status,
-        'Associé' as member_type,
+        CASE
+          WHEN LOWER(\`Identifiant\`) IN ('chantal', 'cheikh') THEN 'Fondateur'
+          ELSE 'Associé'
+        END as member_type,
         \`Profil\` as role,
         \`role_actual\` as access_role,
         \`Prénom\` as prenom,
@@ -861,7 +864,10 @@ app.get('/api/users', async (req, res) => {
         \`Poste\` as poste,
         \`Team\` as departement,
         \`Profil\` as profil,
-        'Associé' as type_membre,
+        CASE
+          WHEN LOWER(\`Identifiant\`) IN ('chantal', 'cheikh') THEN 'Fondateur'
+          ELSE 'Associé'
+        END as type_membre,
         true as active
       FROM \`${PROJECT_ID}.${DATASET_ID}.users\`
       ORDER BY \`Nom\`
