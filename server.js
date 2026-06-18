@@ -65,6 +65,23 @@ const bigquery = new BigQuery(
     : { projectId: PROJECT_ID, keyFilename: path.join(__dirname, 'config', 'credentials.json') }
 );
 
+const isMissingBigQueryTable = (error) => {
+  const message = String(error?.message || '');
+  return message.includes('Not found: Table') || message.includes('Not found: Dataset');
+};
+
+const runQueryWithFallback = async ({ preferredQuery, fallbackQuery, label }) => {
+  try {
+    return await bigquery.query({ query: preferredQuery, location: DATASET_LOCATION });
+  } catch (error) {
+    if (!fallbackQuery || !isMissingBigQueryTable(error)) {
+      throw error;
+    }
+    console.warn(`${label}: table propre indisponible, fallback table historique`);
+    return bigquery.query({ query: fallbackQuery, location: DATASET_LOCATION });
+  }
+};
+
 // ============================================================================
 // MIDDLEWARE
 // ============================================================================
@@ -637,7 +654,29 @@ app.get('/api/documents', async (req, res) => {
     const limit = parseInt(req.query.limit) || 100;
     const offset = parseInt(req.query.offset) || 0;
 
-    const query = `
+    const preferredQuery = `
+      SELECT
+        source_id as id,
+        source_id,
+        nom_document as name,
+        nom_document,
+        type_document as type,
+        type_document,
+        categorie as folder,
+        categorie,
+        proprietaire,
+        date_document,
+        statut,
+        lien,
+        taille_ko,
+        tags,
+        description
+      FROM \`${PROJECT_ID}.${DATASET_ID}.documents_propres\`
+      ORDER BY source_id
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const fallbackQuery = `
       SELECT
         string_field_0 as id,
         string_field_1 as name,
@@ -651,8 +690,11 @@ app.get('/api/documents', async (req, res) => {
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    const options = { query, location: DATASET_LOCATION };
-    const [rows] = await bigquery.query(options);
+    const [rows] = await runQueryWithFallback({
+      preferredQuery,
+      fallbackQuery,
+      label: 'Documents'
+    });
 
     console.log(`✅ Documents returned: ${rows.length} rows`);
 
@@ -673,15 +715,23 @@ app.get('/api/documents', async (req, res) => {
 
 app.get('/api/documents/count', async (req, res) => {
   try {
-    const query = `
+    const preferredQuery = `
+      SELECT COUNT(*) as total
+      FROM \`${PROJECT_ID}.${DATASET_ID}.documents_propres\`
+    `;
+
+    const fallbackQuery = `
       SELECT COUNT(*) as total
       FROM \`${PROJECT_ID}.${DATASET_ID}.documents_inventory\`
       WHERE string_field_0 IS NOT NULL
         AND TRIM(string_field_0) != ''
         AND string_field_0 != 'DOC_ID'
     `;
-    const options = { query, location: DATASET_LOCATION };
-    const [rows] = await bigquery.query(options);
+    const [rows] = await runQueryWithFallback({
+      preferredQuery,
+      fallbackQuery,
+      label: 'Documents count'
+    });
 
     res.json({
       success: true,
@@ -705,7 +755,35 @@ app.get('/api/inventory', async (req, res) => {
     const limit = parseInt(req.query.limit) || 100;
     const offset = parseInt(req.query.offset) || 0;
 
-    const query = `
+    const preferredQuery = `
+      SELECT
+        source_id as id,
+        source_id,
+        source_id as ref,
+        article as name,
+        article,
+        categorie,
+        sous_categorie,
+        fournisseur,
+        quantite as quantity,
+        quantite,
+        unite,
+        achat_chf,
+        achat_cfa,
+        valeur_chf as price,
+        valeur_chf,
+        valeur_cfa,
+        localisation,
+        statut as status,
+        statut,
+        bu,
+        commentaires
+      FROM \`${PROJECT_ID}.${DATASET_ID}.stocks_actifs_propres\`
+      ORDER BY source_id
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const fallbackQuery = `
       SELECT
         string_field_0 as id,
         string_field_1 as ref,
@@ -721,8 +799,11 @@ app.get('/api/inventory', async (req, res) => {
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    const options = { query, location: DATASET_LOCATION };
-    const [rows] = await bigquery.query(options);
+    const [rows] = await runQueryWithFallback({
+      preferredQuery,
+      fallbackQuery,
+      label: 'Inventory'
+    });
 
     res.json({
       success: true,
@@ -740,15 +821,23 @@ app.get('/api/inventory', async (req, res) => {
 
 app.get('/api/inventory/count', async (req, res) => {
   try {
-    const query = `
+    const preferredQuery = `
+      SELECT COUNT(*) as total
+      FROM \`${PROJECT_ID}.${DATASET_ID}.stocks_actifs_propres\`
+    `;
+
+    const fallbackQuery = `
       SELECT COUNT(*) as total
       FROM \`${PROJECT_ID}.${DATASET_ID}.inventory\`
       WHERE string_field_0 IS NOT NULL
         AND TRIM(string_field_0) != ''
         AND string_field_0 != 'ID'
     `;
-    const options = { query, location: DATASET_LOCATION };
-    const [rows] = await bigquery.query(options);
+    const [rows] = await runQueryWithFallback({
+      preferredQuery,
+      fallbackQuery,
+      label: 'Inventory count'
+    });
 
     res.json({
       success: true,
@@ -772,7 +861,33 @@ app.get('/api/tasks', async (req, res) => {
     const limit = parseInt(req.query.limit) || 100;
     const offset = parseInt(req.query.offset) || 0;
 
-    const query = `
+    const preferredQuery = `
+      SELECT
+        source_id as id,
+        source_id,
+        titre as title,
+        titre,
+        description,
+        statut as status,
+        statut,
+        priorite as priority,
+        priorite,
+        responsable,
+        module,
+        projet,
+        date_debut as created_at,
+        date_debut,
+        date_fin,
+        progression,
+        team,
+        bu,
+        annee
+      FROM \`${PROJECT_ID}.${DATASET_ID}.taches_propres\`
+      ORDER BY date_debut DESC, source_id
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const fallbackQuery = `
       SELECT
         string_field_0 as id,
         COALESCE(string_field_1, string_field_0) as title,
@@ -788,8 +903,11 @@ app.get('/api/tasks', async (req, res) => {
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    const options = { query, location: DATASET_LOCATION };
-    const [rows] = await bigquery.query(options);
+    const [rows] = await runQueryWithFallback({
+      preferredQuery,
+      fallbackQuery,
+      label: 'Tasks'
+    });
 
     res.json({
       success: true,
@@ -807,15 +925,23 @@ app.get('/api/tasks', async (req, res) => {
 
 app.get('/api/tasks/count', async (req, res) => {
   try {
-    const query = `
+    const preferredQuery = `
+      SELECT COUNT(*) as total
+      FROM \`${PROJECT_ID}.${DATASET_ID}.taches_propres\`
+    `;
+
+    const fallbackQuery = `
       SELECT COUNT(*) as total
       FROM \`${PROJECT_ID}.${DATASET_ID}.bdd_taches\`
       WHERE string_field_0 IS NOT NULL
         AND TRIM(string_field_0) != ''
         AND string_field_0 != 'Unnamed: 0'
     `;
-    const options = { query, location: DATASET_LOCATION };
-    const [rows] = await bigquery.query(options);
+    const [rows] = await runQueryWithFallback({
+      preferredQuery,
+      fallbackQuery,
+      label: 'Tasks count'
+    });
 
     res.json({
       success: true,
@@ -899,23 +1025,85 @@ app.get('/api/users', async (req, res) => {
 
 app.get('/api/fx-rates', async (req, res) => {
   try {
-    const query = `
+    const limit = parseInt(req.query.limit) || 100;
+
+    const preferredHistoryQuery = `
+      SELECT
+        source_id,
+        devise_base as source_currency,
+        devise_cible as target_currency,
+        taux as rate,
+        date_taux as date_updated,
+        devise_base,
+        devise_cible,
+        taux,
+        date_taux,
+        source_taux,
+        commentaire
+      FROM \`${PROJECT_ID}.${DATASET_ID}.taux_fx_historiques_propres\`
+      ORDER BY date_taux DESC, devise_base, devise_cible
+      LIMIT ${limit}
+    `;
+
+    const fallbackHistoryQuery = `
       SELECT
         devise_source as source_currency,
         devise_cible as target_currency,
         taux as rate,
-        date as date_updated
+        date as date_updated,
+        devise_source as devise_base,
+        devise_cible,
+        taux,
+        date as date_taux
       FROM \`${PROJECT_ID}.${DATASET_ID}.fx_rates\`
       ORDER BY date DESC
-      LIMIT 100
+      LIMIT ${limit}
     `;
 
-    const options = { query, location: DATASET_LOCATION };
-    const [rows] = await bigquery.query(options);
+    const [rows] = await runQueryWithFallback({
+      preferredQuery: preferredHistoryQuery,
+      fallbackQuery: fallbackHistoryQuery,
+      label: 'FX rates'
+    });
+
+    let tauxDuJour = {};
+    try {
+      const [currentRows] = await bigquery.query({
+        query: `
+          SELECT
+            devise_base,
+            devise_cible,
+            taux,
+            date_taux,
+            source_taux
+          FROM \`${PROJECT_ID}.${DATASET_ID}.taux_fx_du_jour\`
+        `,
+        location: DATASET_LOCATION
+      });
+
+      tauxDuJour = currentRows.reduce((acc, row) => {
+        acc[`${row.devise_base}_${row.devise_cible}`] = row.taux;
+        return acc;
+      }, {});
+    } catch (error) {
+      if (!isMissingBigQueryTable(error)) {
+        throw error;
+      }
+
+      tauxDuJour = rows.reduce((acc, row) => {
+        const key = `${row.devise_base || row.source_currency}_${row.devise_cible || row.target_currency}`;
+        if (!acc[key]) {
+          acc[key] = row.taux || row.rate;
+        }
+        return acc;
+      }, {});
+    }
 
     res.json({
       success: true,
       data: rows,
+      count: rows.length,
+      taux_du_jour: tauxDuJour,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
