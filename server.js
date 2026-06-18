@@ -644,6 +644,9 @@ app.get('/api/documents', async (req, res) => {
         string_field_2 as type,
         string_field_3 as folder
       FROM \`${PROJECT_ID}.${DATASET_ID}.documents_inventory\`
+      WHERE string_field_0 IS NOT NULL
+        AND TRIM(string_field_0) != ''
+        AND string_field_0 != 'DOC_ID'
       ORDER BY string_field_0
       LIMIT ${limit} OFFSET ${offset}
     `;
@@ -670,7 +673,13 @@ app.get('/api/documents', async (req, res) => {
 
 app.get('/api/documents/count', async (req, res) => {
   try {
-    const query = `SELECT COUNT(*) as total FROM \`${PROJECT_ID}.${DATASET_ID}.documents_inventory\``;
+    const query = `
+      SELECT COUNT(*) as total
+      FROM \`${PROJECT_ID}.${DATASET_ID}.documents_inventory\`
+      WHERE string_field_0 IS NOT NULL
+        AND TRIM(string_field_0) != ''
+        AND string_field_0 != 'DOC_ID'
+    `;
     const options = { query, location: DATASET_LOCATION };
     const [rows] = await bigquery.query(options);
 
@@ -698,13 +707,17 @@ app.get('/api/inventory', async (req, res) => {
 
     const query = `
       SELECT
-        id,
-        nom as name,
-        quantite as quantity,
-        prix as price,
-        statut as status
+        string_field_0 as id,
+        string_field_1 as ref,
+        string_field_2 as name,
+        SAFE_CAST(string_field_3 AS FLOAT64) as quantity,
+        SAFE_CAST(string_field_4 AS FLOAT64) as price,
+        'active' as status
       FROM \`${PROJECT_ID}.${DATASET_ID}.inventory\`
-      ORDER BY id
+      WHERE string_field_0 IS NOT NULL
+        AND TRIM(string_field_0) != ''
+        AND string_field_0 != 'ID'
+      ORDER BY string_field_0
       LIMIT ${limit} OFFSET ${offset}
     `;
 
@@ -727,7 +740,13 @@ app.get('/api/inventory', async (req, res) => {
 
 app.get('/api/inventory/count', async (req, res) => {
   try {
-    const query = `SELECT COUNT(*) as total FROM \`${PROJECT_ID}.${DATASET_ID}.inventory\``;
+    const query = `
+      SELECT COUNT(*) as total
+      FROM \`${PROJECT_ID}.${DATASET_ID}.inventory\`
+      WHERE string_field_0 IS NOT NULL
+        AND TRIM(string_field_0) != ''
+        AND string_field_0 != 'ID'
+    `;
     const options = { query, location: DATASET_LOCATION };
     const [rows] = await bigquery.query(options);
 
@@ -755,14 +774,17 @@ app.get('/api/tasks', async (req, res) => {
 
     const query = `
       SELECT
-        id,
-        titre as title,
-        description,
-        statut as status,
-        priorite as priority,
-        date_creation as created_at
-      FROM \`${PROJECT_ID}.${DATASET_ID}.tasks\`
-      ORDER BY date_creation DESC
+        string_field_0 as id,
+        COALESCE(string_field_1, string_field_0) as title,
+        string_field_2 as description,
+        string_field_3 as status,
+        string_field_4 as priority,
+        string_field_5 as created_at
+      FROM \`${PROJECT_ID}.${DATASET_ID}.bdd_taches\`
+      WHERE string_field_0 IS NOT NULL
+        AND TRIM(string_field_0) != ''
+        AND string_field_0 != 'Unnamed: 0'
+      ORDER BY string_field_0
       LIMIT ${limit} OFFSET ${offset}
     `;
 
@@ -785,7 +807,13 @@ app.get('/api/tasks', async (req, res) => {
 
 app.get('/api/tasks/count', async (req, res) => {
   try {
-    const query = `SELECT COUNT(*) as total FROM \`${PROJECT_ID}.${DATASET_ID}.tasks\``;
+    const query = `
+      SELECT COUNT(*) as total
+      FROM \`${PROJECT_ID}.${DATASET_ID}.bdd_taches\`
+      WHERE string_field_0 IS NOT NULL
+        AND TRIM(string_field_0) != ''
+        AND string_field_0 != 'Unnamed: 0'
+    `;
     const options = { query, location: DATASET_LOCATION };
     const [rows] = await bigquery.query(options);
 
@@ -813,14 +841,18 @@ app.get('/api/users', async (req, res) => {
 
     const query = `
       SELECT
-        id,
-        nom as name,
-        email,
-        poste as position,
-        departement as department,
-        statut as status
+        \`Identifiant\` as id,
+        COALESCE(
+          NULLIF(TRIM(CONCAT(COALESCE(\`Prénom\`, ''), ' ', COALESCE(\`Nom\`, ''))), ''),
+          \`Identifiant\`
+        ) as name,
+        \`Email Pro\` as email,
+        \`Poste\` as position,
+        \`Team\` as department,
+        \`Profil\` as status,
+        \`role_actual\` as role
       FROM \`${PROJECT_ID}.${DATASET_ID}.users\`
-      ORDER BY nom
+      ORDER BY \`Nom\`
       LIMIT ${limit} OFFSET ${offset}
     `;
 
