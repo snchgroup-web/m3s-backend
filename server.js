@@ -142,13 +142,15 @@ const requireAuth = (req, res, next) => {
     '/debug/bigquery',
     '/debug/documents',
     '/debug/tables',
+    '/debug/schema',
     '/api/auth/login',
     '/api/health',
     '/api/info',
     '/api/debug/config',
     '/api/debug/bigquery',
     '/api/debug/documents',
-    '/api/debug/tables'
+    '/api/debug/tables',
+    '/api/debug/schema'
   ]);
 
   if (publicPaths.has(req.path) || publicPaths.has(req.originalUrl)) {
@@ -398,6 +400,56 @@ app.get('/api/debug/tables', async (req, res) => {
       revision: APP_REVISION,
       project: PROJECT_ID,
       dataset: DATASET_ID,
+      error: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason || null,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+app.get('/api/debug/schema', async (req, res) => {
+  const tableName = String(req.query.table || '').trim();
+  if (!/^[A-Za-z0-9_]+$/.test(tableName)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Query parameter table is required and must contain only letters, numbers, or underscores'
+    });
+  }
+
+  try {
+    const [metadata] = await bigquery.dataset(DATASET_ID).table(tableName).getMetadata();
+    const fields = metadata.schema?.fields || [];
+
+    res.json({
+      success: true,
+      service: 'M3S Backend',
+      revision: APP_REVISION,
+      project: PROJECT_ID,
+      dataset: DATASET_ID,
+      table: tableName,
+      fields: fields.map((field) => ({
+        name: field.name,
+        type: field.type,
+        mode: field.mode || 'NULLABLE'
+      })),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Debug schema error:', {
+      table: tableName,
+      message: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason
+    });
+
+    res.status(500).json({
+      success: false,
+      service: 'M3S Backend',
+      revision: APP_REVISION,
+      project: PROJECT_ID,
+      dataset: DATASET_ID,
+      table: tableName,
       error: error.message,
       code: error.code,
       reason: error.errors?.[0]?.reason || null,
