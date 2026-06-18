@@ -141,12 +141,14 @@ const requireAuth = (req, res, next) => {
     '/debug/config',
     '/debug/bigquery',
     '/debug/documents',
+    '/debug/tables',
     '/api/auth/login',
     '/api/health',
     '/api/info',
     '/api/debug/config',
     '/api/debug/bigquery',
-    '/api/debug/documents'
+    '/api/debug/documents',
+    '/api/debug/tables'
   ]);
 
   if (publicPaths.has(req.path) || publicPaths.has(req.originalUrl)) {
@@ -362,6 +364,40 @@ app.get('/api/debug/bigquery', async (req, res) => {
       project: PROJECT_ID,
       dataset: DATASET_ID,
       datasetLocation: DATASET_LOCATION,
+      error: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason || null,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+app.get('/api/debug/tables', async (req, res) => {
+  try {
+    const [tables] = await bigquery.dataset(DATASET_ID).getTables();
+
+    res.json({
+      success: true,
+      service: 'M3S Backend',
+      revision: APP_REVISION,
+      project: PROJECT_ID,
+      dataset: DATASET_ID,
+      tables: tables.map((table) => table.id).sort(),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Debug tables error:', {
+      message: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason
+    });
+
+    res.status(500).json({
+      success: false,
+      service: 'M3S Backend',
+      revision: APP_REVISION,
+      project: PROJECT_ID,
+      dataset: DATASET_ID,
       error: error.message,
       code: error.code,
       reason: error.errors?.[0]?.reason || null,
