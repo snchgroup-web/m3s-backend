@@ -850,7 +850,13 @@ app.get('/api/users', async (req, res) => {
         \`Poste\` as position,
         \`Team\` as department,
         \`Profil\` as status,
-        \`role_actual\` as role
+        \`role_actual\` as role,
+        \`PrÃ©nom\` as prenom,
+        \`Nom\` as nom,
+        \`Email Pro\` as email_pro,
+        \`Poste\` as poste,
+        \`Team\` as departement,
+        true as active
       FROM \`${PROJECT_ID}.${DATASET_ID}.users\`
       ORDER BY \`Nom\`
       LIMIT ${limit} OFFSET ${offset}
