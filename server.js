@@ -860,9 +860,11 @@ app.get('/api/users', async (req, res) => {
         \`Prénom\` as prenom,
         \`Nom\` as nom,
         \`Email Pro\` as email_pro,
+        \`Email Perso\` as email_perso,
         \`Tel\` as telephone,
         \`Poste\` as poste,
         \`Team\` as departement,
+        \`Matricule\` as matricule,
         \`Profil\` as profil,
         CASE
           WHEN LOWER(\`Identifiant\`) IN ('chantal', 'cheikh') THEN 'Fondateur'
