@@ -287,14 +287,14 @@ app.get('/api/health', async (req, res) => {
 
 app.get('/api/debug/documents', async (req, res) => {
   try {
-    const query = `SELECT COUNT(*) as count FROM \`${PROJECT_ID}.${DATASET_ID}.documents\``;
+    const query = `SELECT COUNT(*) as count FROM \`${PROJECT_ID}.${DATASET_ID}.documents_inventory\``;
     const [rows] = await bigquery.query({ query, location: DATASET_LOCATION });
 
     res.json({
       success: true,
       service: 'M3S Backend',
       revision: APP_REVISION,
-      table: `${PROJECT_ID}.${DATASET_ID}.documents`,
+      table: `${PROJECT_ID}.${DATASET_ID}.documents_inventory`,
       count: rows[0]?.count || 0,
       timestamp: new Date().toISOString()
     });
@@ -309,7 +309,7 @@ app.get('/api/debug/documents', async (req, res) => {
       success: false,
       service: 'M3S Backend',
       revision: APP_REVISION,
-      table: `${PROJECT_ID}.${DATASET_ID}.documents`,
+      table: `${PROJECT_ID}.${DATASET_ID}.documents_inventory`,
       error: error.message,
       code: error.code,
       reason: error.errors?.[0]?.reason || null,
@@ -469,16 +469,16 @@ app.get('/api/finance/expenses', async (req, res) => {
 
     const query = `
       SELECT
-        id,
-        description,
-        montant,
-        type,
-        statut,
-        category,
-        date_created,
-        date_updated
+        \`Nr REF\` as id,
+        DESIGNATION as description,
+        CHF as montant,
+        CFA as montant_cfa,
+        PAIEMENT as type,
+        \`RUBRIQUE DEP\` as category,
+        DATE as date_created,
+        COMMENTAIRES as commentaire
       FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`
-      ORDER BY date_created DESC
+      ORDER BY DATE DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
 
@@ -513,16 +513,16 @@ app.get('/api/finance/income', async (req, res) => {
 
     const query = `
       SELECT
-        id,
-        description,
-        montant,
-        type,
-        statut,
-        category,
-        date_created,
-        date_updated
+        ID_RECETTE as id,
+        DESIGNATION as description,
+        MONTANT_CHF as montant,
+        MONTANT_CFA as montant_cfa,
+        MODE_ENCAISSEMENT as type,
+        NATURE_RECETTE as category,
+        DATE as date_created,
+        COMMENTAIRE as commentaire
       FROM \`${PROJECT_ID}.${DATASET_ID}.income\`
-      ORDER BY date_created DESC
+      ORDER BY DATE DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
 
@@ -555,9 +555,9 @@ app.get('/api/finance/dashboard', async (req, res) => {
     const query = `
       SELECT
         (SELECT COUNT(*) FROM \`${PROJECT_ID}.${DATASET_ID}.income\`) as total_income_count,
-        (SELECT SUM(montant) FROM \`${PROJECT_ID}.${DATASET_ID}.income\`) as total_income,
+        (SELECT SUM(MONTANT_CHF) FROM \`${PROJECT_ID}.${DATASET_ID}.income\`) as total_income,
         (SELECT COUNT(*) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expense_count,
-        (SELECT SUM(montant) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expenses
+        (SELECT SUM(CHF) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expenses
     `;
 
     const options = { query, location: DATASET_LOCATION };
@@ -588,15 +588,12 @@ app.get('/api/documents', async (req, res) => {
 
     const query = `
       SELECT
-        id,
-        nom as name,
-        type,
-        taille as size,
-        dossier as folder,
-        dateCreation as created_at,
-        statut as status
-      FROM \`${PROJECT_ID}.${DATASET_ID}.documents\`
-      ORDER BY dateCreation DESC
+        string_field_0 as id,
+        string_field_1 as name,
+        string_field_2 as type,
+        string_field_3 as folder
+      FROM \`${PROJECT_ID}.${DATASET_ID}.documents_inventory\`
+      ORDER BY string_field_0
       LIMIT ${limit} OFFSET ${offset}
     `;
 
@@ -622,7 +619,7 @@ app.get('/api/documents', async (req, res) => {
 
 app.get('/api/documents/count', async (req, res) => {
   try {
-    const query = `SELECT COUNT(*) as total FROM \`${PROJECT_ID}.${DATASET_ID}.documents\``;
+    const query = `SELECT COUNT(*) as total FROM \`${PROJECT_ID}.${DATASET_ID}.documents_inventory\``;
     const options = { query, location: DATASET_LOCATION };
     const [rows] = await bigquery.query(options);
 
