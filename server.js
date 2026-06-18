@@ -851,7 +851,7 @@ app.get('/api/users', async (req, res) => {
         \`Team\` as department,
         \`Profil\` as status,
         \`role_actual\` as role,
-        \`PrÃ©nom\` as prenom,
+        \`Prénom\` as prenom,
         \`Nom\` as nom,
         \`Email Pro\` as email_pro,
         \`Poste\` as poste,
