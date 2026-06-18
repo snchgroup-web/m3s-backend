@@ -1047,16 +1047,19 @@ app.get('/api/fx-rates', async (req, res) => {
 
     const fallbackHistoryQuery = `
       SELECT
-        devise_source as source_currency,
-        devise_cible as target_currency,
-        taux as rate,
-        date as date_updated,
-        devise_source as devise_base,
-        devise_cible,
-        taux,
-        date as date_taux
+        string_field_0 as source_currency,
+        string_field_1 as target_currency,
+        SAFE_CAST(string_field_2 AS FLOAT64) as rate,
+        string_field_3 as date_updated,
+        string_field_0 as devise_base,
+        string_field_1 as devise_cible,
+        SAFE_CAST(string_field_2 AS FLOAT64) as taux,
+        string_field_3 as date_taux
       FROM \`${PROJECT_ID}.${DATASET_ID}.fx_rates\`
-      ORDER BY date DESC
+      WHERE string_field_0 IS NOT NULL
+        AND TRIM(string_field_0) != ''
+        AND string_field_0 != 'SOURCE'
+      ORDER BY string_field_3 DESC
       LIMIT ${limit}
     `;
 
