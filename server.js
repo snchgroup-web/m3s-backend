@@ -850,9 +850,10 @@ app.get('/api/users', async (req, res) => {
         \`Tel\` as phone,
         \`Poste\` as position,
         \`Team\` as department,
-        \`Profil\` as status,
-        \`Profil\` as member_type,
-        \`role_actual\` as role,
+        'Actif' as status,
+        'Associé' as member_type,
+        \`Profil\` as role,
+        \`role_actual\` as access_role,
         \`Prénom\` as prenom,
         \`Nom\` as nom,
         \`Email Pro\` as email_pro,
@@ -860,7 +861,7 @@ app.get('/api/users', async (req, res) => {
         \`Poste\` as poste,
         \`Team\` as departement,
         \`Profil\` as profil,
-        \`Profil\` as type_membre,
+        'Associé' as type_membre,
         true as active
       FROM \`${PROJECT_ID}.${DATASET_ID}.users\`
       ORDER BY \`Nom\`
