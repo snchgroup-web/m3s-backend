@@ -847,15 +847,20 @@ app.get('/api/users', async (req, res) => {
           \`Identifiant\`
         ) as name,
         \`Email Pro\` as email,
+        \`Tel\` as phone,
         \`Poste\` as position,
         \`Team\` as department,
         \`Profil\` as status,
+        \`Profil\` as member_type,
         \`role_actual\` as role,
         \`Prénom\` as prenom,
         \`Nom\` as nom,
         \`Email Pro\` as email_pro,
+        \`Tel\` as telephone,
         \`Poste\` as poste,
         \`Team\` as departement,
+        \`Profil\` as profil,
+        \`Profil\` as type_membre,
         true as active
       FROM \`${PROJECT_ID}.${DATASET_ID}.users\`
       ORDER BY \`Nom\`
