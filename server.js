@@ -133,14 +133,23 @@ const parseToken = (token) => {
 
 const requireAuth = (req, res, next) => {
   if (!API_REQUIRE_AUTH) return next();
-  if (
-    req.path === '/api/auth/login' ||
-    req.path === '/api/health' ||
-    req.path === '/api/info' ||
-    req.path === '/api/debug/config' ||
-    req.path === '/api/debug/bigquery' ||
-    req.path === '/api/debug/documents'
-  ) {
+
+  const publicPaths = new Set([
+    '/auth/login',
+    '/health',
+    '/info',
+    '/debug/config',
+    '/debug/bigquery',
+    '/debug/documents',
+    '/api/auth/login',
+    '/api/health',
+    '/api/info',
+    '/api/debug/config',
+    '/api/debug/bigquery',
+    '/api/debug/documents'
+  ]);
+
+  if (publicPaths.has(req.path) || publicPaths.has(req.originalUrl)) {
     return next();
   }
 
