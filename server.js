@@ -143,6 +143,7 @@ const requireAuth = (req, res, next) => {
     '/debug/documents',
     '/debug/tables',
     '/debug/schema',
+    '/debug/sample',
     '/api/auth/login',
     '/api/health',
     '/api/info',
@@ -150,7 +151,8 @@ const requireAuth = (req, res, next) => {
     '/api/debug/bigquery',
     '/api/debug/documents',
     '/api/debug/tables',
-    '/api/debug/schema'
+    '/api/debug/schema',
+    '/api/debug/sample'
   ]);
 
   if (publicPaths.has(req.path) || publicPaths.has(req.originalUrl)) {
@@ -437,6 +439,55 @@ app.get('/api/debug/schema', async (req, res) => {
     });
   } catch (error) {
     console.error('Debug schema error:', {
+      table: tableName,
+      message: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason
+    });
+
+    res.status(500).json({
+      success: false,
+      service: 'M3S Backend',
+      revision: APP_REVISION,
+      project: PROJECT_ID,
+      dataset: DATASET_ID,
+      table: tableName,
+      error: error.message,
+      code: error.code,
+      reason: error.errors?.[0]?.reason || null,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+app.get('/api/debug/sample', async (req, res) => {
+  const tableName = String(req.query.table || '').trim();
+  const limit = Math.min(parseInt(req.query.limit, 10) || 5, 10);
+
+  if (!/^[A-Za-z0-9_]+$/.test(tableName)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Query parameter table is required and must contain only letters, numbers, or underscores'
+    });
+  }
+
+  try {
+    const query = `SELECT * FROM \`${PROJECT_ID}.${DATASET_ID}.${tableName}\` LIMIT ${limit}`;
+    const [rows] = await bigquery.query({ query, location: DATASET_LOCATION });
+
+    res.json({
+      success: true,
+      service: 'M3S Backend',
+      revision: APP_REVISION,
+      project: PROJECT_ID,
+      dataset: DATASET_ID,
+      table: tableName,
+      rows,
+      count: rows.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Debug sample error:', {
       table: tableName,
       message: error.message,
       code: error.code,
