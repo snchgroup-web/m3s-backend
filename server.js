@@ -615,6 +615,69 @@ app.get('/api/finance/income', async (req, res) => {
 });
 
 // ============================================================================
+// API ROUTES - FINANCE IMMOBILIERE
+// ============================================================================
+
+app.get('/api/finance/real-estate', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+    const offset = parseInt(req.query.offset, 10) || 0;
+    const transactionsQuery = `
+      SELECT
+        source_id,
+        date_operation,
+        designation,
+        montant_chf,
+        montant_cfa,
+        taux_fx,
+        part_cheikh_chf,
+        remboursement_cheikh_chf,
+        type_operation,
+        perimetre,
+        categorie,
+        projet,
+        document_ref,
+        statut,
+        date_operation > CURRENT_DATE() AS est_planifie,
+        agent,
+        team,
+        departement,
+        phase_projet,
+        source_file,
+        source_row,
+        enrichi_genspark
+      FROM \`${PROJECT_ID}.${DATASET_ID}.fin_immo_propres\`
+      ORDER BY date_operation ASC, source_row ASC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+    const summaryQuery = `
+      SELECT *
+      FROM \`${PROJECT_ID}.${DATASET_ID}.fin_immo_synthese\`
+      LIMIT 1
+    `;
+    const options = { location: DATASET_LOCATION };
+    const [[transactions], [summaryRows]] = await Promise.all([
+      bigquery.query({ ...options, query: transactionsQuery }),
+      bigquery.query({ ...options, query: summaryQuery })
+    ]);
+
+    res.json({
+      success: true,
+      data: transactions,
+      summary: summaryRows[0] || {},
+      count: transactions.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Real Estate Finance Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================================================
 // API ROUTES - FINANCE DASHBOARD
 // ============================================================================
 
