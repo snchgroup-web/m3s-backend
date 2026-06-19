@@ -716,7 +716,22 @@ app.post('/api/finance/real-estate', async (req, res) => {
   try {
     const sourceId = `IMM-APP-${Date.now()}`;
     const row = normalizeRealEstatePayload(req.body, sourceId);
-    await bigquery.dataset(DATASET_ID).table('fin_immo_propres').insert([{ ...row, taux_fx: row.taux_fx || null }]);
+    const params = { ...row };
+    delete params.source_row;
+    const query = `
+      INSERT INTO \`${PROJECT_ID}.${DATASET_ID}.fin_immo_propres\` (
+        source_id, date_operation, designation, montant_chf, montant_cfa, taux_fx,
+        part_cheikh_chf, remboursement_cheikh_chf, type_operation, perimetre,
+        categorie, projet, document_ref, statut, est_planifie, agent, team,
+        departement, phase_projet, source_file, source_row, enrichi_genspark
+      ) VALUES (
+        @source_id, DATE(@date_operation), @designation, @montant_chf, @montant_cfa, NULLIF(@taux_fx, 0),
+        @part_cheikh_chf, @remboursement_cheikh_chf, @type_operation, @perimetre,
+        @categorie, @projet, @document_ref, @statut, @est_planifie, @agent, @team,
+        @departement, @phase_projet, @source_file, NULL, @enrichi_genspark
+      )
+    `;
+    await bigquery.query({ query, params, location: DATASET_LOCATION });
     res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error('Create Real Estate Finance Error:', error.message);
@@ -728,6 +743,8 @@ app.put('/api/finance/real-estate/:id', async (req, res) => {
   try {
     const sourceId = String(req.params.id || '');
     const row = normalizeRealEstatePayload(req.body, sourceId);
+    const params = { ...row };
+    delete params.source_row;
     const query = `
       UPDATE \`${PROJECT_ID}.${DATASET_ID}.fin_immo_propres\`
       SET
@@ -753,7 +770,7 @@ app.put('/api/finance/real-estate/:id', async (req, res) => {
         enrichi_genspark = @enrichi_genspark
       WHERE source_id = @source_id
     `;
-    await bigquery.query({ query, params: row, location: DATASET_LOCATION });
+    await bigquery.query({ query, params, location: DATASET_LOCATION });
     res.json({ success: true, data: row });
   } catch (error) {
     console.error('Update Real Estate Finance Error:', error.message);
