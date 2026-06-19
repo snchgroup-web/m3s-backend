@@ -677,6 +677,105 @@ app.get('/api/finance/real-estate', async (req, res) => {
   }
 });
 
+const normalizeRealEstatePayload = (body, sourceId) => {
+  const numberValue = (value) => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const dateOperation = String(body.date_operation || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOperation) || !String(body.designation || '').trim()) {
+    throw new Error('La date et la designation sont obligatoires.');
+  }
+  return {
+    source_id: sourceId,
+    date_operation: dateOperation,
+    designation: String(body.designation).trim(),
+    montant_chf: numberValue(body.montant_chf),
+    montant_cfa: numberValue(body.montant_cfa),
+    taux_fx: numberValue(body.taux_fx),
+    part_cheikh_chf: numberValue(body.part_cheikh_chf),
+    remboursement_cheikh_chf: numberValue(body.remboursement_cheikh_chf),
+    type_operation: String(body.type_operation || 'Avance'),
+    perimetre: String(body.perimetre || 'Immobilier'),
+    categorie: String(body.categorie || 'Autre'),
+    projet: String(body.projet || 'Terrain Lac Rose'),
+    document_ref: String(body.document_ref || ''),
+    statut: String(body.statut || 'En cours'),
+    est_planifie: dateOperation > new Date().toISOString().slice(0, 10),
+    agent: String(body.agent || ''),
+    team: String(body.team || ''),
+    departement: String(body.departement || ''),
+    phase_projet: String(body.phase_projet || ''),
+    source_file: String(body.source_file || 'M3S App'),
+    source_row: Number.isFinite(Number(body.source_row)) ? Number(body.source_row) : null,
+    enrichi_genspark: Boolean(body.enrichi_genspark)
+  };
+};
+
+app.post('/api/finance/real-estate', async (req, res) => {
+  try {
+    const sourceId = `IMM-APP-${Date.now()}`;
+    const row = normalizeRealEstatePayload(req.body, sourceId);
+    await bigquery.dataset(DATASET_ID).table('fin_immo_propres').insert([{ ...row, taux_fx: row.taux_fx || null }]);
+    res.status(201).json({ success: true, data: row });
+  } catch (error) {
+    console.error('Create Real Estate Finance Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.put('/api/finance/real-estate/:id', async (req, res) => {
+  try {
+    const sourceId = String(req.params.id || '');
+    const row = normalizeRealEstatePayload(req.body, sourceId);
+    const query = `
+      UPDATE \`${PROJECT_ID}.${DATASET_ID}.fin_immo_propres\`
+      SET
+        date_operation = DATE(@date_operation),
+        designation = @designation,
+        montant_chf = @montant_chf,
+        montant_cfa = @montant_cfa,
+        taux_fx = NULLIF(@taux_fx, 0),
+        part_cheikh_chf = @part_cheikh_chf,
+        remboursement_cheikh_chf = @remboursement_cheikh_chf,
+        type_operation = @type_operation,
+        perimetre = @perimetre,
+        categorie = @categorie,
+        projet = @projet,
+        document_ref = @document_ref,
+        statut = @statut,
+        est_planifie = @est_planifie,
+        agent = @agent,
+        team = @team,
+        departement = @departement,
+        phase_projet = @phase_projet,
+        source_file = @source_file,
+        enrichi_genspark = @enrichi_genspark
+      WHERE source_id = @source_id
+    `;
+    await bigquery.query({ query, params: row, location: DATASET_LOCATION });
+    res.json({ success: true, data: row });
+  } catch (error) {
+    console.error('Update Real Estate Finance Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/finance/real-estate/:id', async (req, res) => {
+  try {
+    const sourceId = String(req.params.id || '');
+    await bigquery.query({
+      query: `DELETE FROM \`${PROJECT_ID}.${DATASET_ID}.fin_immo_propres\` WHERE source_id = @source_id`,
+      params: { source_id: sourceId },
+      location: DATASET_LOCATION
+    });
+    res.json({ success: true, source_id: sourceId });
+  } catch (error) {
+    console.error('Delete Real Estate Finance Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
 // ============================================================================
 // API ROUTES - FINANCE DASHBOARD
 // ============================================================================
