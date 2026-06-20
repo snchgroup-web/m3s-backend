@@ -538,12 +538,22 @@ app.get('/api/finance/expenses', async (req, res) => {
     const query = `
       SELECT
         \`Nr REF\` as id,
+        \`Nr REF\` as ref,
         DESIGNATION as description,
         CHF as montant,
+        CHF as montant_chf,
         CFA as montant_cfa,
+        SAFE_DIVIDE(CFA, NULLIF(CHF, 0)) as taux_fx,
+        'CHF' as devise_origine,
         PAIEMENT as type,
         \`RUBRIQUE DEP\` as category,
         DATE as date_created,
+        BU as departement,
+        BU as team,
+        PHASE as phase_projet,
+        \` AGENT\` as agent,
+        FOURNISSEUR as fournisseur,
+        PAYS as pays,
         COMMENTAIRES as commentaire
       FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`
       ORDER BY DATE DESC
@@ -582,12 +592,22 @@ app.get('/api/finance/income', async (req, res) => {
     const query = `
       SELECT
         ID_RECETTE as id,
+        ID_RECETTE as ref,
         DESIGNATION as description,
+        MONTANT_SAISI as montant_origine,
+        DEVISE_SAISIE as devise_origine,
         MONTANT_CHF as montant,
+        MONTANT_CHF as montant_chf,
         MONTANT_CFA as montant_cfa,
+        TAUX_FX_APPLIQUE as taux_fx,
         MODE_ENCAISSEMENT as type,
         NATURE_RECETTE as category,
         DATE as date_created,
+        BU as departement,
+        TEAM as team,
+        PHASE as phase_projet,
+        AGENT as agent,
+        PAYS as pays,
         COMMENTAIRE as commentaire
       FROM \`${PROJECT_ID}.${DATASET_ID}.income\`
       ORDER BY DATE DESC
@@ -611,6 +631,140 @@ app.get('/api/finance/income', async (req, res) => {
       success: false,
       error: error.message
     });
+  }
+});
+
+const numberOrZero = (value) => {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalizeFinanceTransaction = (body, id, kind) => {
+  const date = String(body.date || body.date_created || '').slice(0, 10);
+  const description = String(body.description || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !description) {
+    throw new Error('La date et la designation sont obligatoires.');
+  }
+  const deviseOrigine = String(body.devise_origine || body.devise || 'CHF').toUpperCase();
+  if (!['CHF', 'CFA'].includes(deviseOrigine)) throw new Error('La devise doit etre CHF ou CFA.');
+
+  const montantOrigine = numberOrZero(body.montant_origine ?? body.montant);
+  const montantChf = numberOrZero(body.montant_chf);
+  const montantCfa = numberOrZero(body.montant_cfa);
+  const tauxFx = numberOrZero(body.taux_fx);
+  if (montantOrigine <= 0 || montantChf <= 0 || montantCfa <= 0 || tauxFx <= 0) {
+    throw new Error('Les montants CHF/CFA et le taux historique exact sont obligatoires.');
+  }
+  return {
+    id, date, description, montant_origine: montantOrigine, devise_origine: deviseOrigine,
+    montant_chf: montantChf, montant_cfa: montantCfa, taux_fx: tauxFx,
+    categorie: String(body.categorie || (kind === 'income' ? 'Recettes' : 'Depenses')),
+    type: String(body.type || (kind === 'income' ? 'Virement' : 'Paiement')),
+    departement: String(body.departement || ''), team: String(body.team || ''),
+    phase_projet: String(body.phase_projet || ''), agent: String(body.agent || ''),
+    pays: String(body.pays || ''), commentaire: String(body.commentaire || ''),
+    fournisseur: String(body.fournisseur || ''), annee: Number(date.slice(0, 4))
+  };
+};
+
+app.post('/api/finance/expenses', async (req, res) => {
+  try {
+    const row = normalizeFinanceTransaction(req.body, `DEP-APP-${Date.now()}`, 'expense');
+    await bigquery.query({
+      query: `INSERT INTO \`${PROJECT_ID}.${DATASET_ID}.expenses\`
+        (\`Nr REF\`, DATE, DESIGNATION, CHF, CFA, PAIEMENT, \`POSTE  \`, \`OPERATION \`,
+         \`RUBRIQUE DEP\`, BU, PHASE, \` AGENT\`, FOURNISSEUR, PAYS, COMMENTAIRES)
+        VALUES (@id,@date,@description,@montant_chf,@montant_cfa,@type,'','',@categorie,
+                @departement,@phase_projet,@agent,@fournisseur,@pays,@commentaire)`,
+      params: row, location: DATASET_LOCATION
+    });
+    res.status(201).json({ success: true, data: row });
+  } catch (error) {
+    console.error('Create Expense Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.put('/api/finance/expenses/:id', async (req, res) => {
+  try {
+    const row = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'expense');
+    await bigquery.query({
+      query: `UPDATE \`${PROJECT_ID}.${DATASET_ID}.expenses\`
+        SET DATE=@date, DESIGNATION=@description, CHF=@montant_chf, CFA=@montant_cfa,
+            PAIEMENT=@type, \`RUBRIQUE DEP\`=@categorie, BU=@departement,
+            PHASE=@phase_projet, \` AGENT\`=@agent, FOURNISSEUR=@fournisseur,
+            PAYS=@pays, COMMENTAIRES=@commentaire WHERE \`Nr REF\`=@id`,
+      params: row, location: DATASET_LOCATION
+    });
+    res.json({ success: true, data: row });
+  } catch (error) {
+    console.error('Update Expense Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/finance/expenses/:id', async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    await bigquery.query({ query: `DELETE FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\` WHERE \`Nr REF\`=@id`, params: { id }, location: DATASET_LOCATION });
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error('Delete Expense Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/finance/income', async (req, res) => {
+  try {
+    const row = normalizeFinanceTransaction(req.body, `REC-APP-${Date.now()}`, 'income');
+    await bigquery.query({
+      query: `INSERT INTO \`${PROJECT_ID}.${DATASET_ID}.income\`
+        (ID_RECETTE,DATE,DESIGNATION,MONTANT_SAISI,DEVISE_SAISIE,MONTANT_CHF,MONTANT_CFA,
+         MODE_ENCAISSEMENT,TYPE_BUDGETAIRE,NATURE_RECETTE,MODE_TAUX,PERIODE_REF,
+         TAUX_REF_AUTO,TAUX_FX_SAISI,TAUX_FX_APPLIQUE,DEVISE_CIBLE,SENS_TRESORERIE,
+         BU,PHASE,SOUS_PHASE,TEAM,AGENT,PAYS,COMMENTAIRE,\`Année\`)
+        VALUES (@id,@date,@description,@montant_origine,@devise_origine,@montant_chf,@montant_cfa,
+         @type,'',@categorie,'Historique exact',@date,@taux_fx,NULL,@taux_fx,
+         IF(@devise_origine='CHF','CFA','CHF'),'Entree',@departement,@phase_projet,'',
+         @team,@agent,@pays,@commentaire,@annee)`,
+      params: row, location: DATASET_LOCATION
+    });
+    res.status(201).json({ success: true, data: row });
+  } catch (error) {
+    console.error('Create Income Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.put('/api/finance/income/:id', async (req, res) => {
+  try {
+    const row = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'income');
+    await bigquery.query({
+      query: `UPDATE \`${PROJECT_ID}.${DATASET_ID}.income\`
+        SET DATE=@date, DESIGNATION=@description, MONTANT_SAISI=@montant_origine,
+            DEVISE_SAISIE=@devise_origine, MONTANT_CHF=@montant_chf, MONTANT_CFA=@montant_cfa,
+            MODE_ENCAISSEMENT=@type, NATURE_RECETTE=@categorie, MODE_TAUX='Historique exact',
+            PERIODE_REF=@date, TAUX_REF_AUTO=@taux_fx, TAUX_FX_APPLIQUE=@taux_fx,
+            DEVISE_CIBLE=IF(@devise_origine='CHF','CFA','CHF'), BU=@departement,
+            PHASE=@phase_projet, TEAM=@team, AGENT=@agent, PAYS=@pays,
+            COMMENTAIRE=@commentaire, \`Année\`=@annee WHERE ID_RECETTE=@id`,
+      params: row, location: DATASET_LOCATION
+    });
+    res.json({ success: true, data: row });
+  } catch (error) {
+    console.error('Update Income Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/finance/income/:id', async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    await bigquery.query({ query: `DELETE FROM \`${PROJECT_ID}.${DATASET_ID}.income\` WHERE ID_RECETTE=@id`, params: { id }, location: DATASET_LOCATION });
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error('Delete Income Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
   }
 });
 
