@@ -548,8 +548,17 @@ app.get('/api/finance/expenses', async (req, res) => {
         PAIEMENT as type,
         \`RUBRIQUE DEP\` as category,
         DATE as date_created,
-        BU as departement,
-        BU as team,
+        COALESCE(NULLIF(DEPARTEMENT, ''),
+          CASE UPPER(REPLACE(BU, '_', ''))
+            WHEN 'ADMINORG' THEN 'Administration'
+            WHEN 'IMMO' THEN 'Finances'
+            WHEN 'SOCIAL' THEN 'Finances'
+            WHEN 'IMPORTEXPORT' THEN 'Commercial & CRM'
+            ELSE BU END) as departement,
+        COALESCE(NULLIF(TEAM, ''),
+          CASE WHEN UPPER(PAYS) = 'CH' THEN 'Team_ZH'
+               WHEN UPPER(PAYS) = 'SN' THEN 'Team_SN'
+               ELSE NULL END) as team,
         PHASE as phase_projet,
         \` AGENT\` as agent,
         FOURNISSEUR as fournisseur,
@@ -603,7 +612,13 @@ app.get('/api/finance/income', async (req, res) => {
         MODE_ENCAISSEMENT as type,
         NATURE_RECETTE as category,
         DATE as date_created,
-        BU as departement,
+        COALESCE(NULLIF(DEPARTEMENT, ''),
+          CASE UPPER(REPLACE(BU, '_', ''))
+            WHEN 'ADMINORG' THEN 'Administration'
+            WHEN 'IMMO' THEN 'Finances'
+            WHEN 'SOCIAL' THEN 'Finances'
+            WHEN 'IMPORTEXPORT' THEN 'Commercial & CRM'
+            ELSE BU END) as departement,
         TEAM as team,
         PHASE as phase_projet,
         AGENT as agent,
@@ -673,9 +688,9 @@ app.post('/api/finance/expenses', async (req, res) => {
     await bigquery.query({
       query: `INSERT INTO \`${PROJECT_ID}.${DATASET_ID}.expenses\`
         (\`Nr REF\`, DATE, DESIGNATION, CHF, CFA, PAIEMENT, \`POSTE  \`, \`OPERATION \`,
-         \`RUBRIQUE DEP\`, BU, PHASE, \` AGENT\`, FOURNISSEUR, PAYS, COMMENTAIRES)
+         \`RUBRIQUE DEP\`, BU, DEPARTEMENT, TEAM, PHASE, \` AGENT\`, FOURNISSEUR, PAYS, COMMENTAIRES)
         VALUES (@id,@date,@description,@montant_chf,@montant_cfa,@type,'','',@categorie,
-                @departement,@phase_projet,@agent,@fournisseur,@pays,@commentaire)`,
+                '',@departement,@team,@phase_projet,@agent,@fournisseur,@pays,@commentaire)`,
       params: row, location: DATASET_LOCATION
     });
     res.status(201).json({ success: true, data: row });
@@ -691,7 +706,7 @@ app.put('/api/finance/expenses/:id', async (req, res) => {
     await bigquery.query({
       query: `UPDATE \`${PROJECT_ID}.${DATASET_ID}.expenses\`
         SET DATE=@date, DESIGNATION=@description, CHF=@montant_chf, CFA=@montant_cfa,
-            PAIEMENT=@type, \`RUBRIQUE DEP\`=@categorie, BU=@departement,
+            PAIEMENT=@type, \`RUBRIQUE DEP\`=@categorie, DEPARTEMENT=@departement, TEAM=@team,
             PHASE=@phase_projet, \` AGENT\`=@agent, FOURNISSEUR=@fournisseur,
             PAYS=@pays, COMMENTAIRES=@commentaire WHERE \`Nr REF\`=@id`,
       params: row, location: DATASET_LOCATION
@@ -722,10 +737,10 @@ app.post('/api/finance/income', async (req, res) => {
         (ID_RECETTE,DATE,DESIGNATION,MONTANT_SAISI,DEVISE_SAISIE,MONTANT_CHF,MONTANT_CFA,
          MODE_ENCAISSEMENT,TYPE_BUDGETAIRE,NATURE_RECETTE,MODE_TAUX,PERIODE_REF,
          TAUX_REF_AUTO,TAUX_FX_SAISI,TAUX_FX_APPLIQUE,DEVISE_CIBLE,SENS_TRESORERIE,
-         BU,PHASE,SOUS_PHASE,TEAM,AGENT,PAYS,COMMENTAIRE,\`Année\`)
+         BU,DEPARTEMENT,PHASE,SOUS_PHASE,TEAM,AGENT,PAYS,COMMENTAIRE,\`Année\`)
         VALUES (@id,@date,@description,@montant_origine,@devise_origine,@montant_chf,@montant_cfa,
          @type,'',@categorie,'Historique exact',@date,@taux_fx,NULL,@taux_fx,
-         IF(@devise_origine='CHF','CFA','CHF'),'Entree',@departement,@phase_projet,'',
+         IF(@devise_origine='CHF','CFA','CHF'),'Entree','',@departement,@phase_projet,'',
          @team,@agent,@pays,@commentaire,@annee)`,
       params: row, location: DATASET_LOCATION
     });
@@ -745,7 +760,7 @@ app.put('/api/finance/income/:id', async (req, res) => {
             DEVISE_SAISIE=@devise_origine, MONTANT_CHF=@montant_chf, MONTANT_CFA=@montant_cfa,
             MODE_ENCAISSEMENT=@type, NATURE_RECETTE=@categorie, MODE_TAUX='Historique exact',
             PERIODE_REF=@date, TAUX_REF_AUTO=@taux_fx, TAUX_FX_APPLIQUE=@taux_fx,
-            DEVISE_CIBLE=IF(@devise_origine='CHF','CFA','CHF'), BU=@departement,
+            DEVISE_CIBLE=IF(@devise_origine='CHF','CFA','CHF'), DEPARTEMENT=@departement,
             PHASE=@phase_projet, TEAM=@team, AGENT=@agent, PAYS=@pays,
             COMMENTAIRE=@commentaire, \`Année\`=@annee WHERE ID_RECETTE=@id`,
       params: row, location: DATASET_LOCATION
@@ -1497,7 +1512,29 @@ app.get('/api/info', (req, res) => {
 // START SERVER
 // ============================================================================
 
-app.listen(PORT, () => {
+const startServer = async () => {
+  try {
+    await Promise.all([
+      bigquery.query({
+        query: `ALTER TABLE \`${PROJECT_ID}.${DATASET_ID}.expenses\` ADD COLUMN IF NOT EXISTS TEAM STRING`,
+        location: DATASET_LOCATION
+      }),
+      bigquery.query({
+        query: `ALTER TABLE \`${PROJECT_ID}.${DATASET_ID}.expenses\` ADD COLUMN IF NOT EXISTS DEPARTEMENT STRING`,
+        location: DATASET_LOCATION
+      }),
+      bigquery.query({
+        query: `ALTER TABLE \`${PROJECT_ID}.${DATASET_ID}.income\`
+          ADD COLUMN IF NOT EXISTS DEPARTEMENT STRING`,
+        location: DATASET_LOCATION
+      })
+    ]);
+    console.log('Finance schema ready: TEAM and DEPARTEMENT');
+  } catch (error) {
+    console.error('Finance schema migration warning:', error.message);
+  }
+
+  app.listen(PORT, () => {
   console.log(`
 ╔════════════════════════════════════════════════════════════════╗
 ║  🚀 M3S BACKEND API - FIXED & RUNNING                         ║
@@ -1521,5 +1558,8 @@ app.listen(PORT, () => {
 
 🌐 Test: curl http://localhost:3001/api/health
   `);
-});
+  });
+};
+
+startServer();
 
