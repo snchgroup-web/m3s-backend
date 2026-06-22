@@ -1265,6 +1265,105 @@ app.get('/api/inventory/count', async (req, res) => {
   }
 });
 
+const normalizeInventoryPayload = (body, sourceId) => {
+  const article = String(body.article || body.name || '').trim();
+  const categorie = String(body.categorie || '').trim();
+  const quantite = numberOrZero(body.quantite ?? body.quantity);
+  const achatChf = numberOrZero(body.achat_chf);
+  const achatCfa = numberOrZero(body.achat_cfa);
+  const valeurChf = numberOrZero(body.valeur_chf ?? body.price);
+  const valeurCfa = numberOrZero(body.valeur_cfa);
+
+  if (!article || !categorie) {
+    throw new Error("L'article et la categorie sont obligatoires.");
+  }
+  if (quantite < 0 || achatChf < 0 || achatCfa < 0 || valeurChf < 0 || valeurCfa < 0) {
+    throw new Error('Les quantites et montants ne peuvent pas etre negatifs.');
+  }
+
+  return {
+    source_id: sourceId,
+    article,
+    categorie,
+    sous_categorie: String(body.sous_categorie || '').trim(),
+    fournisseur: String(body.fournisseur || '').trim(),
+    quantite,
+    unite: String(body.unite || '').trim(),
+    achat_chf: achatChf,
+    achat_cfa: achatCfa,
+    valeur_chf: valeurChf,
+    valeur_cfa: valeurCfa,
+    localisation: String(body.localisation || '').trim(),
+    statut: String(body.statut || body.status || 'Neuf').trim(),
+    bu: String(body.bu || '').trim(),
+    commentaires: String(body.commentaires || body.commentaire || '').trim(),
+    source_file: String(body.source_file || 'M3S App').trim()
+  };
+};
+
+app.post('/api/inventory', async (req, res) => {
+  try {
+    const row = normalizeInventoryPayload(req.body, `ART-APP-${Date.now()}`);
+    await bigquery.query({
+      query: `
+        INSERT INTO \`${PROJECT_ID}.${DATASET_ID}.stocks_actifs_propres\` (
+          source_id, article, categorie, sous_categorie, fournisseur, quantite, unite,
+          achat_chf, achat_cfa, valeur_chf, valeur_cfa, localisation, statut, bu,
+          commentaires, source_file
+        ) VALUES (
+          @source_id, @article, @categorie, @sous_categorie, @fournisseur, @quantite, @unite,
+          @achat_chf, @achat_cfa, @valeur_chf, @valeur_cfa, @localisation, @statut, @bu,
+          @commentaires, @source_file
+        )
+      `,
+      params: row,
+      location: DATASET_LOCATION
+    });
+    res.status(201).json({ success: true, data: row });
+  } catch (error) {
+    console.error('Create Inventory Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.put('/api/inventory/:id', async (req, res) => {
+  try {
+    const row = normalizeInventoryPayload(req.body, String(req.params.id || ''));
+    await bigquery.query({
+      query: `
+        UPDATE \`${PROJECT_ID}.${DATASET_ID}.stocks_actifs_propres\`
+        SET article=@article, categorie=@categorie, sous_categorie=@sous_categorie,
+            fournisseur=@fournisseur, quantite=@quantite, unite=@unite,
+            achat_chf=@achat_chf, achat_cfa=@achat_cfa, valeur_chf=@valeur_chf,
+            valeur_cfa=@valeur_cfa, localisation=@localisation, statut=@statut,
+            bu=@bu, commentaires=@commentaires, source_file=@source_file
+        WHERE source_id=@source_id
+      `,
+      params: row,
+      location: DATASET_LOCATION
+    });
+    res.json({ success: true, data: row });
+  } catch (error) {
+    console.error('Update Inventory Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/inventory/:id', async (req, res) => {
+  try {
+    const sourceId = String(req.params.id || '');
+    await bigquery.query({
+      query: `DELETE FROM \`${PROJECT_ID}.${DATASET_ID}.stocks_actifs_propres\` WHERE source_id=@source_id`,
+      params: { source_id: sourceId },
+      location: DATASET_LOCATION
+    });
+    res.json({ success: true, source_id: sourceId });
+  } catch (error) {
+    console.error('Delete Inventory Error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
 // ============================================================================
 // API ROUTES - TASKS (CRM)
 // ============================================================================
