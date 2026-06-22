@@ -649,6 +649,71 @@ app.get('/api/finance/income', async (req, res) => {
   }
 });
 
+// ============================================================================
+// API ROUTES - FINANCE (FLUX SOCIAUX RECLASSES)
+// ============================================================================
+
+app.get('/api/finance/social', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+    const offset = parseInt(req.query.offset, 10) || 0;
+    const query = `
+      SELECT
+        ID_RECETTE as id,
+        ID_RECETTE as ref,
+        DATE as date_created,
+        DESIGNATION as description,
+        NATURE_RECETTE as category,
+        MONTANT_CHF as montant_chf,
+        MONTANT_CFA as montant_cfa,
+        TAUX_FX_APPLIQUE as taux_fx,
+        'Aide sociale' as nature_sociale,
+        CASE
+          WHEN REGEXP_CONTAINS(UPPER(DESIGNATION), r'FAMILLE|MENAGE') THEN 'Famille SN'
+          ELSE NULL
+        END as beneficiaire,
+        AGENT as agent,
+        TEAM as team,
+        COALESCE(NULLIF(DEPARTEMENT, ''), 'Finances') as departement,
+        PHASE as phase_projet,
+        PAYS as pays,
+        COMMENTAIRE as commentaire
+      FROM \`${PROJECT_ID}.${DATASET_ID}.income\`
+      WHERE UPPER(TRIM(NATURE_RECETTE)) IN ('AIDE SOCIALE MENAGE', 'AIDE SOCIALE MÉNAGE', 'AIDE SOCIALE')
+      ORDER BY DATE DESC, ID_RECETTE DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const [rows] = await bigquery.query({ query, location: DATASET_LOCATION });
+    const totalChf = rows.reduce((sum, row) => sum + numberOrZero(row.montant_chf), 0);
+    const totalCfaHistorique = rows.reduce((sum, row) => sum + numberOrZero(row.montant_cfa), 0);
+    const years = rows
+      .map((row) => String(row.date_created?.value || row.date_created || '').slice(0, 4))
+      .filter((year) => /^\d{4}$/.test(year));
+
+    res.json({
+      success: true,
+      data: rows,
+      count: rows.length,
+      summary: {
+        total_chf: Number(totalChf.toFixed(2)),
+        total_cfa_historique: Math.round(totalCfaHistorique),
+        premiere_annee: years.length ? Math.min(...years.map(Number)) : null,
+        derniere_annee: years.length ? Math.max(...years.map(Number)) : null
+      },
+      classification: {
+        source_table: 'income',
+        rule: 'NATURE_RECETTE = Aide Sociale Menage',
+        accounting_scope: 'hors recettes exploitation'
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Social Finance Error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 const numberOrZero = (value) => {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -1480,6 +1545,7 @@ app.get('/api/info', (req, res) => {
       finance: [
         'GET /api/finance/expenses?limit=100&offset=0',
         'GET /api/finance/income?limit=100&offset=0',
+        'GET /api/finance/social?limit=100&offset=0',
         'GET /api/finance/dashboard'
       ],
       documents: [
