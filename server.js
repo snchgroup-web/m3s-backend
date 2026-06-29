@@ -90,6 +90,20 @@ const readOfferTaxonomy = async () => {
   return JSON.parse(raw);
 };
 
+const findOfferTaxonomyItem = (taxonomy, requestedType) => {
+  const normalizedType = String(requestedType || '').trim().toUpperCase();
+  const items = Array.isArray(taxonomy.items) ? taxonomy.items : [];
+
+  if (!normalizedType) {
+    return null;
+  }
+
+  return items.find((item) => (
+    item.code === normalizedType ||
+    (Array.isArray(item.aliases) && item.aliases.includes(normalizedType))
+  )) || null;
+};
+
 // ============================================================================
 // MIDDLEWARE
 // ============================================================================
@@ -1656,6 +1670,35 @@ app.get('/api/referentiels/offres-digitales', async (req, res) => {
     });
   } catch (error) {
     console.error('Offer taxonomy Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/referentiels/offres-digitales/:type', async (req, res) => {
+  try {
+    const requestedType = String(req.params.type || '').trim().toUpperCase();
+    const taxonomy = await readOfferTaxonomy();
+    const item = findOfferTaxonomyItem(taxonomy, requestedType);
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        error: "Type d'offre inconnu"
+      });
+    }
+
+    res.json({
+      success: true,
+      type: requestedType,
+      normalized_type: item.code,
+      item,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Offer taxonomy detail Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message
