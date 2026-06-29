@@ -8,6 +8,7 @@
  */
 
 require('dotenv').config();
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
@@ -31,6 +32,7 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://l
 const AUTH_SECRET = process.env.JWT_SECRET || 'm3s-development-secret-change-me';
 const API_REQUIRE_AUTH = process.env.API_REQUIRE_AUTH === 'true';
 const APP_REVISION = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.APP_REVISION || 'local';
+const OFFER_TAXONOMY_PATH = path.join(__dirname, 'referentiels', 'offerTaxonomy.json');
 
 const parseGoogleCredentials = () => {
   const rawCredentials = process.env.GOOGLE_CREDENTIALS;
@@ -81,6 +83,11 @@ const runQueryWithFallback = async ({ preferredQuery, fallbackQuery, label }) =>
     console.warn(`${label}: table propre indisponible, fallback table historique`);
     return bigquery.query({ query: fallbackQuery, location: DATASET_LOCATION });
   }
+};
+
+const readOfferTaxonomy = async () => {
+  const raw = await fs.promises.readFile(OFFER_TAXONOMY_PATH, 'utf8');
+  return JSON.parse(raw);
 };
 
 // ============================================================================
@@ -1623,6 +1630,32 @@ app.get('/api/fx-rates', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================================================
+// API ROUTES - REFERENTIELS
+// ============================================================================
+
+app.get('/api/referentiels/offres-digitales', async (req, res) => {
+  try {
+    const taxonomy = await readOfferTaxonomy();
+    const items = Array.isArray(taxonomy.items) ? taxonomy.items : [];
+
+    res.json({
+      success: true,
+      version: taxonomy.version,
+      validated_at: taxonomy.validated_at,
+      items,
+      count: items.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Offer taxonomy Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message
