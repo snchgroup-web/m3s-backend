@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const { BigQuery } = require('@google-cloud/bigquery');
+const { createCorsOriginValidator } = require('./corsPolicy');
 
 // ============================================================================
 // INITIALISATION
@@ -87,7 +88,7 @@ const runQueryWithFallback = async ({ preferredQuery, fallbackQuery, label }) =>
 // ============================================================================
 
 app.use(cors({
-  origin: CORS_ORIGINS,
+  origin: createCorsOriginValidator(CORS_ORIGINS),
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
