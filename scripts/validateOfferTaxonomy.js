@@ -15,6 +15,7 @@ const REQUIRED_ITEM_FIELDS = [
   'category',
   'active',
 ];
+const REQUIRED_STRING_ITEM_FIELDS = REQUIRED_ITEM_FIELDS.filter((field) => field !== 'active');
 
 function hasOwn(object, field) {
   return Object.prototype.hasOwnProperty.call(object, field);
@@ -43,6 +44,11 @@ function loadTaxonomy(errors) {
 }
 
 function validateRoot(taxonomy, errors) {
+  if (!taxonomy || typeof taxonomy !== 'object' || Array.isArray(taxonomy)) {
+    errors.push('Taxonomy root must be an object.');
+    return false;
+  }
+
   REQUIRED_ROOT_FIELDS.forEach((field) => {
     if (!hasOwn(taxonomy, field)) {
       errors.push(`Missing root field: ${field}`);
@@ -58,17 +64,19 @@ function validateRoot(taxonomy, errors) {
   }
 
   if (!hasOwn(taxonomy, 'items')) {
-    return;
+    return false;
   }
 
   if (!Array.isArray(taxonomy.items)) {
     errors.push('Root field items must be an array.');
-    return;
+    return false;
   }
 
   if (taxonomy.items.length !== EXPECTED_ITEM_COUNT) {
     errors.push(`Root field items must contain ${EXPECTED_ITEM_COUNT} entries, got ${taxonomy.items.length}.`);
   }
+
+  return true;
 }
 
 function validateItems(items, errors) {
@@ -95,12 +103,22 @@ function validateItems(items, errors) {
       }
     });
 
-    if (!isNonEmptyString(item.code)) {
-      errors.push(`item[${index}]: code must be a non-empty string.`);
-    } else if (codes.has(item.code)) {
-      duplicateCodes.add(item.code);
-    } else {
-      codes.add(item.code);
+    REQUIRED_STRING_ITEM_FIELDS.forEach((field) => {
+      if (hasOwn(item, field) && !isNonEmptyString(item[field])) {
+        errors.push(`${label}: ${field} must be a non-empty string.`);
+      }
+    });
+
+    if (hasOwn(item, 'active') && typeof item.active !== 'boolean') {
+      errors.push(`${label}: active must be a boolean.`);
+    }
+
+    if (isNonEmptyString(item.code)) {
+      if (codes.has(item.code)) {
+        duplicateCodes.add(item.code);
+      } else {
+        codes.add(item.code);
+      }
     }
 
     if (hasOwn(item, 'aliases')) {
@@ -154,9 +172,13 @@ function main() {
   const errors = [];
   const taxonomy = loadTaxonomy(errors);
 
-  if (taxonomy) {
-    validateRoot(taxonomy, errors);
-    validateItems(taxonomy.items, errors);
+  if (taxonomy !== null) {
+    const rootIsValid = validateRoot(taxonomy, errors);
+    if (rootIsValid) {
+      validateItems(taxonomy.items, errors);
+    }
+  } else if (errors.length === 0) {
+    errors.push('Taxonomy root must be an object.');
   }
 
   if (errors.length > 0) {
