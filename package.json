@@ -8,7 +8,9 @@
     "dev": "nodemon server.js",
     "test": "bash test-api.sh",
     "test:cors": "node scripts/test-cors-policy.js",
-    "auth:hash": "node scripts/hash-password.js"
+    "auth:hash": "node scripts/hash-password.js",
+    "validate:taxonomy": "node scripts/validateOfferTaxonomy.js",
+    "compare:taxonomy": "node scripts/compareOfferTaxonomy.js"
   },
   "keywords": [
     "erp",
