@@ -99,8 +99,11 @@ const findOfferTaxonomyItem = (taxonomy, requestedType) => {
   }
 
   return items.find((item) => (
-    item.code === normalizedType ||
-    (Array.isArray(item.aliases) && item.aliases.includes(normalizedType))
+    String(item.code || '').trim().toUpperCase() === normalizedType ||
+    (
+      Array.isArray(item.aliases) &&
+      item.aliases.some((alias) => String(alias || '').trim().toUpperCase() === normalizedType)
+    )
   )) || null;
 };
 

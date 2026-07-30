@@ -114,6 +114,10 @@ function validateItems(items, errors) {
     }
 
     if (isNonEmptyString(item.code)) {
+      if (item.code !== item.code.trim().toUpperCase()) {
+        errors.push(`${label}: code must use normalized uppercase identifier casing.`);
+      }
+
       if (codes.has(item.code)) {
         duplicateCodes.add(item.code);
       } else {
@@ -129,6 +133,10 @@ function validateItems(items, errors) {
           if (!isNonEmptyString(alias)) {
             errors.push(`${label}: aliases must contain only non-empty strings.`);
             return;
+          }
+
+          if (alias !== alias.trim().toUpperCase()) {
+            errors.push(`${label}: alias ${alias} must use normalized uppercase identifier casing.`);
           }
 
           if (aliasOwners.has(alias)) {
