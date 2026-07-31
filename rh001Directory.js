@@ -42,7 +42,7 @@ const FORBIDDEN_KEYS = new Set([
 
 const normalizeRole = (role) => {
   const normalized = String(role || '').trim().toLowerCase();
-  if (['admin', 'administrateur', 'administrator'].includes(normalized)) return 'Admin';
+  if (['admin', 'administrateur', 'administrator', 'manager'].includes(normalized)) return 'Admin';
   if (['utilisateur', 'user'].includes(normalized)) return 'Utilisateur';
   return '';
 };

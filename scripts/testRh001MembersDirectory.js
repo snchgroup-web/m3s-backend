@@ -52,6 +52,7 @@ const run = async () => {
 
   const roles = parseAllowedRoles('Admin,Utilisateur');
   assert.equal(isRoleAllowed('Administrateur', roles), true);
+  assert.equal(isRoleAllowed('Manager', roles), true);
   assert.equal(isRoleAllowed('USER', roles), true);
   assert.equal(isRoleAllowed('Auditeur', roles), false);
   assert.equal(isRoleAllowed('', roles), false);
