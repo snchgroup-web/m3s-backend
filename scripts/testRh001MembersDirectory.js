@@ -1,6 +1,7 @@
 const assert = require('assert');
 const path = require('path');
 const {
+  DOCUMENT_FIELDS,
   DIRECTORY_FIELDS,
   buildDirectoryPage,
   createMembersDirectoryHandler,
@@ -32,6 +33,7 @@ const run = async () => {
   assert.equal(document.records.length, 6);
   assert.equal(new Set(document.records.map((item) => item.person_id)).size, 6);
   assert.equal(new Set(document.records.map((item) => item.display_name)).size, 6);
+  assert.deepEqual(Object.keys(document), DOCUMENT_FIELDS);
 
   const firstPage = buildDirectoryPage(document, { limit: '2', offset: '1' });
   assert.equal(firstPage.data.length, 2);
@@ -56,7 +58,27 @@ const run = async () => {
 
   const duplicate = structuredClone(document);
   duplicate.records[1].person_id = duplicate.records[0].person_id;
-  assert.throws(() => validateDirectoryDocument(duplicate), /duplicate person identity/);
+  assert.throws(() => validateDirectoryDocument(duplicate), /Duplicate person identity/);
+
+  const unexpectedMetadata = structuredClone(document);
+  unexpectedMetadata.internal_note = 'not part of the public contract';
+  assert.throws(() => validateDirectoryDocument(unexpectedMetadata), /Unexpected RH-001 fields at root/);
+
+  const invalidStatus = structuredClone(document);
+  invalidStatus.status = 'draft';
+  assert.throws(() => validateDirectoryDocument(invalidStatus), /status must be validated_documentary/);
+
+  const invalidApprovalDate = structuredClone(document);
+  invalidApprovalDate.approved_on = '2026-02-31';
+  assert.throws(() => validateDirectoryDocument(invalidApprovalDate), /Invalid approved_on/);
+
+  const invalidPreferredName = structuredClone(document);
+  invalidPreferredName.records[0].preferred_name = null;
+  assert.throws(() => validateDirectoryDocument(invalidPreferredName), /Invalid preferred_name/);
+
+  const invalidSubgroup = structuredClone(document);
+  invalidSubgroup.records[0].subgroup = 'TSN-TASKFORCE';
+  assert.throws(() => validateDirectoryDocument(invalidSubgroup), /Subgroup must belong to team/);
 
   const sensitive = structuredClone(document);
   sensitive.records[0].email = 'hidden@example.com';

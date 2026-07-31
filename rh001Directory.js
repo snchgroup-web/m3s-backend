@@ -1,5 +1,14 @@
 const fs = require('fs');
 
+const DOCUMENT_FIELDS = Object.freeze([
+  'schema_version',
+  'classification',
+  'status',
+  'approved_by',
+  'approved_on',
+  'records'
+]);
+
 const DIRECTORY_FIELDS = Object.freeze([
   'person_id',
   'display_name',
@@ -13,6 +22,7 @@ const DIRECTORY_FIELDS = Object.freeze([
 
 const ALLOWED_MEMBER_TYPES = new Set(['Fondateur', 'Associe']);
 const ALLOWED_TEAMS = new Set(['TZH', 'TSN']);
+const ALLOWED_DOCUMENT_STATUS = 'validated_documentary';
 const FORBIDDEN_KEYS = new Set([
   'email',
   'email_pro',
@@ -83,15 +93,46 @@ const assertNoSensitiveContent = (value, path = 'root') => {
   }
 };
 
+const assertExactFields = (value, expectedFields, path) => {
+  const keys = Object.keys(value);
+  const unexpectedKeys = keys.filter((key) => !expectedFields.includes(key));
+  if (unexpectedKeys.length) {
+    throw new Error(`Unexpected RH-001 fields at ${path}: ${unexpectedKeys.join(', ')}`);
+  }
+  expectedFields.forEach((field) => {
+    if (!(field in value)) throw new Error(`Missing ${field} at ${path}`);
+  });
+};
+
+const assertNonEmptyString = (value, field, path, maxLength = 200) => {
+  if (typeof value !== 'string' || !value.trim() || value.length > maxLength) {
+    throw new Error(`Invalid ${field} at ${path}`);
+  }
+};
+
+const isIsoDate = (value) => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+};
+
 const validateDirectoryDocument = (document) => {
   if (!document || typeof document !== 'object' || Array.isArray(document)) {
     throw new Error('RH-001 directory must be an object');
   }
+  assertExactFields(document, DOCUMENT_FIELDS, 'root');
   if (document.schema_version !== 'rh001-directory-v1') {
     throw new Error('Unsupported RH-001 directory schema');
   }
   if (document.classification !== 'C2') {
     throw new Error('RH-001 directory classification must be C2');
+  }
+  if (document.status !== ALLOWED_DOCUMENT_STATUS) {
+    throw new Error(`RH-001 directory status must be ${ALLOWED_DOCUMENT_STATUS}`);
+  }
+  assertNonEmptyString(document.approved_by, 'approved_by', 'root');
+  if (!isIsoDate(document.approved_on)) {
+    throw new Error('Invalid approved_on at root');
   }
   if (!Array.isArray(document.records)) {
     throw new Error('RH-001 directory records must be an array');
@@ -103,19 +144,18 @@ const validateDirectoryDocument = (document) => {
   const displayNames = new Set();
   document.records.forEach((record, index) => {
     const path = `records[${index}]`;
-    const keys = Object.keys(record);
-    const unexpectedKeys = keys.filter((key) => !DIRECTORY_FIELDS.includes(key));
-    if (unexpectedKeys.length) {
-      throw new Error(`Unexpected RH-001 fields at ${path}: ${unexpectedKeys.join(', ')}`);
+    if (!record || typeof record !== 'object' || Array.isArray(record)) {
+      throw new Error(`Invalid RH-001 record at ${path}`);
     }
-    DIRECTORY_FIELDS.forEach((field) => {
-      if (!(field in record)) throw new Error(`Missing ${field} at ${path}`);
-    });
+    assertExactFields(record, DIRECTORY_FIELDS, path);
     if (!/^PER-2SG-\d{4}$/.test(record.person_id)) {
       throw new Error(`Invalid person_id at ${path}`);
     }
-    if (!record.display_name || personIds.has(record.person_id)) {
-      throw new Error(`Missing or duplicate person identity at ${path}`);
+    assertNonEmptyString(record.display_name, 'display_name', path);
+    assertNonEmptyString(record.preferred_name, 'preferred_name', path, 100);
+    assertNonEmptyString(record.position, 'position', path);
+    if (personIds.has(record.person_id)) {
+      throw new Error(`Duplicate person identity at ${path}`);
     }
     if (displayNames.has(record.display_name)) {
       throw new Error(`Duplicate display_name at ${path}`);
@@ -125,6 +165,12 @@ const validateDirectoryDocument = (document) => {
     }
     if (!ALLOWED_TEAMS.has(record.team)) {
       throw new Error(`Invalid team at ${path}`);
+    }
+    if (record.subgroup !== null) {
+      assertNonEmptyString(record.subgroup, 'subgroup', path, 100);
+      if (!record.subgroup.startsWith(`${record.team}-`)) {
+        throw new Error(`Subgroup must belong to team at ${path}`);
+      }
     }
     if (typeof record.active !== 'boolean') {
       throw new Error(`Invalid active flag at ${path}`);
@@ -210,6 +256,7 @@ const createMembersDirectoryHandler = ({
 };
 
 module.exports = {
+  DOCUMENT_FIELDS,
   DIRECTORY_FIELDS,
   buildDirectoryPage,
   createMembersDirectoryHandler,
