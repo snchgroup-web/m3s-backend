@@ -10,7 +10,8 @@
     "test:cors": "node scripts/test-cors-policy.js",
     "auth:hash": "node scripts/hash-password.js",
     "validate:taxonomy": "node scripts/validateOfferTaxonomy.js",
-    "compare:taxonomy": "node scripts/compareOfferTaxonomy.js"
+    "compare:taxonomy": "node scripts/compareOfferTaxonomy.js",
+    "test:rh001": "node scripts/testRh001MembersDirectory.js"
   },
   "keywords": [
     "erp",

@@ -1,0 +1,69 @@
+{
+  "schema_version": "rh001-directory-v1",
+  "classification": "C2",
+  "status": "validated_documentary",
+  "approved_by": "Cheikh Ndiaye",
+  "approved_on": "2026-07-31",
+  "records": [
+    {
+      "person_id": "PER-2SG-0001",
+      "display_name": "Cheikh Ndiaye",
+      "preferred_name": "Cheikh",
+      "member_type": "Fondateur",
+      "team": "TZH",
+      "subgroup": null,
+      "position": "Manager et coordinateur général de 2SG - architecte fonctionnel M3S",
+      "active": true
+    },
+    {
+      "person_id": "PER-2SG-0002",
+      "display_name": "Chantal Löffler",
+      "preferred_name": "Chantal",
+      "member_type": "Fondateur",
+      "team": "TZH",
+      "subgroup": null,
+      "position": "Administratrice financière et référente sociale",
+      "active": true
+    },
+    {
+      "person_id": "PER-2SG-0003",
+      "display_name": "Gnilane Diouf",
+      "preferred_name": "Gnilane",
+      "member_type": "Associe",
+      "team": "TSN",
+      "subgroup": "TSN-TASKFORCE",
+      "position": "Cheffe de projets",
+      "active": true
+    },
+    {
+      "person_id": "PER-2SG-0004",
+      "display_name": "Gnilane Ndiaye",
+      "preferred_name": "Gnilane",
+      "member_type": "Associe",
+      "team": "TSN",
+      "subgroup": "TSN-TASKFORCE",
+      "position": "Cheffe Organisation & RH",
+      "active": true
+    },
+    {
+      "person_id": "PER-2SG-0005",
+      "display_name": "Papa Amandiogou Ndiaye",
+      "preferred_name": "Pape",
+      "member_type": "Associe",
+      "team": "TSN",
+      "subgroup": "TSN-TASKFORCE",
+      "position": "Responsable Administration & Marketing - référent local 2SG au Sénégal",
+      "active": true
+    },
+    {
+      "person_id": "PER-2SG-0006",
+      "display_name": "Ibrahima Ndiaye",
+      "preferred_name": "Ibou",
+      "member_type": "Associe",
+      "team": "TSN",
+      "subgroup": "TSN-TASKFORCE",
+      "position": "Chef Opérations",
+      "active": true
+    }
+  ]
+}

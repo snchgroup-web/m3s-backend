@@ -15,6 +15,11 @@ const express = require('express');
 const cors = require('cors');
 const { BigQuery } = require('@google-cloud/bigquery');
 const { createCorsOriginValidator } = require('./corsPolicy');
+const {
+  createMembersDirectoryHandler,
+  isFeatureEnabled,
+  parseAllowedRoles,
+} = require('./rh001Directory');
 
 // ============================================================================
 // INITIALISATION
@@ -33,6 +38,13 @@ const AUTH_SECRET = process.env.JWT_SECRET || 'm3s-development-secret-change-me'
 const API_REQUIRE_AUTH = process.env.API_REQUIRE_AUTH === 'true';
 const APP_REVISION = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.APP_REVISION || 'local';
 const OFFER_TAXONOMY_PATH = path.join(__dirname, 'referentiels', 'offerTaxonomy.json');
+const RH001_DIRECTORY_PATH = path.join(__dirname, 'referentiels', 'rh001MembersDirectory.json');
+const RH001_MEMBERS_DIRECTORY_ENABLED = isFeatureEnabled(
+  process.env.RH001_MEMBERS_DIRECTORY_ENABLED
+);
+const RH001_MEMBERS_DIRECTORY_ALLOWED_ROLES = parseAllowedRoles(
+  process.env.RH001_MEMBERS_DIRECTORY_ALLOWED_ROLES
+);
 
 const parseGoogleCredentials = () => {
   const rawCredentials = process.env.GOOGLE_CREDENTIALS;
@@ -1556,6 +1568,12 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
+app.get('/api/members-directory', createMembersDirectoryHandler({
+  enabled: RH001_MEMBERS_DIRECTORY_ENABLED,
+  allowedRoles: RH001_MEMBERS_DIRECTORY_ALLOWED_ROLES,
+  directoryPath: RH001_DIRECTORY_PATH
+}));
+
 // ============================================================================
 // API ROUTES - FX RATES
 // ============================================================================
@@ -1742,6 +1760,9 @@ app.get('/api/info', (req, res) => {
       users: [
         'GET /api/users?limit=100&offset=0'
       ],
+      members_directory: RH001_MEMBERS_DIRECTORY_ENABLED
+        ? ['GET /api/members-directory?limit=100&offset=0']
+        : [],
       fx_rates: [
         'GET /api/fx-rates'
       ],
