@@ -20,6 +20,10 @@ const {
   isFeatureEnabled,
   parseAllowedRoles,
 } = require('./rh001Directory');
+const {
+  createIntelligenceDashboardRepository,
+  isPublishKeyValid,
+} = require('./intelligenceDashboard');
 
 // ============================================================================
 // INITIALISATION
@@ -45,6 +49,7 @@ const RH001_MEMBERS_DIRECTORY_ENABLED = isFeatureEnabled(
 const RH001_MEMBERS_DIRECTORY_ALLOWED_ROLES = parseAllowedRoles(
   process.env.RH001_MEMBERS_DIRECTORY_ALLOWED_ROLES
 );
+const INTELLIGENCE_PUBLISH_KEY = process.env.INTELLIGENCE_PUBLISH_KEY || '';
 
 const parseGoogleCredentials = () => {
   const rawCredentials = process.env.GOOGLE_CREDENTIALS;
@@ -79,6 +84,12 @@ const bigquery = new BigQuery(
     ? { projectId: PROJECT_ID, credentials: googleCredentials }
     : { projectId: PROJECT_ID, keyFilename: path.join(__dirname, 'config', 'credentials.json') }
 );
+const intelligenceDashboardRepository = createIntelligenceDashboardRepository({
+  bigquery,
+  projectId: PROJECT_ID,
+  datasetId: DATASET_ID,
+  location: DATASET_LOCATION
+});
 
 const isMissingBigQueryTable = (error) => {
   const message = String(error?.message || '');
@@ -206,7 +217,9 @@ const requireAuth = (req, res, next) => {
     '/api/debug/documents',
     '/api/debug/tables',
     '/api/debug/schema',
-    '/api/debug/sample'
+    '/api/debug/sample',
+    '/intelligence/latest/publish',
+    '/api/intelligence/latest/publish'
   ]);
 
   if (publicPaths.has(req.path) || publicPaths.has(req.originalUrl)) {
@@ -300,6 +313,64 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.use('/api', requireAuth);
+
+// ============================================================================
+// 2SG INTELLIGENCE DASHBOARD
+// ============================================================================
+
+app.post('/api/intelligence/latest/publish', async (req, res) => {
+  if (!INTELLIGENCE_PUBLISH_KEY) {
+    return res.status(503).json({ success: false, error: 'Publication Intelligence non configurée' });
+  }
+  if (!isPublishKeyValid(req.get('x-m3s-publish-key'), INTELLIGENCE_PUBLISH_KEY)) {
+    return res.status(401).json({ success: false, error: 'Clé de publication invalide' });
+  }
+
+  try {
+    const data = await intelligenceDashboardRepository.publish(req.body);
+    return res.json({ success: true, data });
+  } catch (error) {
+    const isValidationError = /doit |invalide|requis/.test(String(error.message || ''));
+    console.error('Intelligence publication error:', error.message);
+    return res.status(isValidationError ? 400 : 500).json({
+      success: false,
+      error: isValidationError ? error.message : 'Publication Intelligence impossible'
+    });
+  }
+});
+
+app.get('/api/intelligence/latest', async (req, res) => {
+  try {
+    const data = await intelligenceDashboardRepository.getLatestMetadata();
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error('Intelligence metadata error:', error.message);
+    return res.status(500).json({ success: false, error: 'Lecture Intelligence indisponible' });
+  }
+});
+
+app.get('/api/intelligence/latest/:artifact(html|pdf|reference)', async (req, res) => {
+  try {
+    const artifact = await intelligenceDashboardRepository.getLatestArtifact(req.params.artifact);
+    if (!artifact) return res.status(404).json({ success: false, error: 'Aucune édition disponible' });
+
+    const date = artifact.editionDate || 'latest';
+    if (req.params.artifact === 'html') {
+      res.type('html').set('Content-Disposition', `inline; filename="2SG_Intelligence_Dashboard_${date}.html"`);
+      return res.send(artifact.content);
+    }
+    if (req.params.artifact === 'pdf') {
+      res.type('pdf').set('Content-Disposition', `inline; filename="2SG_Intelligence_Dashboard_${date}.pdf"`);
+      return res.send(Buffer.from(artifact.content, 'base64'));
+    }
+
+    res.type('text/markdown').set('Content-Disposition', `inline; filename="M3S_Referentiel_Intelligence_${date}.md"`);
+    return res.send(artifact.content);
+  } catch (error) {
+    console.error('Intelligence artifact error:', error.message);
+    return res.status(500).json({ success: false, error: 'Livrable Intelligence indisponible' });
+  }
+});
 
 // ============================================================================
 // HEALTH CHECK
@@ -1765,6 +1836,12 @@ app.get('/api/info', (req, res) => {
         : [],
       fx_rates: [
         'GET /api/fx-rates'
+      ],
+      intelligence: [
+        'GET /api/intelligence/latest',
+        'GET /api/intelligence/latest/html',
+        'GET /api/intelligence/latest/pdf',
+        'GET /api/intelligence/latest/reference'
       ],
       health: [
         'GET /api/health'
