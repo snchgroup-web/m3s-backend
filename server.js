@@ -1546,16 +1546,34 @@ app.get('/api/tasks', async (req, res) => {
 app.get('/api/tasks/count', async (req, res) => {
   try {
     const preferredQuery = `
-      SELECT COUNT(*) as total
-      FROM \`${PROJECT_ID}.${DATASET_ID}.taches_propres\`
+      WITH task_statuses AS (
+        SELECT UPPER(TRIM(COALESCE(statut, ''))) as status
+        FROM \`${PROJECT_ID}.${DATASET_ID}.taches_propres\`
+      )
+      SELECT
+        COUNT(*) as total,
+        COUNTIF(status IN ('TERMINÉ', 'TERMINE', 'DONE', 'ERLEDIGT')) as completed,
+        COUNTIF(status IN ('BLOQUÉ', 'BLOQUE', 'BLOCKED', 'BLOCKIERT')) as blocked,
+        COUNTIF(status IN ('ANNULÉ', 'ANNULE', 'CANCELLED', 'CANCELED', 'ABGEBROCHEN')) as cancelled,
+        COUNTIF(status NOT IN ('TERMINÉ', 'TERMINE', 'DONE', 'ERLEDIGT', 'ANNULÉ', 'ANNULE', 'CANCELLED', 'CANCELED', 'ABGEBROCHEN')) as open
+      FROM task_statuses
     `;
 
     const fallbackQuery = `
-      SELECT COUNT(*) as total
-      FROM \`${PROJECT_ID}.${DATASET_ID}.bdd_taches\`
-      WHERE string_field_0 IS NOT NULL
-        AND TRIM(string_field_0) != ''
-        AND string_field_0 != 'Unnamed: 0'
+      WITH task_statuses AS (
+        SELECT UPPER(TRIM(COALESCE(string_field_3, ''))) as status
+        FROM \`${PROJECT_ID}.${DATASET_ID}.bdd_taches\`
+        WHERE string_field_0 IS NOT NULL
+          AND TRIM(string_field_0) != ''
+          AND string_field_0 != 'Unnamed: 0'
+      )
+      SELECT
+        COUNT(*) as total,
+        COUNTIF(status IN ('TERMINÉ', 'TERMINE', 'DONE', 'ERLEDIGT')) as completed,
+        COUNTIF(status IN ('BLOQUÉ', 'BLOQUE', 'BLOCKED', 'BLOCKIERT')) as blocked,
+        COUNTIF(status IN ('ANNULÉ', 'ANNULE', 'CANCELLED', 'CANCELED', 'ABGEBROCHEN')) as cancelled,
+        COUNTIF(status NOT IN ('TERMINÉ', 'TERMINE', 'DONE', 'ERLEDIGT', 'ANNULÉ', 'ANNULE', 'CANCELLED', 'CANCELED', 'ABGEBROCHEN')) as open
+      FROM task_statuses
     `;
     const [rows] = await runQueryWithFallback({
       preferredQuery,
@@ -1563,9 +1581,14 @@ app.get('/api/tasks/count', async (req, res) => {
       label: 'Tasks count'
     });
 
+    const summary = rows[0] || {};
     res.json({
       success: true,
-      total: rows[0]?.total || 0,
+      total: Number(summary.total || 0),
+      completed: Number(summary.completed || 0),
+      open: Number(summary.open || 0),
+      blocked: Number(summary.blocked || 0),
+      cancelled: Number(summary.cancelled || 0),
       timestamp: new Date().toISOString()
     });
   } catch (error) {
