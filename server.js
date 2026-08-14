@@ -15,7 +15,7 @@ const express = require('express');
 const cors = require('cors');
 const { BigQuery } = require('@google-cloud/bigquery');
 const { createCorsOriginValidator } = require('./corsPolicy');
-const { createDebugAccessMiddleware } = require('./debugAccess');
+const { createDebugAccessMiddleware, createDebugSampleGuard } = require('./debugAccess');
 const {
   createMembersDirectoryHandler,
   isFeatureEnabled,
@@ -37,6 +37,7 @@ const {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROJECT_ID = process.env.BIGQUERY_PROJECT || 'mon-projet-data-2sg';
 const DATASET_ID = process.env.BIGQUERY_DATASET || 'm3s_2sg';
 const DATASET_LOCATION = 'US';
@@ -226,6 +227,7 @@ const authenticateRequest = (req, res, next) => {
 };
 
 const requireDebugAccess = createDebugAccessMiddleware(authenticateRequest);
+const disableProductionDebugSamples = createDebugSampleGuard(NODE_ENV);
 
 const requireAuth = (req, res, next) => {
   const publicPaths = new Set([
@@ -604,7 +606,7 @@ app.get('/api/debug/schema', async (req, res) => {
   }
 });
 
-app.get('/api/debug/sample', async (req, res) => {
+app.get('/api/debug/sample', disableProductionDebugSamples, async (req, res) => {
   const tableName = String(req.query.table || '').trim();
   const limit = Math.min(parseInt(req.query.limit, 10) || 5, 10);
 

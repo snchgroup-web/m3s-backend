@@ -1,7 +1,8 @@
 const assert = require('assert');
 const {
   isDebugRoleAllowed,
-  createDebugAccessMiddleware
+  createDebugAccessMiddleware,
+  createDebugSampleGuard
 } = require('../debugAccess');
 
 const createResponse = () => ({
@@ -46,6 +47,17 @@ const run = () => {
   middleware({ user: { role: 'Membre fondateur' } }, founderResponse, () => { nextCalls += 1; });
   assert.equal(founderResponse.statusCode, 200);
   assert.equal(nextCalls, 1);
+
+  const productionResponse = createResponse();
+  createDebugSampleGuard('production')({}, productionResponse, () => { nextCalls += 1; });
+  assert.equal(productionResponse.statusCode, 404);
+  assert.equal(productionResponse.body.code, 'DEBUG_SAMPLE_DISABLED');
+  assert.equal(nextCalls, 1);
+
+  const developmentResponse = createResponse();
+  createDebugSampleGuard('development')({}, developmentResponse, () => { nextCalls += 1; });
+  assert.equal(developmentResponse.statusCode, 200);
+  assert.equal(nextCalls, 2);
 
   console.log('Debug access policy tests: OK');
 };
