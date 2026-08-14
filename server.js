@@ -26,6 +26,7 @@ const {
 } = require('./intelligenceDashboard');
 const {
   createAdministrationRegistryHandlers,
+  ensureAdministrationRegistrySchema,
   permissionsForAccount,
 } = require('./administrationRegistries');
 
@@ -1915,6 +1916,18 @@ app.get('/api/info', (req, res) => {
 // ============================================================================
 
 const startServer = async () => {
+  try {
+    const registrySchema = await ensureAdministrationRegistrySchema({
+      bigquery,
+      projectId: PROJECT_ID,
+      datasetId: DATASET_ID,
+      location: DATASET_LOCATION
+    });
+    console.log(`Administration registry schema ready: ${registrySchema.tables.join(', ')}`);
+  } catch (error) {
+    console.error('Administration registry schema migration warning:', error.message);
+  }
+
   try {
     await Promise.all([
       bigquery.query({

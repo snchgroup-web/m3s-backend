@@ -37,6 +37,102 @@ const CORRESPONDENCE_FIELDS = new Set([
   'receipt_evidence_reference', 'owner', 'next_action', 'status', 'deadline'
 ]);
 
+const validateSchemaIdentifier = (value, label, pattern) => {
+  const identifier = String(value || '').trim();
+  if (!pattern.test(identifier)) {
+    throw new Error(`Invalid BigQuery ${label}`);
+  }
+  return identifier;
+};
+
+const buildAdministrationRegistrySchemaStatements = ({ projectId, datasetId }) => {
+  const project = validateSchemaIdentifier(projectId, 'project identifier', /^[A-Za-z0-9][A-Za-z0-9_-]*$/);
+  const dataset = validateSchemaIdentifier(datasetId, 'dataset identifier', /^[A-Za-z_][A-Za-z0-9_]*$/);
+  const table = name => `\`${project}.${dataset}.${name}\``;
+
+  return [
+    `CREATE TABLE IF NOT EXISTS ${table('administration_resources')} (
+      id STRING NOT NULL,
+      tenant_id STRING NOT NULL,
+      title STRING NOT NULL,
+      family STRING NOT NULL,
+      authority STRING NOT NULL,
+      location STRING NOT NULL,
+      source_status STRING NOT NULL,
+      review_status STRING NOT NULL,
+      confidentiality STRING NOT NULL,
+      note STRING,
+      created_by_user_id STRING NOT NULL,
+      created_by_name STRING,
+      created_at TIMESTAMP NOT NULL,
+      updated_by_user_id STRING NOT NULL,
+      updated_at TIMESTAMP NOT NULL,
+      deleted_at TIMESTAMP
+    )
+    PARTITION BY DATE(created_at)
+    CLUSTER BY tenant_id, confidentiality, family`,
+    `CREATE TABLE IF NOT EXISTS ${table('administration_correspondence')} (
+      id STRING NOT NULL,
+      tenant_id STRING NOT NULL,
+      receipt_date DATE NOT NULL,
+      direction STRING NOT NULL,
+      channel STRING NOT NULL,
+      sender STRING NOT NULL,
+      recipient STRING NOT NULL,
+      subject STRING NOT NULL,
+      category STRING NOT NULL,
+      confidentiality STRING NOT NULL,
+      linked_person_or_case STRING,
+      ged_reference STRING,
+      receipt_evidence_reference STRING,
+      owner STRING NOT NULL,
+      next_action STRING,
+      status STRING NOT NULL,
+      deadline DATE,
+      created_by_user_id STRING NOT NULL,
+      created_by_name STRING,
+      created_at TIMESTAMP NOT NULL,
+      updated_by_user_id STRING NOT NULL,
+      updated_at TIMESTAMP NOT NULL,
+      deleted_at TIMESTAMP
+    )
+    PARTITION BY receipt_date
+    CLUSTER BY tenant_id, confidentiality, status`,
+    `CREATE TABLE IF NOT EXISTS ${table('administration_audit_log')} (
+      id STRING NOT NULL,
+      tenant_id STRING NOT NULL,
+      actor_user_id STRING NOT NULL,
+      actor_name STRING,
+      entity_type STRING NOT NULL,
+      entity_id STRING NOT NULL,
+      action STRING NOT NULL,
+      event_at TIMESTAMP NOT NULL,
+      metadata_json STRING
+    )
+    PARTITION BY DATE(event_at)
+    CLUSTER BY tenant_id, entity_type, action`
+  ];
+};
+
+const ensureAdministrationRegistrySchema = async ({
+  bigquery,
+  projectId,
+  datasetId,
+  location = 'US'
+}) => {
+  const statements = buildAdministrationRegistrySchemaStatements({ projectId, datasetId });
+  for (const query of statements) {
+    await bigquery.query({ query, location });
+  }
+  return {
+    tables: [
+      'administration_resources',
+      'administration_correspondence',
+      'administration_audit_log'
+    ]
+  };
+};
+
 class RegistryValidationError extends Error {
   constructor(message, code = 'ADMIN_REGISTRY_INVALID_PAYLOAD') {
     super(message);
@@ -546,6 +642,8 @@ const createAdministrationRegistryHandlers = ({
 module.exports = {
   PERMISSIONS,
   RegistryValidationError,
+  buildAdministrationRegistrySchemaStatements,
+  ensureAdministrationRegistrySchema,
   defaultPermissionsForRole,
   permissionsForAccount,
   normalizeResourcePayload,
