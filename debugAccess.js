@@ -27,9 +27,21 @@ const createDebugAccessMiddleware = authenticateRequest => (req, res, next) => (
   })
 );
 
+const createDebugSampleGuard = environment => (req, res, next) => {
+  if (String(environment || '').trim().toLowerCase() === 'production') {
+    return res.status(404).json({
+      success: false,
+      code: 'DEBUG_SAMPLE_DISABLED',
+      error: 'Route indisponible'
+    });
+  }
+  return next();
+};
+
 module.exports = {
   DEBUG_ALLOWED_ROLES,
   normalizeRole,
   isDebugRoleAllowed,
-  createDebugAccessMiddleware
+  createDebugAccessMiddleware,
+  createDebugSampleGuard
 };
