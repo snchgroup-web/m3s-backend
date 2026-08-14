@@ -6,7 +6,8 @@ const PERMISSIONS = Object.freeze({
   RESOURCES_RESTRICTED: 'administration:resources:restricted',
   CORRESPONDENCE_READ: 'administration:correspondence:read',
   CORRESPONDENCE_WRITE: 'administration:correspondence:write',
-  CORRESPONDENCE_RESTRICTED: 'administration:correspondence:restricted'
+  CORRESPONDENCE_RESTRICTED: 'administration:correspondence:restricted',
+  AUDIT_READ: 'administration:audit:read'
 });
 
 const ALL_PERMISSIONS = Object.freeze(Object.values(PERMISSIONS));
@@ -193,6 +194,22 @@ const parsePagination = query => {
     limit: Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 200) : 100,
     offset: Number.isFinite(requestedOffset) ? Math.max(requestedOffset, 0) : 0
   };
+};
+
+const parseAuditMetadata = value => {
+  try {
+    const parsed = JSON.parse(String(value || '{}'));
+    const changedFields = Array.isArray(parsed?.changed_fields)
+      ? parsed.changed_fields
+        .filter(field => typeof field === 'string')
+        .map(field => field.trim().slice(0, 120))
+        .filter(Boolean)
+        .slice(0, 80)
+      : [];
+    return { changed_fields: changedFields };
+  } catch {
+    return { changed_fields: [] };
+  }
 };
 
 const assertNoFilePayload = (value, path = 'root') => {
@@ -507,6 +524,33 @@ const createAdministrationRegistryHandlers = ({
     }
   };
 
+  const listAuditEvents = async (req, res) => {
+    const identity = authorize(req, res, PERMISSIONS.AUDIT_READ);
+    if (!identity) return;
+    const { limit, offset } = parsePagination(req.query);
+    try {
+      const [rows] = await run(`
+        SELECT id, actor_name, entity_type, entity_id, action, event_at, metadata_json
+        FROM ${auditTable}
+        WHERE tenant_id=@tenant_id
+        ORDER BY event_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `, commonParams(identity));
+      const data = rows.map(row => ({
+        id: row.id,
+        actor_name: row.actor_name || '',
+        entity_type: row.entity_type,
+        entity_id: row.entity_id,
+        action: row.action,
+        event_at: row.event_at,
+        changed_fields: parseAuditMetadata(row.metadata_json).changed_fields
+      }));
+      return res.json({ success: true, data, count: data.length, limit, offset, source: 'bigquery', timestamp: now() });
+    } catch (error) {
+      return respondError(res, error, logger);
+    }
+  };
+
   const createCorrespondence = async (req, res) => {
     const identity = authorize(req, res, PERMISSIONS.CORRESPONDENCE_WRITE);
     if (!identity) return;
@@ -635,7 +679,8 @@ const createAdministrationRegistryHandlers = ({
     listCorrespondence,
     createCorrespondence,
     updateCorrespondence,
-    deleteCorrespondence
+    deleteCorrespondence,
+    listAuditEvents
   };
 };
 
@@ -649,5 +694,6 @@ module.exports = {
   normalizeResourcePayload,
   normalizeCorrespondencePayload,
   parsePagination,
+  parseAuditMetadata,
   createAdministrationRegistryHandlers
 };

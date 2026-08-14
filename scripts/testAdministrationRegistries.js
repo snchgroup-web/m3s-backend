@@ -8,6 +8,7 @@ const {
   normalizeResourcePayload,
   normalizeCorrespondencePayload,
   parsePagination,
+  parseAuditMetadata,
   createAdministrationRegistryHandlers
 } = require('../administrationRegistries');
 
@@ -123,10 +124,12 @@ const run = async () => {
   const founderPermissions = defaultPermissionsForRole('Membre fondateur');
   assert(founderPermissions.includes(PERMISSIONS.RESOURCES_RESTRICTED));
   assert(founderPermissions.includes(PERMISSIONS.CORRESPONDENCE_RESTRICTED));
+  assert(founderPermissions.includes(PERMISSIONS.AUDIT_READ));
   assert.deepEqual(defaultPermissionsForRole('Utilisateur'), [
     PERMISSIONS.RESOURCES_READ,
     PERMISSIONS.CORRESPONDENCE_READ
   ]);
+  assert.equal(defaultPermissionsForRole('Administrateur').includes(PERMISSIONS.AUDIT_READ), false);
   assert.deepEqual(permissionsForAccount({
     role: 'Membre fondateur',
     permissions: [PERMISSIONS.RESOURCES_READ, 'permission:unknown']
@@ -151,6 +154,8 @@ const run = async () => {
     /Invalid receipt_date/
   );
   assert.deepEqual(parsePagination({ limit: '999', offset: '-3' }), { limit: 200, offset: 0 });
+  assert.deepEqual(parseAuditMetadata('{"changed_fields":["title","note"]}'), { changed_fields: ['title', 'note'] });
+  assert.deepEqual(parseAuditMetadata('invalid-json'), { changed_fields: [] });
 
   const unauthenticatedBq = createBigQuery([]);
   const unauthenticatedResponse = createResponse();
@@ -167,6 +172,22 @@ const run = async () => {
   assert.equal(forbiddenResponse.statusCode, 403);
   assert.equal(forbiddenBq.calls.length, 0);
 
+  const ordinaryMutationCases = [
+    ['updateResource', { user: reader, params: { id: 'RES-1' }, body: resourcePayload }],
+    ['deleteResource', { user: reader, params: { id: 'RES-1' } }],
+    ['createCorrespondence', { user: reader, body: { ...correspondencePayload, confidentiality: 'internal' } }],
+    ['updateCorrespondence', { user: reader, params: { id: 'COR-1' }, body: { ...correspondencePayload, confidentiality: 'internal' } }],
+    ['deleteCorrespondence', { user: reader, params: { id: 'COR-1' } }],
+    ['listAuditEvents', { user: reader, query: {} }]
+  ];
+  for (const [handlerName, request] of ordinaryMutationCases) {
+    const ordinaryBq = createBigQuery([]);
+    const ordinaryResponse = createResponse();
+    await createHandlers(ordinaryBq)[handlerName](request, ordinaryResponse);
+    assert.equal(ordinaryResponse.statusCode, 403, `${handlerName} must reject an ordinary user`);
+    assert.equal(ordinaryBq.calls.length, 0, `${handlerName} must not query BigQuery when forbidden`);
+  }
+
   const listBq = createBigQuery([[[{ id: 'RES-1' }]]]);
   const listResponse = createResponse();
   await createHandlers(listBq).listResources({ user: reader, query: { limit: '10' } }, listResponse);
@@ -176,6 +197,34 @@ const run = async () => {
   assert.equal(listBq.calls[0].params.user_id, 'USR-READER');
   assert.equal(listBq.calls[0].params.can_read_restricted_resources, false);
   assert.match(listBq.calls[0].query, /tenant_id = @tenant_id/);
+
+  const correspondenceListBq = createBigQuery([[[{ id: 'COR-1' }]]]);
+  const correspondenceListResponse = createResponse();
+  await createHandlers(correspondenceListBq).listCorrespondence(
+    { user: reader, query: { limit: '10' } },
+    correspondenceListResponse
+  );
+  assert.equal(correspondenceListResponse.statusCode, 200);
+  assert.equal(correspondenceListBq.calls[0].params.can_read_restricted_correspondence, false);
+  assert.match(correspondenceListBq.calls[0].query, /confidentiality NOT IN \('restricted_hr', 'confidential'\)/);
+
+  const auditBq = createBigQuery([[[{
+    id: 'AUD-1',
+    actor_name: 'Membre fondateur',
+    entity_type: 'resource',
+    entity_id: 'RES-1',
+    action: 'update',
+    event_at: '2026-08-14T12:00:00.000Z',
+    metadata_json: '{"changed_fields":["title","note"]}'
+  }]]]);
+  const auditResponse = createResponse();
+  await createHandlers(auditBq).listAuditEvents({ user: founder, query: { limit: '25' } }, auditResponse);
+  assert.equal(auditResponse.statusCode, 200);
+  assert.deepEqual(auditResponse.body.data[0].changed_fields, ['title', 'note']);
+  assert.equal('metadata_json' in auditResponse.body.data[0], false);
+  assert.equal('actor_user_id' in auditResponse.body.data[0], false);
+  assert.equal(auditBq.calls[0].params.tenant_id, founder.tenantId);
+  assert.match(auditBq.calls[0].query, /WHERE tenant_id=@tenant_id/);
 
   const missingTableBq = createBigQuery([new Error('Not found: Table project-test:dataset_test.administration_resources')]);
   const missingTableResponse = createResponse();
