@@ -15,6 +15,7 @@ const express = require('express');
 const cors = require('cors');
 const { BigQuery } = require('@google-cloud/bigquery');
 const { createCorsOriginValidator } = require('./corsPolicy');
+const { createDebugAccessMiddleware } = require('./debugAccess');
 const {
   createMembersDirectoryHandler,
   isFeatureEnabled,
@@ -224,26 +225,16 @@ const authenticateRequest = (req, res, next) => {
   return next();
 };
 
+const requireDebugAccess = createDebugAccessMiddleware(authenticateRequest);
+
 const requireAuth = (req, res, next) => {
   const publicPaths = new Set([
     '/auth/login',
     '/health',
     '/info',
-    '/debug/config',
-    '/debug/bigquery',
-    '/debug/documents',
-    '/debug/tables',
-    '/debug/schema',
-    '/debug/sample',
     '/api/auth/login',
     '/api/health',
     '/api/info',
-    '/api/debug/config',
-    '/api/debug/bigquery',
-    '/api/debug/documents',
-    '/api/debug/tables',
-    '/api/debug/schema',
-    '/api/debug/sample',
     '/intelligence/latest/publish',
     '/api/intelligence/latest/publish'
   ]);
@@ -330,6 +321,7 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.use('/api', requireAuth);
+app.use('/api/debug', requireDebugAccess);
 
 // Administration registries always require an authenticated, tenant-scoped identity.
 app.get('/api/administration/resources', authenticateRequest, administrationRegistryHandlers.listResources);
