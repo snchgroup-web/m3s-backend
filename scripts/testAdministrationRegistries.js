@@ -1,6 +1,8 @@
 const assert = require('assert');
 const {
   PERMISSIONS,
+  buildAdministrationRegistrySchemaStatements,
+  ensureAdministrationRegistrySchema,
   defaultPermissionsForRole,
   permissionsForAccount,
   normalizeResourcePayload,
@@ -90,6 +92,34 @@ const createHandlers = bigquery => createAdministrationRegistryHandlers({
 });
 
 const run = async () => {
+  const schemaStatements = buildAdministrationRegistrySchemaStatements({
+    projectId: 'project-test',
+    datasetId: 'dataset_test'
+  });
+  assert.equal(schemaStatements.length, 3);
+  assert.match(schemaStatements[0], /CREATE TABLE IF NOT EXISTS `project-test\.dataset_test\.administration_resources`/);
+  assert.match(schemaStatements[1], /PARTITION BY receipt_date/);
+  assert.match(schemaStatements[2], /CLUSTER BY tenant_id, entity_type, action/);
+  assert.throws(
+    () => buildAdministrationRegistrySchemaStatements({ projectId: 'project`; DROP TABLE x', datasetId: 'dataset_test' }),
+    /Invalid BigQuery project identifier/
+  );
+
+  const schemaBigQuery = createBigQuery([[[]], [[]], [[]]]);
+  const schemaResult = await ensureAdministrationRegistrySchema({
+    bigquery: schemaBigQuery,
+    projectId: 'project-test',
+    datasetId: 'dataset_test',
+    location: 'EU'
+  });
+  assert.equal(schemaBigQuery.calls.length, 3);
+  assert(schemaBigQuery.calls.every(call => call.location === 'EU'));
+  assert.deepEqual(schemaResult.tables, [
+    'administration_resources',
+    'administration_correspondence',
+    'administration_audit_log'
+  ]);
+
   const founderPermissions = defaultPermissionsForRole('Membre fondateur');
   assert(founderPermissions.includes(PERMISSIONS.RESOURCES_RESTRICTED));
   assert(founderPermissions.includes(PERMISSIONS.CORRESPONDENCE_RESTRICTED));
