@@ -24,6 +24,10 @@ const {
   createIntelligenceDashboardRepository,
   isPublishKeyValid,
 } = require('./intelligenceDashboard');
+const {
+  createAdministrationRegistryHandlers,
+  permissionsForAccount,
+} = require('./administrationRegistries');
 
 // ============================================================================
 // INITIALISATION
@@ -85,6 +89,12 @@ const bigquery = new BigQuery(
     : { projectId: PROJECT_ID, keyFilename: path.join(__dirname, 'config', 'credentials.json') }
 );
 const intelligenceDashboardRepository = createIntelligenceDashboardRepository({
+  bigquery,
+  projectId: PROJECT_ID,
+  datasetId: DATASET_ID,
+  location: DATASET_LOCATION
+});
+const administrationRegistryHandlers = createAdministrationRegistryHandlers({
   bigquery,
   projectId: PROJECT_ID,
   datasetId: DATASET_ID,
@@ -196,9 +206,24 @@ const parseToken = (token) => {
   }
 };
 
-const requireAuth = (req, res, next) => {
-  if (!API_REQUIRE_AUTH) return next();
+const authenticateRequest = (req, res, next) => {
+  if (req.user) return next();
+  const authHeader = req.get('authorization') || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const payload = token ? parseToken(token) : null;
 
+  if (!payload) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentification requise'
+    });
+  }
+
+  req.user = payload;
+  return next();
+};
+
+const requireAuth = (req, res, next) => {
   const publicPaths = new Set([
     '/auth/login',
     '/health',
@@ -225,20 +250,8 @@ const requireAuth = (req, res, next) => {
   if (publicPaths.has(req.path) || publicPaths.has(req.originalUrl)) {
     return next();
   }
-
-  const authHeader = req.get('authorization') || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  const payload = token ? parseToken(token) : null;
-
-  if (!payload) {
-    return res.status(401).json({
-      success: false,
-      error: 'Authentification requise'
-    });
-  }
-
-  req.user = payload;
-  return next();
+  if (!API_REQUIRE_AUTH) return next();
+  return authenticateRequest(req, res, next);
 };
 
 const getConfiguredUsers = () => {
@@ -300,9 +313,12 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   const user = {
+    id: account.id || account.userId || account.email,
+    tenantId: account.tenantId || account.organizationId || process.env.M3S_DEFAULT_TENANT_ID || '2sg',
     email: account.email,
     name: account.name || account.email,
-    role: account.role || 'Utilisateur'
+    role: account.role || 'Utilisateur',
+    permissions: permissionsForAccount(account)
   };
 
   res.json({
@@ -313,6 +329,16 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.use('/api', requireAuth);
+
+// Administration registries always require an authenticated, tenant-scoped identity.
+app.get('/api/administration/resources', authenticateRequest, administrationRegistryHandlers.listResources);
+app.post('/api/administration/resources', authenticateRequest, administrationRegistryHandlers.createResource);
+app.put('/api/administration/resources/:id', authenticateRequest, administrationRegistryHandlers.updateResource);
+app.delete('/api/administration/resources/:id', authenticateRequest, administrationRegistryHandlers.deleteResource);
+app.get('/api/administration/correspondence', authenticateRequest, administrationRegistryHandlers.listCorrespondence);
+app.post('/api/administration/correspondence', authenticateRequest, administrationRegistryHandlers.createCorrespondence);
+app.put('/api/administration/correspondence/:id', authenticateRequest, administrationRegistryHandlers.updateCorrespondence);
+app.delete('/api/administration/correspondence/:id', authenticateRequest, administrationRegistryHandlers.deleteCorrespondence);
 
 // ============================================================================
 // 2SG INTELLIGENCE DASHBOARD
@@ -1865,6 +1891,16 @@ app.get('/api/info', (req, res) => {
         'GET /api/intelligence/latest/html',
         'GET /api/intelligence/latest/pdf',
         'GET /api/intelligence/latest/reference'
+      ],
+      administration: [
+        'GET /api/administration/resources',
+        'POST /api/administration/resources',
+        'PUT /api/administration/resources/:id',
+        'DELETE /api/administration/resources/:id',
+        'GET /api/administration/correspondence',
+        'POST /api/administration/correspondence',
+        'PUT /api/administration/correspondence/:id',
+        'DELETE /api/administration/correspondence/:id'
       ],
       health: [
         'GET /api/health'
