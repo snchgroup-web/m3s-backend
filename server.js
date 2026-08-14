@@ -334,6 +334,7 @@ app.get('/api/administration/correspondence', authenticateRequest, administratio
 app.post('/api/administration/correspondence', authenticateRequest, administrationRegistryHandlers.createCorrespondence);
 app.put('/api/administration/correspondence/:id', authenticateRequest, administrationRegistryHandlers.updateCorrespondence);
 app.delete('/api/administration/correspondence/:id', authenticateRequest, administrationRegistryHandlers.deleteCorrespondence);
+app.get('/api/administration/audit', authenticateRequest, administrationRegistryHandlers.listAuditEvents);
 
 // ============================================================================
 // 2SG INTELLIGENCE DASHBOARD
