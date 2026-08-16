@@ -40,6 +40,7 @@ const {
   socialIncomePredicate,
   nonSocialIncomePredicate,
 } = require('./financeDataScope');
+const { resolveFinanceSources } = require('./financeSources');
 
 // ============================================================================
 // INITIALISATION
@@ -113,6 +114,27 @@ const bigquery = new BigQuery(
     ? { projectId: PROJECT_ID, credentials: googleCredentials }
     : { projectId: PROJECT_ID, keyFilename: path.join(__dirname, 'config', 'credentials.json') }
 );
+let financeSources = {
+  income: 'income',
+  expenses: 'expenses',
+  location: DATASET_LOCATION,
+  resolved: false
+};
+const financeTableRef = sourceKey => (
+  `\`${PROJECT_ID}.${DATASET_ID}.${financeSources[sourceKey]}\``
+);
+const financeQueryOptions = query => ({
+  query,
+  location: financeSources.location || DATASET_LOCATION
+});
+const requireResolvedFinanceSources = (_req, res, next) => {
+  if (financeSources.resolved) return next();
+  return res.status(503).json({
+    success: false,
+    code: financeSources.errorCode || 'FINANCE_SOURCE_UNAVAILABLE',
+    error: 'Sources financières temporairement indisponibles'
+  });
+};
 const intelligenceDashboardRepository = createIntelligenceDashboardRepository({
   bigquery,
   projectId: PROJECT_ID,
@@ -687,7 +709,7 @@ app.get('/api/debug/sample', disableProductionDebugSamples, async (req, res) => 
 // API ROUTES - FINANCE (EXPENSES)
 // ============================================================================
 
-app.get('/api/finance/expenses', requireFinanceRead, async (req, res) => {
+app.get('/api/finance/expenses', requireFinanceRead, requireResolvedFinanceSources, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
     const offset = parseInt(req.query.offset) || 0;
@@ -721,12 +743,12 @@ app.get('/api/finance/expenses', requireFinanceRead, async (req, res) => {
         FOURNISSEUR as fournisseur,
         PAYS as pays,
         COMMENTAIRES as commentaire
-      FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`
+      FROM ${financeTableRef('expenses')}
       ORDER BY DATE DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    const options = { query, location: DATASET_LOCATION };
+    const options = financeQueryOptions(query);
     const [rows] = await bigquery.query(options);
 
     console.log(`✅ Expenses returned: ${rows.length} rows`);
@@ -750,7 +772,7 @@ app.get('/api/finance/expenses', requireFinanceRead, async (req, res) => {
 // API ROUTES - FINANCE (INCOME)
 // ============================================================================
 
-app.get('/api/finance/income', requireFinanceRead, async (req, res) => {
+app.get('/api/finance/income', requireFinanceRead, requireResolvedFinanceSources, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
     const offset = parseInt(req.query.offset) || 0;
@@ -781,13 +803,13 @@ app.get('/api/finance/income', requireFinanceRead, async (req, res) => {
         AGENT as agent,
         PAYS as pays,
         COMMENTAIRE as commentaire
-      FROM \`${PROJECT_ID}.${DATASET_ID}.income\`
+      FROM ${financeTableRef('income')}
       WHERE ${nonSocialIncomeWhere}
       ORDER BY DATE DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    const options = { query, location: DATASET_LOCATION };
+    const options = financeQueryOptions(query);
     const [rows] = await bigquery.query(options);
 
     console.log(`✅ Income returned: ${rows.length} rows`);
@@ -811,7 +833,7 @@ app.get('/api/finance/income', requireFinanceRead, async (req, res) => {
 // API ROUTES - FINANCE (FLUX SOCIAUX RECLASSES)
 // ============================================================================
 
-app.get('/api/finance/social', requireFinanceSocialRead, async (req, res) => {
+app.get('/api/finance/social', requireFinanceSocialRead, requireResolvedFinanceSources, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
     const offset = parseInt(req.query.offset, 10) || 0;
@@ -836,13 +858,13 @@ app.get('/api/finance/social', requireFinanceSocialRead, async (req, res) => {
         PHASE as phase_projet,
         PAYS as pays,
         COMMENTAIRE as commentaire
-      FROM \`${PROJECT_ID}.${DATASET_ID}.income\`
+      FROM ${financeTableRef('income')}
       WHERE ${socialIncomeWhere}
       ORDER BY DATE DESC, ID_RECETTE DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    const [rows] = await bigquery.query({ query, location: DATASET_LOCATION });
+    const [rows] = await bigquery.query(financeQueryOptions(query));
     const totalChf = rows.reduce((sum, row) => sum + numberOrZero(row.montant_chf), 0);
     const totalCfaHistorique = rows.reduce((sum, row) => sum + numberOrZero(row.montant_cfa), 0);
     const years = rows
@@ -860,7 +882,7 @@ app.get('/api/finance/social', requireFinanceSocialRead, async (req, res) => {
         derniere_annee: years.length ? Math.max(...years.map(Number)) : null
       },
       classification: {
-        source_table: 'income',
+        source_table: financeSources.income,
         rule: 'NATURE_RECETTE = Aide Sociale Menage',
         accounting_scope: 'hors recettes exploitation'
       },
@@ -905,16 +927,16 @@ const normalizeFinanceTransaction = (body, id, kind) => {
   };
 };
 
-app.post('/api/finance/expenses', requireFinanceWrite, async (req, res) => {
+app.post('/api/finance/expenses', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
     const row = normalizeFinanceTransaction(req.body, `DEP-APP-${Date.now()}`, 'expense');
     await bigquery.query({
-      query: `INSERT INTO \`${PROJECT_ID}.${DATASET_ID}.expenses\`
+      query: `INSERT INTO ${financeTableRef('expenses')}
         (\`Nr REF\`, DATE, DESIGNATION, CHF, CFA, PAIEMENT, \`POSTE  \`, \`OPERATION \`,
          \`RUBRIQUE DEP\`, BU, DEPARTEMENT, TEAM, PHASE, \` AGENT\`, FOURNISSEUR, PAYS, COMMENTAIRES)
         VALUES (@id,@date,@description,@montant_chf,@montant_cfa,@type,'','',@categorie,
                 '',@departement,@team,@phase_projet,@agent,@fournisseur,@pays,@commentaire)`,
-      params: row, location: DATASET_LOCATION
+      params: row, location: financeSources.location || DATASET_LOCATION
     });
     res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -923,16 +945,16 @@ app.post('/api/finance/expenses', requireFinanceWrite, async (req, res) => {
   }
 });
 
-app.put('/api/finance/expenses/:id', requireFinanceWrite, async (req, res) => {
+app.put('/api/finance/expenses/:id', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
     const row = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'expense');
     await bigquery.query({
-      query: `UPDATE \`${PROJECT_ID}.${DATASET_ID}.expenses\`
+      query: `UPDATE ${financeTableRef('expenses')}
         SET DATE=@date, DESIGNATION=@description, CHF=@montant_chf, CFA=@montant_cfa,
             PAIEMENT=@type, \`RUBRIQUE DEP\`=@categorie, DEPARTEMENT=@departement, TEAM=@team,
             PHASE=@phase_projet, \` AGENT\`=@agent, FOURNISSEUR=@fournisseur,
             PAYS=@pays, COMMENTAIRES=@commentaire WHERE \`Nr REF\`=@id`,
-      params: row, location: DATASET_LOCATION
+      params: row, location: financeSources.location || DATASET_LOCATION
     });
     res.json({ success: true, data: row });
   } catch (error) {
@@ -941,10 +963,10 @@ app.put('/api/finance/expenses/:id', requireFinanceWrite, async (req, res) => {
   }
 });
 
-app.delete('/api/finance/expenses/:id', requireFinanceWrite, async (req, res) => {
+app.delete('/api/finance/expenses/:id', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
     const id = String(req.params.id || '');
-    await bigquery.query({ query: `DELETE FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\` WHERE \`Nr REF\`=@id`, params: { id }, location: DATASET_LOCATION });
+    await bigquery.query({ query: `DELETE FROM ${financeTableRef('expenses')} WHERE \`Nr REF\`=@id`, params: { id }, location: financeSources.location || DATASET_LOCATION });
     res.json({ success: true, id });
   } catch (error) {
     console.error('Delete Expense Error:', error.message);
@@ -952,11 +974,11 @@ app.delete('/api/finance/expenses/:id', requireFinanceWrite, async (req, res) =>
   }
 });
 
-app.post('/api/finance/income', requireFinanceWrite, async (req, res) => {
+app.post('/api/finance/income', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
     const row = normalizeFinanceTransaction(req.body, `REC-APP-${Date.now()}`, 'income');
     await bigquery.query({
-      query: `INSERT INTO \`${PROJECT_ID}.${DATASET_ID}.income\`
+      query: `INSERT INTO ${financeTableRef('income')}
         (ID_RECETTE,DATE,DESIGNATION,MONTANT_SAISI,DEVISE_SAISIE,MONTANT_CHF,MONTANT_CFA,
          MODE_ENCAISSEMENT,TYPE_BUDGETAIRE,NATURE_RECETTE,MODE_TAUX,PERIODE_REF,
          TAUX_REF_AUTO,TAUX_FX_SAISI,TAUX_FX_APPLIQUE,DEVISE_CIBLE,SENS_TRESORERIE,
@@ -965,7 +987,7 @@ app.post('/api/finance/income', requireFinanceWrite, async (req, res) => {
          @type,'',@categorie,'Historique exact',@date,@taux_fx,NULL,@taux_fx,
          IF(@devise_origine='CHF','CFA','CHF'),'Entree','',@departement,@phase_projet,'',
          @team,@agent,@pays,@commentaire,@annee)`,
-      params: row, location: DATASET_LOCATION
+      params: row, location: financeSources.location || DATASET_LOCATION
     });
     res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -974,11 +996,11 @@ app.post('/api/finance/income', requireFinanceWrite, async (req, res) => {
   }
 });
 
-app.put('/api/finance/income/:id', requireFinanceWrite, async (req, res) => {
+app.put('/api/finance/income/:id', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
     const row = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'income');
     await bigquery.query({
-      query: `UPDATE \`${PROJECT_ID}.${DATASET_ID}.income\`
+      query: `UPDATE ${financeTableRef('income')}
         SET DATE=@date, DESIGNATION=@description, MONTANT_SAISI=@montant_origine,
             DEVISE_SAISIE=@devise_origine, MONTANT_CHF=@montant_chf, MONTANT_CFA=@montant_cfa,
             MODE_ENCAISSEMENT=@type, NATURE_RECETTE=@categorie, MODE_TAUX='Historique exact',
@@ -986,7 +1008,7 @@ app.put('/api/finance/income/:id', requireFinanceWrite, async (req, res) => {
             DEVISE_CIBLE=IF(@devise_origine='CHF','CFA','CHF'), DEPARTEMENT=@departement,
             PHASE=@phase_projet, TEAM=@team, AGENT=@agent, PAYS=@pays,
             COMMENTAIRE=@commentaire, \`Année\`=@annee WHERE ID_RECETTE=@id`,
-      params: row, location: DATASET_LOCATION
+      params: row, location: financeSources.location || DATASET_LOCATION
     });
     res.json({ success: true, data: row });
   } catch (error) {
@@ -995,10 +1017,10 @@ app.put('/api/finance/income/:id', requireFinanceWrite, async (req, res) => {
   }
 });
 
-app.delete('/api/finance/income/:id', requireFinanceWrite, async (req, res) => {
+app.delete('/api/finance/income/:id', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
     const id = String(req.params.id || '');
-    await bigquery.query({ query: `DELETE FROM \`${PROJECT_ID}.${DATASET_ID}.income\` WHERE ID_RECETTE=@id`, params: { id }, location: DATASET_LOCATION });
+    await bigquery.query({ query: `DELETE FROM ${financeTableRef('income')} WHERE ID_RECETTE=@id`, params: { id }, location: financeSources.location || DATASET_LOCATION });
     res.json({ success: true, id });
   } catch (error) {
     console.error('Delete Income Error:', error.message);
@@ -1189,19 +1211,19 @@ app.delete('/api/finance/real-estate/:id', requireFinanceRealEstateWrite, async 
 // API ROUTES - FINANCE DASHBOARD
 // ============================================================================
 
-app.get('/api/finance/dashboard', requireFinanceRead, async (req, res) => {
+app.get('/api/finance/dashboard', requireFinanceRead, requireResolvedFinanceSources, async (req, res) => {
   try {
     const query = `
       SELECT
-        (SELECT COUNT(*) FROM \`${PROJECT_ID}.${DATASET_ID}.income\` WHERE ${nonSocialIncomeWhere}) as total_income_count,
-        (SELECT SUM(MONTANT_CHF) FROM \`${PROJECT_ID}.${DATASET_ID}.income\` WHERE ${nonSocialIncomeWhere}) as total_income,
-        (SELECT SUM(MONTANT_CFA) FROM \`${PROJECT_ID}.${DATASET_ID}.income\` WHERE ${nonSocialIncomeWhere}) as total_income_cfa,
-        (SELECT COUNT(*) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expense_count,
-        (SELECT SUM(CHF) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expenses,
-        (SELECT SUM(CFA) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expenses_cfa
+        (SELECT COUNT(*) FROM ${financeTableRef('income')} WHERE ${nonSocialIncomeWhere}) as total_income_count,
+        (SELECT SUM(MONTANT_CHF) FROM ${financeTableRef('income')} WHERE ${nonSocialIncomeWhere}) as total_income,
+        (SELECT SUM(MONTANT_CFA) FROM ${financeTableRef('income')} WHERE ${nonSocialIncomeWhere}) as total_income_cfa,
+        (SELECT COUNT(*) FROM ${financeTableRef('expenses')}) as total_expense_count,
+        (SELECT SUM(CHF) FROM ${financeTableRef('expenses')}) as total_expenses,
+        (SELECT SUM(CFA) FROM ${financeTableRef('expenses')}) as total_expenses_cfa
     `;
 
-    const options = { query, location: DATASET_LOCATION };
+    const options = financeQueryOptions(query);
     const [rows] = await bigquery.query(options);
 
     res.json({
@@ -1942,6 +1964,27 @@ app.get('/api/info', (req, res) => {
 
 const startServer = async () => {
   try {
+    const resolvedSources = await resolveFinanceSources({
+      bigquery,
+      datasetId: DATASET_ID
+    });
+    financeSources = {
+      ...resolvedSources,
+      resolved: true
+    };
+    console.log(
+      `Finance sources ready: income=${financeSources.income}, expenses=${financeSources.expenses}, location=${financeSources.location || DATASET_LOCATION}`
+    );
+  } catch (error) {
+    financeSources = {
+      ...financeSources,
+      resolved: false,
+      errorCode: error.code || 'FINANCE_SOURCE_RESOLUTION_FAILED'
+    };
+    console.error('Finance source resolution warning:', error.message);
+  }
+
+  try {
     const registrySchema = await ensureAdministrationRegistrySchema({
       bigquery,
       projectId: PROJECT_ID,
@@ -1956,17 +1999,17 @@ const startServer = async () => {
   try {
     await Promise.all([
       bigquery.query({
-        query: `ALTER TABLE \`${PROJECT_ID}.${DATASET_ID}.expenses\` ADD COLUMN IF NOT EXISTS TEAM STRING`,
-        location: DATASET_LOCATION
+        query: `ALTER TABLE ${financeTableRef('expenses')} ADD COLUMN IF NOT EXISTS TEAM STRING`,
+        location: financeSources.location || DATASET_LOCATION
       }),
       bigquery.query({
-        query: `ALTER TABLE \`${PROJECT_ID}.${DATASET_ID}.expenses\` ADD COLUMN IF NOT EXISTS DEPARTEMENT STRING`,
-        location: DATASET_LOCATION
+        query: `ALTER TABLE ${financeTableRef('expenses')} ADD COLUMN IF NOT EXISTS DEPARTEMENT STRING`,
+        location: financeSources.location || DATASET_LOCATION
       }),
       bigquery.query({
-        query: `ALTER TABLE \`${PROJECT_ID}.${DATASET_ID}.income\`
+        query: `ALTER TABLE ${financeTableRef('income')}
           ADD COLUMN IF NOT EXISTS DEPARTEMENT STRING`,
-        location: DATASET_LOCATION
+        location: financeSources.location || DATASET_LOCATION
       })
     ]);
     console.log('Finance schema ready: TEAM and DEPARTEMENT');
