@@ -1195,8 +1195,10 @@ app.get('/api/finance/dashboard', requireFinanceRead, async (req, res) => {
       SELECT
         (SELECT COUNT(*) FROM \`${PROJECT_ID}.${DATASET_ID}.income\` WHERE ${nonSocialIncomeWhere}) as total_income_count,
         (SELECT SUM(MONTANT_CHF) FROM \`${PROJECT_ID}.${DATASET_ID}.income\` WHERE ${nonSocialIncomeWhere}) as total_income,
+        (SELECT SUM(MONTANT_CFA) FROM \`${PROJECT_ID}.${DATASET_ID}.income\` WHERE ${nonSocialIncomeWhere}) as total_income_cfa,
         (SELECT COUNT(*) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expense_count,
-        (SELECT SUM(CHF) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expenses
+        (SELECT SUM(CHF) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expenses,
+        (SELECT SUM(CFA) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expenses_cfa
     `;
 
     const options = { query, location: DATASET_LOCATION };
