@@ -16,7 +16,8 @@
     "test:intelligence": "node scripts/testIntelligenceDashboard.js",
     "test:administration-registries": "node scripts/testAdministrationRegistries.js",
     "test:finance-access": "node scripts/testFinanceAccess.js",
-    "test:finance-scope": "node scripts/testFinanceDataScope.js"
+    "test:finance-scope": "node scripts/testFinanceDataScope.js",
+    "test:finance-sources": "node scripts/testFinanceSources.js"
   },
   "keywords": [
     "erp",
