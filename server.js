@@ -36,6 +36,10 @@ const {
   permissionsForAccount: financePermissionsForAccount,
   createFinanceAuthorizationMiddleware,
 } = require('./financeAccess');
+const {
+  socialIncomePredicate,
+  nonSocialIncomePredicate,
+} = require('./financeDataScope');
 
 // ============================================================================
 // INITIALISATION
@@ -73,6 +77,8 @@ const requireFinanceWrite = financeAuthorization(FINANCE_PERMISSIONS.WRITE);
 const requireFinanceSocialRead = financeAuthorization(FINANCE_PERMISSIONS.SOCIAL_READ);
 const requireFinanceRealEstateRead = financeAuthorization(FINANCE_PERMISSIONS.REAL_ESTATE_READ);
 const requireFinanceRealEstateWrite = financeAuthorization(FINANCE_PERMISSIONS.REAL_ESTATE_WRITE);
+const socialIncomeWhere = socialIncomePredicate('NATURE_RECETTE');
+const nonSocialIncomeWhere = nonSocialIncomePredicate('NATURE_RECETTE');
 
 const parseGoogleCredentials = () => {
   const rawCredentials = process.env.GOOGLE_CREDENTIALS;
@@ -776,6 +782,7 @@ app.get('/api/finance/income', requireFinanceRead, async (req, res) => {
         PAYS as pays,
         COMMENTAIRE as commentaire
       FROM \`${PROJECT_ID}.${DATASET_ID}.income\`
+      WHERE ${nonSocialIncomeWhere}
       ORDER BY DATE DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
@@ -830,7 +837,7 @@ app.get('/api/finance/social', requireFinanceSocialRead, async (req, res) => {
         PAYS as pays,
         COMMENTAIRE as commentaire
       FROM \`${PROJECT_ID}.${DATASET_ID}.income\`
-      WHERE UPPER(TRIM(NATURE_RECETTE)) IN ('AIDE SOCIALE MENAGE', 'AIDE SOCIALE MÉNAGE', 'AIDE SOCIALE')
+      WHERE ${socialIncomeWhere}
       ORDER BY DATE DESC, ID_RECETTE DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
@@ -1186,8 +1193,8 @@ app.get('/api/finance/dashboard', requireFinanceRead, async (req, res) => {
   try {
     const query = `
       SELECT
-        (SELECT COUNT(*) FROM \`${PROJECT_ID}.${DATASET_ID}.income\`) as total_income_count,
-        (SELECT SUM(MONTANT_CHF) FROM \`${PROJECT_ID}.${DATASET_ID}.income\`) as total_income,
+        (SELECT COUNT(*) FROM \`${PROJECT_ID}.${DATASET_ID}.income\` WHERE ${nonSocialIncomeWhere}) as total_income_count,
+        (SELECT SUM(MONTANT_CHF) FROM \`${PROJECT_ID}.${DATASET_ID}.income\` WHERE ${nonSocialIncomeWhere}) as total_income,
         (SELECT COUNT(*) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expense_count,
         (SELECT SUM(CHF) FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\`) as total_expenses
     `;
