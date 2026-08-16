@@ -34,5 +34,9 @@ const dashboardRoute = serverSource.slice(
 assert.ok(incomeRoute.includes('WHERE ${nonSocialIncomeWhere}'), 'Generic income must exclude social rows');
 assert.ok(socialRoute.includes('WHERE ${socialIncomeWhere}'), 'Social route must use the governed social scope');
 assert.ok(dashboardRoute.includes('WHERE ${nonSocialIncomeWhere}'), 'Dashboard income totals must exclude social rows');
+assert.ok(dashboardRoute.includes('SUM(MONTANT_CFA)'), 'Dashboard must expose historical CFA income totals');
+assert.ok(dashboardRoute.includes('as total_income_cfa'), 'Dashboard must name the CFA income aggregate');
+assert.ok(dashboardRoute.includes('SUM(CFA)'), 'Dashboard must expose historical CFA expense totals');
+assert.ok(dashboardRoute.includes('as total_expenses_cfa'), 'Dashboard must name the CFA expense aggregate');
 
 console.log('Finance data scope tests passed.');
