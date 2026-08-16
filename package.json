@@ -14,7 +14,8 @@
     "compare:taxonomy": "node scripts/compareOfferTaxonomy.js",
     "test:rh001": "node scripts/testRh001MembersDirectory.js",
     "test:intelligence": "node scripts/testIntelligenceDashboard.js",
-    "test:administration-registries": "node scripts/testAdministrationRegistries.js"
+    "test:administration-registries": "node scripts/testAdministrationRegistries.js",
+    "test:finance-access": "node scripts/testFinanceAccess.js"
   },
   "keywords": [
     "erp",

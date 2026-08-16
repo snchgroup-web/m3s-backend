@@ -28,8 +28,14 @@ const {
 const {
   createAdministrationRegistryHandlers,
   ensureAdministrationRegistrySchema,
-  permissionsForAccount,
+  permissionsForAccount: administrationPermissionsForAccount,
 } = require('./administrationRegistries');
+const {
+  PERMISSIONS: FINANCE_PERMISSIONS,
+  hasFinancePermissionConfiguration,
+  permissionsForAccount: financePermissionsForAccount,
+  createFinanceAuthorizationMiddleware,
+} = require('./financeAccess');
 
 // ============================================================================
 // INITIALISATION
@@ -57,6 +63,16 @@ const RH001_MEMBERS_DIRECTORY_ALLOWED_ROLES = parseAllowedRoles(
   process.env.RH001_MEMBERS_DIRECTORY_ALLOWED_ROLES
 );
 const INTELLIGENCE_PUBLISH_KEY = process.env.INTELLIGENCE_PUBLISH_KEY || '';
+const financeAuthorization = permission => (
+  API_REQUIRE_AUTH
+    ? createFinanceAuthorizationMiddleware(permission)
+    : (_req, _res, next) => next()
+);
+const requireFinanceRead = financeAuthorization(FINANCE_PERMISSIONS.READ);
+const requireFinanceWrite = financeAuthorization(FINANCE_PERMISSIONS.WRITE);
+const requireFinanceSocialRead = financeAuthorization(FINANCE_PERMISSIONS.SOCIAL_READ);
+const requireFinanceRealEstateRead = financeAuthorization(FINANCE_PERMISSIONS.REAL_ESTATE_READ);
+const requireFinanceRealEstateWrite = financeAuthorization(FINANCE_PERMISSIONS.REAL_ESTATE_WRITE);
 
 const parseGoogleCredentials = () => {
   const rawCredentials = process.env.GOOGLE_CREDENTIALS;
@@ -312,7 +328,12 @@ app.post('/api/auth/login', (req, res) => {
     email: account.email,
     name: account.name || account.email,
     role: account.role || 'Utilisateur',
-    permissions: permissionsForAccount(account)
+    permissions: [...new Set([
+      ...administrationPermissionsForAccount(account),
+      ...financePermissionsForAccount(account)
+    ])],
+    permissionsExplicit: Array.isArray(account.permissions),
+    financePermissionsExplicit: hasFinancePermissionConfiguration(account)
   };
 
   res.json({
@@ -660,7 +681,7 @@ app.get('/api/debug/sample', disableProductionDebugSamples, async (req, res) => 
 // API ROUTES - FINANCE (EXPENSES)
 // ============================================================================
 
-app.get('/api/finance/expenses', async (req, res) => {
+app.get('/api/finance/expenses', requireFinanceRead, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
     const offset = parseInt(req.query.offset) || 0;
@@ -723,7 +744,7 @@ app.get('/api/finance/expenses', async (req, res) => {
 // API ROUTES - FINANCE (INCOME)
 // ============================================================================
 
-app.get('/api/finance/income', async (req, res) => {
+app.get('/api/finance/income', requireFinanceRead, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
     const offset = parseInt(req.query.offset) || 0;
@@ -783,7 +804,7 @@ app.get('/api/finance/income', async (req, res) => {
 // API ROUTES - FINANCE (FLUX SOCIAUX RECLASSES)
 // ============================================================================
 
-app.get('/api/finance/social', async (req, res) => {
+app.get('/api/finance/social', requireFinanceSocialRead, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
     const offset = parseInt(req.query.offset, 10) || 0;
@@ -877,7 +898,7 @@ const normalizeFinanceTransaction = (body, id, kind) => {
   };
 };
 
-app.post('/api/finance/expenses', async (req, res) => {
+app.post('/api/finance/expenses', requireFinanceWrite, async (req, res) => {
   try {
     const row = normalizeFinanceTransaction(req.body, `DEP-APP-${Date.now()}`, 'expense');
     await bigquery.query({
@@ -895,7 +916,7 @@ app.post('/api/finance/expenses', async (req, res) => {
   }
 });
 
-app.put('/api/finance/expenses/:id', async (req, res) => {
+app.put('/api/finance/expenses/:id', requireFinanceWrite, async (req, res) => {
   try {
     const row = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'expense');
     await bigquery.query({
@@ -913,7 +934,7 @@ app.put('/api/finance/expenses/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/finance/expenses/:id', async (req, res) => {
+app.delete('/api/finance/expenses/:id', requireFinanceWrite, async (req, res) => {
   try {
     const id = String(req.params.id || '');
     await bigquery.query({ query: `DELETE FROM \`${PROJECT_ID}.${DATASET_ID}.expenses\` WHERE \`Nr REF\`=@id`, params: { id }, location: DATASET_LOCATION });
@@ -924,7 +945,7 @@ app.delete('/api/finance/expenses/:id', async (req, res) => {
   }
 });
 
-app.post('/api/finance/income', async (req, res) => {
+app.post('/api/finance/income', requireFinanceWrite, async (req, res) => {
   try {
     const row = normalizeFinanceTransaction(req.body, `REC-APP-${Date.now()}`, 'income');
     await bigquery.query({
@@ -946,7 +967,7 @@ app.post('/api/finance/income', async (req, res) => {
   }
 });
 
-app.put('/api/finance/income/:id', async (req, res) => {
+app.put('/api/finance/income/:id', requireFinanceWrite, async (req, res) => {
   try {
     const row = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'income');
     await bigquery.query({
@@ -967,7 +988,7 @@ app.put('/api/finance/income/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/finance/income/:id', async (req, res) => {
+app.delete('/api/finance/income/:id', requireFinanceWrite, async (req, res) => {
   try {
     const id = String(req.params.id || '');
     await bigquery.query({ query: `DELETE FROM \`${PROJECT_ID}.${DATASET_ID}.income\` WHERE ID_RECETTE=@id`, params: { id }, location: DATASET_LOCATION });
@@ -982,7 +1003,7 @@ app.delete('/api/finance/income/:id', async (req, res) => {
 // API ROUTES - FINANCE IMMOBILIERE
 // ============================================================================
 
-app.get('/api/finance/real-estate', async (req, res) => {
+app.get('/api/finance/real-estate', requireFinanceRealEstateRead, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
     const offset = parseInt(req.query.offset, 10) || 0;
@@ -1076,7 +1097,7 @@ const normalizeRealEstatePayload = (body, sourceId) => {
   };
 };
 
-app.post('/api/finance/real-estate', async (req, res) => {
+app.post('/api/finance/real-estate', requireFinanceRealEstateWrite, async (req, res) => {
   try {
     const sourceId = `IMM-APP-${Date.now()}`;
     const row = normalizeRealEstatePayload(req.body, sourceId);
@@ -1103,7 +1124,7 @@ app.post('/api/finance/real-estate', async (req, res) => {
   }
 });
 
-app.put('/api/finance/real-estate/:id', async (req, res) => {
+app.put('/api/finance/real-estate/:id', requireFinanceRealEstateWrite, async (req, res) => {
   try {
     const sourceId = String(req.params.id || '');
     const row = normalizeRealEstatePayload(req.body, sourceId);
@@ -1142,7 +1163,7 @@ app.put('/api/finance/real-estate/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/finance/real-estate/:id', async (req, res) => {
+app.delete('/api/finance/real-estate/:id', requireFinanceRealEstateWrite, async (req, res) => {
   try {
     const sourceId = String(req.params.id || '');
     await bigquery.query({
@@ -1161,7 +1182,7 @@ app.delete('/api/finance/real-estate/:id', async (req, res) => {
 // API ROUTES - FINANCE DASHBOARD
 // ============================================================================
 
-app.get('/api/finance/dashboard', async (req, res) => {
+app.get('/api/finance/dashboard', requireFinanceRead, async (req, res) => {
   try {
     const query = `
       SELECT
