@@ -31,6 +31,10 @@ const {
   permissionsForAccount: administrationPermissionsForAccount,
 } = require('./administrationRegistries');
 const {
+  createManagementPortfolioHandlers,
+  ensureManagementPortfolio,
+} = require('./managementPortfolio');
+const {
   PERMISSIONS: FINANCE_PERMISSIONS,
   hasFinancePermissionConfiguration,
   permissionsForAccount: financePermissionsForAccount,
@@ -142,6 +146,12 @@ const intelligenceDashboardRepository = createIntelligenceDashboardRepository({
   location: DATASET_LOCATION
 });
 const administrationRegistryHandlers = createAdministrationRegistryHandlers({
+  bigquery,
+  projectId: PROJECT_ID,
+  datasetId: DATASET_ID,
+  location: DATASET_LOCATION
+});
+const managementPortfolioHandlers = createManagementPortfolioHandlers({
   bigquery,
   projectId: PROJECT_ID,
   datasetId: DATASET_ID,
@@ -391,6 +401,7 @@ app.post('/api/administration/correspondence', authenticateRequest, administrati
 app.put('/api/administration/correspondence/:id', authenticateRequest, administrationRegistryHandlers.updateCorrespondence);
 app.delete('/api/administration/correspondence/:id', authenticateRequest, administrationRegistryHandlers.deleteCorrespondence);
 app.get('/api/administration/audit', authenticateRequest, administrationRegistryHandlers.listAuditEvents);
+app.get('/api/management/portfolio/summary', authenticateRequest, managementPortfolioHandlers.getSummary);
 
 // ============================================================================
 // 2SG INTELLIGENCE DASHBOARD
@@ -2012,6 +2023,21 @@ const startServer = async () => {
     console.log(`Administration registry schema ready: ${registrySchema.tables.join(', ')}`);
   } catch (error) {
     console.error('Administration registry schema migration warning:', error.message);
+  }
+
+  try {
+    const portfolioSchema = await ensureManagementPortfolio({
+      bigquery,
+      projectId: PROJECT_ID,
+      datasetId: DATASET_ID,
+      location: DATASET_LOCATION,
+      tenantId: process.env.M3S_DEFAULT_TENANT_ID || '2sg'
+    });
+    console.log(
+      `Management portfolio ready: ${portfolioSchema.dossiersImported} dossiers, ${portfolioSchema.assignmentsImported} assignments`
+    );
+  } catch (error) {
+    console.error('Management portfolio migration warning:', error.message);
   }
 
   try {
