@@ -304,6 +304,13 @@ const getConfiguredUsers = () => {
   }
 };
 
+const countConfiguredAccounts = () => getConfiguredUsers().filter((account) => (
+  account
+  && typeof account.email === 'string'
+  && account.email.trim()
+  && account.active !== false
+)).length;
+
 const verifyPassword = (account, password) => {
   if (account.passwordHash && account.passwordSalt) {
     const iterations = Number(account.passwordIterations) || 120000;
@@ -1677,6 +1684,16 @@ app.get('/api/tasks/count', async (req, res) => {
 // API ROUTES - USERS (RH)
 // ============================================================================
 
+app.get('/api/auth/accounts/count', (req, res) => {
+  const total = countConfiguredAccounts();
+
+  res.json({
+    success: true,
+    total,
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get('/api/users', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
@@ -1905,7 +1922,8 @@ app.get('/api/info', (req, res) => {
     version: '2.0',
     endpoints: {
       auth: [
-        'POST /api/auth/login'
+        'POST /api/auth/login',
+        'GET /api/auth/accounts/count'
       ],
       finance: [
         'GET /api/finance/expenses?limit=100&offset=0',
