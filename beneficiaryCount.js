@@ -8,12 +8,20 @@ const validateTableReference = (value) => {
   return reference;
 };
 
+const buildBeneficiarySourceExpression = (column = 'CLIENT_BENEFICIAIRE') => {
+  const sourceColumn = String(column || '').trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(sourceColumn)) {
+    throw new Error('Invalid beneficiary source column');
+  }
+  return `NULLIF(TRIM(CAST(${sourceColumn} AS STRING)), '')`;
+};
+
 const buildBeneficiaryCountQuery = ({ financeIncomeTable }) => {
   const income = validateTableReference(financeIncomeTable);
 
   return `
     WITH beneficiary_units AS (
-      SELECT NULLIF(TRIM(CAST(CLIENT_BENEFICIAIRE AS STRING)), '') AS beneficiary
+      SELECT ${buildBeneficiarySourceExpression()} AS beneficiary
       FROM ${income}
       WHERE ${socialIncomePredicate('NATURE_RECETTE')}
     )
@@ -35,6 +43,7 @@ const normalizeBeneficiaryCount = value => {
 };
 
 module.exports = {
+  buildBeneficiarySourceExpression,
   buildBeneficiaryCountQuery,
   normalizeBeneficiaryCount
 };
