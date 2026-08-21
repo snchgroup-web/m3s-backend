@@ -45,6 +45,10 @@ const {
   nonSocialIncomePredicate,
 } = require('./financeDataScope');
 const { resolveFinanceSources } = require('./financeSources');
+const {
+  buildSupplierCountQuery,
+  normalizeSupplierCount
+} = require('./supplierCount');
 
 // ============================================================================
 // INITIALISATION
@@ -782,6 +786,33 @@ app.get('/api/finance/expenses', requireFinanceRead, requireResolvedFinanceSourc
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+app.get('/api/suppliers/count', requireFinanceRead, requireResolvedFinanceSources, async (req, res) => {
+  try {
+    const stockAssetsTable = `\`${PROJECT_ID}.${DATASET_ID}.stocks_actifs_propres\``;
+    const query = buildSupplierCountQuery({
+      financeExpensesTable: financeTableRef('expenses'),
+      stockAssetsTable
+    });
+    const [rows] = await bigquery.query(financeQueryOptions(query));
+    const total = normalizeSupplierCount(rows[0]?.total);
+
+    res.json({
+      success: true,
+      total,
+      source_scope: ['finance_expenses', 'stocks_actifs_propres'],
+      normalization: 'TRIM + UPPER',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Supplier count error:', error.message);
+    res.status(500).json({
+      success: false,
+      code: 'SUPPLIER_COUNT_UNAVAILABLE',
+      error: 'Compteur global des fournisseurs temporairement indisponible'
     });
   }
 });
@@ -1940,7 +1971,8 @@ app.get('/api/info', (req, res) => {
         'GET /api/finance/expenses?limit=100&offset=0',
         'GET /api/finance/income?limit=100&offset=0',
         'GET /api/finance/social?limit=100&offset=0',
-        'GET /api/finance/dashboard'
+        'GET /api/finance/dashboard',
+        'GET /api/suppliers/count'
       ],
       documents: [
         'GET /api/documents?limit=100&offset=0',
