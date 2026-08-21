@@ -50,6 +50,7 @@ const {
   normalizeSupplierCount
 } = require('./supplierCount');
 const {
+  buildBeneficiarySourceExpression,
   buildBeneficiaryCountQuery,
   normalizeBeneficiaryCount
 } = require('./beneficiaryCount');
@@ -928,10 +929,7 @@ app.get('/api/finance/social', requireFinanceSocialRead, requireResolvedFinanceS
         MONTANT_CFA as montant_cfa,
         TAUX_FX_APPLIQUE as taux_fx,
         'Aide sociale' as nature_sociale,
-        CASE
-          WHEN REGEXP_CONTAINS(UPPER(DESIGNATION), r'FAMILLE|MENAGE') THEN 'Famille SN'
-          ELSE NULL
-        END as beneficiaire,
+        ${buildBeneficiarySourceExpression()} as beneficiaire,
         AGENT as agent,
         TEAM as team,
         COALESCE(NULLIF(DEPARTEMENT, ''), 'Finances') as departement,
