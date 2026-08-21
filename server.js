@@ -2033,7 +2033,8 @@ app.get('/api/info', (req, res) => {
         'GET /api/finance/social?limit=100&offset=0',
         'GET /api/finance/dashboard',
         'GET /api/suppliers/count',
-        'GET /api/beneficiaries/count'
+        'GET /api/beneficiaries/count',
+        'GET /api/donors/count'
       ],
       documents: [
         'GET /api/documents?limit=100&offset=0',
