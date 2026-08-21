@@ -49,6 +49,10 @@ const {
   buildSupplierCountQuery,
   normalizeSupplierCount
 } = require('./supplierCount');
+const {
+  buildBeneficiaryCountQuery,
+  normalizeBeneficiaryCount
+} = require('./beneficiaryCount');
 
 // ============================================================================
 // INITIALISATION
@@ -813,6 +817,33 @@ app.get('/api/suppliers/count', requireFinanceRead, requireResolvedFinanceSource
       success: false,
       code: 'SUPPLIER_COUNT_UNAVAILABLE',
       error: 'Compteur global des fournisseurs temporairement indisponible'
+    });
+  }
+});
+
+app.get('/api/beneficiaries/count', requireFinanceSocialRead, requireResolvedFinanceSources, async (req, res) => {
+  try {
+    const query = buildBeneficiaryCountQuery({
+      financeIncomeTable: financeTableRef('income')
+    });
+    const [rows] = await bigquery.query(financeQueryOptions(query));
+    const total = normalizeBeneficiaryCount(rows[0]?.total);
+
+    res.json({
+      success: true,
+      total,
+      source_scope: ['finance_social_income'],
+      counted_field: 'CLIENT_BENEFICIAIRE',
+      normalization: 'TRIM + UPPER',
+      counting_unit: 'distinct_beneficiary_unit',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Beneficiary count error:', error.message);
+    res.status(500).json({
+      success: false,
+      code: 'BENEFICIARY_COUNT_UNAVAILABLE',
+      error: 'Compteur global des bénéficiaires temporairement indisponible'
     });
   }
 });
@@ -1972,7 +2003,8 @@ app.get('/api/info', (req, res) => {
         'GET /api/finance/income?limit=100&offset=0',
         'GET /api/finance/social?limit=100&offset=0',
         'GET /api/finance/dashboard',
-        'GET /api/suppliers/count'
+        'GET /api/suppliers/count',
+        'GET /api/beneficiaries/count'
       ],
       documents: [
         'GET /api/documents?limit=100&offset=0',
