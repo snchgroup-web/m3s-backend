@@ -21,6 +21,7 @@
     "test:finance-sources": "node scripts/testFinanceSources.js",
     "test:suppliers-count": "node scripts/testSupplierCount.js",
     "test:beneficiaries-count": "node scripts/testBeneficiaryCount.js",
+    "test:donors-count": "node scripts/testDonorCount.js",
     "finance:import:sources": "node scripts/importFinanceSources.js"
   },
   "keywords": [
