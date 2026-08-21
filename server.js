@@ -54,6 +54,10 @@ const {
   buildBeneficiaryCountQuery,
   normalizeBeneficiaryCount
 } = require('./beneficiaryCount');
+const {
+  buildDonorCountQuery,
+  normalizeDonorCount
+} = require('./donorCount');
 
 // ============================================================================
 // INITIALISATION
@@ -845,6 +849,33 @@ app.get('/api/beneficiaries/count', requireFinanceSocialRead, requireResolvedFin
       success: false,
       code: 'BENEFICIARY_COUNT_UNAVAILABLE',
       error: 'Compteur global des bénéficiaires temporairement indisponible'
+    });
+  }
+});
+
+app.get('/api/donors/count', async (req, res) => {
+  try {
+    const stockAssetsTable = `\`${PROJECT_ID}.${DATASET_ID}.stocks_actifs_propres\``;
+    const query = buildDonorCountQuery({ stockAssetsTable });
+    const [rows] = await bigquery.query({ query, location: DATASET_LOCATION });
+    const total = normalizeDonorCount(rows[0]?.total);
+
+    res.json({
+      success: true,
+      total,
+      source_scope: ['stocks_actifs_propres_donation_candidates'],
+      counted_field: 'fournisseur',
+      normalization: 'TRIM + UPPER',
+      counting_unit: 'distinct_identified_donor',
+      limitation: 'candidate_register_without_master_donor_identity',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Donor count error:', error.message);
+    res.status(500).json({
+      success: false,
+      code: 'DONOR_COUNT_UNAVAILABLE',
+      error: 'Compteur des donateurs identifiés temporairement indisponible'
     });
   }
 });
