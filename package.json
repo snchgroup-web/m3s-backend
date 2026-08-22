@@ -19,6 +19,7 @@
     "test:finance-access": "node scripts/testFinanceAccess.js",
     "test:finance-scope": "node scripts/testFinanceDataScope.js",
     "test:finance-sources": "node scripts/testFinanceSources.js",
+    "test:finance-transaction": "node scripts/testFinanceTransaction.js",
     "test:suppliers-count": "node scripts/testSupplierCount.js",
     "test:beneficiaries-count": "node scripts/testBeneficiaryCount.js",
     "test:donors-count": "node scripts/testDonorCount.js",
