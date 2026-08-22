@@ -20,6 +20,7 @@ const {
   createMembersDirectoryHandler,
   isFeatureEnabled,
   parseAllowedRoles,
+  readDirectoryDocument,
 } = require('./rh001Directory');
 const {
   createIntelligenceDashboardRepository,
@@ -62,6 +63,7 @@ const {
   numberOrZero,
   normalizeFinanceTransaction,
 } = require('./financeTransaction');
+const { reconcileTeamAgentAssignment } = require('./teamAgentContract');
 
 // ============================================================================
 // INITIALISATION
@@ -1011,9 +1013,37 @@ app.get('/api/finance/social', requireFinanceSocialRead, requireResolvedFinanceS
   }
 });
 
+const loadTeamAgentMembers = async () => {
+  const directory = await readDirectoryDocument(RH001_DIRECTORY_PATH);
+  return directory.records.filter((member) => member.active !== false);
+};
+
+const applyTeamAgentContract = async (row) => {
+  if (!row.team && !row.agent) return { row, warnings: [] };
+
+  let members = [];
+  let directoryAvailable = true;
+  try {
+    members = await loadTeamAgentMembers();
+  } catch (error) {
+    directoryAvailable = false;
+    console.warn('Team-Agent contract: RH-001 unavailable:', error.message);
+  }
+
+  const result = reconcileTeamAgentAssignment(row, members, { directoryAvailable });
+  if (result.errors.length) {
+    throw new Error(result.errors.map((error) => error.message).join(' '));
+  }
+
+  return {
+    row: { ...row, team: result.team, agent: result.agent },
+    warnings: result.warnings
+  };
+};
 app.post('/api/finance/expenses', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
-    const row = normalizeFinanceTransaction(req.body, `DEP-APP-${Date.now()}`, 'expense');
+    const normalizedRow = normalizeFinanceTransaction(req.body, `DEP-APP-${Date.now()}`, 'expense');
+    const { row, warnings } = await applyTeamAgentContract(normalizedRow);
     await bigquery.query({
       query: `INSERT INTO ${financeTableRef('expenses')}
         (\`Nr REF\`, DATE, DESIGNATION, CHF, CFA, PAIEMENT, \`POSTE  \`, \`OPERATION \`,
@@ -1022,7 +1052,7 @@ app.post('/api/finance/expenses', requireFinanceWrite, requireResolvedFinanceSou
                 '',@departement,@team,@phase_projet,@agent,@fournisseur,@pays,@commentaire)`,
       params: row, location: financeSources.location || DATASET_LOCATION
     });
-    res.status(201).json({ success: true, data: row });
+    res.status(201).json({ success: true, data: row, warnings });
   } catch (error) {
     console.error('Create Expense Error:', error.message);
     res.status(400).json({ success: false, error: error.message });
@@ -1031,7 +1061,8 @@ app.post('/api/finance/expenses', requireFinanceWrite, requireResolvedFinanceSou
 
 app.put('/api/finance/expenses/:id', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
-    const row = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'expense');
+    const normalizedRow = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'expense');
+    const { row, warnings } = await applyTeamAgentContract(normalizedRow);
     await bigquery.query({
       query: `UPDATE ${financeTableRef('expenses')}
         SET DATE=@date, DESIGNATION=@description, CHF=@montant_chf, CFA=@montant_cfa,
@@ -1040,7 +1071,7 @@ app.put('/api/finance/expenses/:id', requireFinanceWrite, requireResolvedFinance
             PAYS=@pays, COMMENTAIRES=@commentaire WHERE \`Nr REF\`=@id`,
       params: row, location: financeSources.location || DATASET_LOCATION
     });
-    res.json({ success: true, data: row });
+    res.json({ success: true, data: row, warnings });
   } catch (error) {
     console.error('Update Expense Error:', error.message);
     res.status(400).json({ success: false, error: error.message });
@@ -1060,7 +1091,8 @@ app.delete('/api/finance/expenses/:id', requireFinanceWrite, requireResolvedFina
 
 app.post('/api/finance/income', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
-    const row = normalizeFinanceTransaction(req.body, `REC-APP-${Date.now()}`, 'income');
+    const normalizedRow = normalizeFinanceTransaction(req.body, `REC-APP-${Date.now()}`, 'income');
+    const { row, warnings } = await applyTeamAgentContract(normalizedRow);
     await bigquery.query({
       query: `INSERT INTO ${financeTableRef('income')}
         (ID_RECETTE,DATE,DESIGNATION,MONTANT_SAISI,DEVISE_SAISIE,MONTANT_CHF,MONTANT_CFA,
@@ -1076,7 +1108,7 @@ app.post('/api/finance/income', requireFinanceWrite, requireResolvedFinanceSourc
          @team,@agent,@pays,@commentaire,@annee)`,
       params: row, location: financeSources.location || DATASET_LOCATION
     });
-    res.status(201).json({ success: true, data: row });
+    res.status(201).json({ success: true, data: row, warnings });
   } catch (error) {
     console.error('Create Income Error:', error.message);
     res.status(400).json({ success: false, error: error.message });
@@ -1085,7 +1117,8 @@ app.post('/api/finance/income', requireFinanceWrite, requireResolvedFinanceSourc
 
 app.put('/api/finance/income/:id', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
-    const row = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'income');
+    const normalizedRow = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'income');
+    const { row, warnings } = await applyTeamAgentContract(normalizedRow);
     await bigquery.query({
       query: `UPDATE ${financeTableRef('income')}
         SET DATE=@date, DESIGNATION=@description, MONTANT_SAISI=@montant_origine,
@@ -1100,7 +1133,7 @@ app.put('/api/finance/income/:id', requireFinanceWrite, requireResolvedFinanceSo
             COMMENTAIRE=@commentaire, \`Année\`=@annee WHERE ID_RECETTE=@id`,
       params: row, location: financeSources.location || DATASET_LOCATION
     });
-    res.json({ success: true, data: row });
+    res.json({ success: true, data: row, warnings });
   } catch (error) {
     console.error('Update Income Error:', error.message);
     res.status(400).json({ success: false, error: error.message });
@@ -1219,7 +1252,8 @@ const normalizeRealEstatePayload = (body, sourceId) => {
 app.post('/api/finance/real-estate', requireFinanceRealEstateWrite, async (req, res) => {
   try {
     const sourceId = `IMM-APP-${Date.now()}`;
-    const row = normalizeRealEstatePayload(req.body, sourceId);
+    const normalizedRow = normalizeRealEstatePayload(req.body, sourceId);
+    const { row, warnings } = await applyTeamAgentContract(normalizedRow);
     const params = { ...row };
     delete params.source_row;
     const query = `
@@ -1236,7 +1270,7 @@ app.post('/api/finance/real-estate', requireFinanceRealEstateWrite, async (req, 
       )
     `;
     await bigquery.query({ query, params, location: DATASET_LOCATION });
-    res.status(201).json({ success: true, data: row });
+    res.status(201).json({ success: true, data: row, warnings });
   } catch (error) {
     console.error('Create Real Estate Finance Error:', error.message);
     res.status(400).json({ success: false, error: error.message });
@@ -1246,7 +1280,8 @@ app.post('/api/finance/real-estate', requireFinanceRealEstateWrite, async (req, 
 app.put('/api/finance/real-estate/:id', requireFinanceRealEstateWrite, async (req, res) => {
   try {
     const sourceId = String(req.params.id || '');
-    const row = normalizeRealEstatePayload(req.body, sourceId);
+    const normalizedRow = normalizeRealEstatePayload(req.body, sourceId);
+    const { row, warnings } = await applyTeamAgentContract(normalizedRow);
     const params = { ...row };
     delete params.source_row;
     const query = `
@@ -1275,7 +1310,7 @@ app.put('/api/finance/real-estate/:id', requireFinanceRealEstateWrite, async (re
       WHERE source_id = @source_id
     `;
     await bigquery.query({ query, params, location: DATASET_LOCATION });
-    res.json({ success: true, data: row });
+    res.json({ success: true, data: row, warnings });
   } catch (error) {
     console.error('Update Real Estate Finance Error:', error.message);
     res.status(400).json({ success: false, error: error.message });
