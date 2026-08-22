@@ -58,6 +58,10 @@ const {
   buildDonorCountQuery,
   normalizeDonorCount
 } = require('./donorCount');
+const {
+  numberOrZero,
+  normalizeFinanceTransaction,
+} = require('./financeTransaction');
 
 // ============================================================================
 // INITIALISATION
@@ -900,6 +904,8 @@ app.get('/api/finance/income', requireFinanceRead, requireResolvedFinanceSources
         MONTANT_CHF as montant_chf,
         MONTANT_CFA as montant_cfa,
         TAUX_FX_APPLIQUE as taux_fx,
+        TAUX_FX_APPLIQUE as taux_fx_applique,
+        TAUX_REF_AUTO as taux_fx_reference,
         MODE_ENCAISSEMENT as type,
         NATURE_RECETTE as category,
         DATE as date_created,
@@ -959,6 +965,8 @@ app.get('/api/finance/social', requireFinanceSocialRead, requireResolvedFinanceS
         MONTANT_CHF as montant_chf,
         MONTANT_CFA as montant_cfa,
         TAUX_FX_APPLIQUE as taux_fx,
+        TAUX_FX_APPLIQUE as taux_fx_applique,
+        TAUX_REF_AUTO as taux_fx_reference,
         'Aide sociale' as nature_sociale,
         ${buildBeneficiarySourceExpression()} as beneficiaire,
         AGENT as agent,
@@ -1002,39 +1010,6 @@ app.get('/api/finance/social', requireFinanceSocialRead, requireResolvedFinanceS
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
-const numberOrZero = (value) => {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const normalizeFinanceTransaction = (body, id, kind) => {
-  const date = String(body.date || body.date_created || '').slice(0, 10);
-  const description = String(body.description || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !description) {
-    throw new Error('La date et la designation sont obligatoires.');
-  }
-  const deviseOrigine = String(body.devise_origine || body.devise || 'CHF').toUpperCase();
-  if (!['CHF', 'CFA'].includes(deviseOrigine)) throw new Error('La devise doit etre CHF ou CFA.');
-
-  const montantOrigine = numberOrZero(body.montant_origine ?? body.montant);
-  const montantChf = numberOrZero(body.montant_chf);
-  const montantCfa = numberOrZero(body.montant_cfa);
-  const tauxFx = numberOrZero(body.taux_fx);
-  if (montantOrigine <= 0 || montantChf <= 0 || montantCfa <= 0 || tauxFx <= 0) {
-    throw new Error('Les montants CHF/CFA et le taux historique exact sont obligatoires.');
-  }
-  return {
-    id, date, description, montant_origine: montantOrigine, devise_origine: deviseOrigine,
-    montant_chf: montantChf, montant_cfa: montantCfa, taux_fx: tauxFx,
-    categorie: String(body.categorie || (kind === 'income' ? 'Recettes' : 'Depenses')),
-    type: String(body.type || (kind === 'income' ? 'Virement' : 'Paiement')),
-    departement: String(body.departement || ''), team: String(body.team || ''),
-    phase_projet: String(body.phase_projet || ''), agent: String(body.agent || ''),
-    pays: String(body.pays || ''), commentaire: String(body.commentaire || ''),
-    fournisseur: String(body.fournisseur || ''), annee: Number(date.slice(0, 4))
-  };
-};
 
 app.post('/api/finance/expenses', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
@@ -1093,7 +1068,10 @@ app.post('/api/finance/income', requireFinanceWrite, requireResolvedFinanceSourc
          TAUX_REF_AUTO,TAUX_FX_SAISI,TAUX_FX_APPLIQUE,DEVISE_CIBLE,SENS_TRESORERIE,
          BU,DEPARTEMENT,PHASE,SOUS_PHASE,TEAM,AGENT,PAYS,COMMENTAIRE,\`Année\`)
         VALUES (@id,@date,@description,@montant_origine,@devise_origine,@montant_chf,@montant_cfa,
-         @type,'',@categorie,'Historique exact',@date,@taux_fx,NULL,@taux_fx,
+         @type,'',@categorie,
+         IF(@taux_fx_reference > 0,'Reference et applique distincts','Applique communique'),
+         IF(@taux_fx_reference > 0,DATE(@date),NULL),NULLIF(@taux_fx_reference,0),
+         @taux_fx_applique,@taux_fx_applique,
          IF(@devise_origine='CHF','CFA','CHF'),'Entree','',@departement,@phase_projet,'',
          @team,@agent,@pays,@commentaire,@annee)`,
       params: row, location: financeSources.location || DATASET_LOCATION
@@ -1112,8 +1090,11 @@ app.put('/api/finance/income/:id', requireFinanceWrite, requireResolvedFinanceSo
       query: `UPDATE ${financeTableRef('income')}
         SET DATE=@date, DESIGNATION=@description, MONTANT_SAISI=@montant_origine,
             DEVISE_SAISIE=@devise_origine, MONTANT_CHF=@montant_chf, MONTANT_CFA=@montant_cfa,
-            MODE_ENCAISSEMENT=@type, NATURE_RECETTE=@categorie, MODE_TAUX='Historique exact',
-            PERIODE_REF=@date, TAUX_REF_AUTO=@taux_fx, TAUX_FX_APPLIQUE=@taux_fx,
+            MODE_ENCAISSEMENT=@type, NATURE_RECETTE=@categorie,
+            MODE_TAUX=IF(@taux_fx_reference > 0,'Reference et applique distincts','Applique communique'),
+            PERIODE_REF=IF(@taux_fx_reference > 0,DATE(@date),NULL),
+            TAUX_REF_AUTO=NULLIF(@taux_fx_reference,0), TAUX_FX_SAISI=@taux_fx_applique,
+            TAUX_FX_APPLIQUE=@taux_fx_applique,
             DEVISE_CIBLE=IF(@devise_origine='CHF','CFA','CHF'), DEPARTEMENT=@departement,
             PHASE=@phase_projet, TEAM=@team, AGENT=@agent, PAYS=@pays,
             COMMENTAIRE=@commentaire, \`Année\`=@annee WHERE ID_RECETTE=@id`,
