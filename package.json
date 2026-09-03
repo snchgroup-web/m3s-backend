@@ -19,6 +19,8 @@
     "test:administration-registries": "node scripts/testAdministrationRegistries.js",
     "test:management-portfolio": "node scripts/testManagementPortfolio.js",
     "test:finance-access": "node scripts/testFinanceAccess.js",
+    "test:budget-drafts": "node --test tests/financeBudgetDrafts.test.js",
+    "budget:schema:print": "node scripts/printBudgetSchema.js",
     "test:finance-scope": "node scripts/testFinanceDataScope.js",
     "test:finance-sources": "node scripts/testFinanceSources.js",
     "test:finance-transaction": "node scripts/testFinanceTransaction.js",

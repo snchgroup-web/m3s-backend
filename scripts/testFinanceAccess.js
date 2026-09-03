@@ -83,10 +83,15 @@ const run = () => {
 
   const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   const financeRoutes = [...serverSource.matchAll(
-    /app\.(get|post|put|delete)\('([^']*\/api\/finance\/[^']*)',\s*([A-Za-z0-9_]+)/g
+    /app\.(get|post|put|delete)\('([^']*\/api\/finance\/[^']*)',\s*([A-Za-z0-9_.]+)/g
   )].map(match => ({ method: match[1], route: match[2], guard: match[3] }));
-  assert.equal(financeRoutes.length, 14);
+  assert.equal(financeRoutes.length, 19);
   const expectedGuards = new Map([
+    ['get /api/finance/budget-drafts/capabilities', 'budgetDraftHandlers.capabilities'],
+    ['get /api/finance/budget-drafts', 'budgetDraftHandlers.list'],
+    ['get /api/finance/budget-drafts/:id', 'budgetDraftHandlers.get'],
+    ['post /api/finance/budget-drafts', 'budgetDraftHandlers.create'],
+    ['put /api/finance/budget-drafts/:id', 'budgetDraftHandlers.update'],
     ['get /api/finance/expenses', 'requireFinanceRead'],
     ['get /api/finance/income', 'requireFinanceRead'],
     ['get /api/finance/social', 'requireFinanceSocialRead'],
@@ -104,6 +109,11 @@ const run = () => {
   ]);
   financeRoutes.forEach(({ method, route, guard }) => {
     assert.equal(guard, expectedGuards.get(`${method} ${route}`), `Unexpected guard for ${method.toUpperCase()} ${route}`);
+  });
+  const budgetGuard = serverSource.indexOf("app.use('/api/finance/budget-drafts', authenticateRequest, requireCurrentBudgetAccount)");
+  assert(budgetGuard >= 0, 'Budget must not inherit the optional legacy Finance authentication');
+  financeRoutes.filter(({ route }) => route.includes('/budget-drafts')).forEach(({ method, route }) => {
+    assert(serverSource.indexOf(`app.${method}('${route}'`) > budgetGuard, 'Budget authentication must precede its routes');
   });
 
   console.log('Finance access tests passed');
