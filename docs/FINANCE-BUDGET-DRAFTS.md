@@ -56,3 +56,21 @@ Retour arriere non destructif: retirer le flag, conserver les tables et le journ
 
 `node --test tests/financeBudgetDrafts.test.js` couvre la validation, les gardes, les requetes parametrees, les issues de concurrence et l'integration HTTP Express avec un double BigQuery en memoire.
 Ces tests ne prouvent ni l'execution du SQL sur BigQuery reel, ni les IAM, sauvegardes ou performances de production. Aucune collecte de donnees financieres reelles pour ce lot.
+
+## Recette HTTP/JWT de preview
+
+La recette cloud valide le SQL et l'isolation avec des identites applicatives injectees. La recette HTTP distincte valide le chemin deploye complet : login, JWT, relecture du compte courant, permissions Finance, cloisonnement par auteur et tenant, ecriture et conflit de version.
+
+Elle refuse les domaines de production connus, exige HTTPS hors localhost, une attestation `--non-production` et la confirmation exacte de l'URL. Les trois comptes doivent etre des comptes de test pre-provisionnes : un auteur, un autre auteur du meme tenant et un auteur d'un autre tenant. Les identifiants restent uniquement dans l'environnement et ne sont jamais affiches.
+
+```powershell
+$env:BUDGET_HTTP_OWNER_EMAIL='...'
+$env:BUDGET_HTTP_OWNER_PASSWORD='...'
+$env:BUDGET_HTTP_OTHER_OWNER_EMAIL='...'
+$env:BUDGET_HTTP_OTHER_OWNER_PASSWORD='...'
+$env:BUDGET_HTTP_OTHER_TENANT_EMAIL='...'
+$env:BUDGET_HTTP_OTHER_TENANT_PASSWORD='...'
+npm run budget:http:check -- --execute --non-production --url https://PREVIEW-BACKEND/api --confirm https://PREVIEW-BACKEND/api
+```
+
+Le scénario ne supprime rien : le brouillon synthétique créé reste dans le dataset de test pour l'audit et expire selon la politique de ce dataset. Il ne remplace pas la revue IAM du compte de service.
