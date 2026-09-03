@@ -23,7 +23,7 @@ function parseArgs(args, env = {}) {
   }
   if (flags['--plan'] && flags['--execute']) refusal('CONFLICTING_MODES');
   const config = { execute: flags['--execute'] === true, projectId: flags['--project'],
-    datasetId: flags['--dataset'], location: flags['--location'] };
+    datasetId: flags['--dataset'], location: flags['--location'], confirmation: flags['--confirm'] };
   const hasTarget = config.projectId || config.datasetId || config.location;
   if (hasTarget || config.execute) {
     if (!/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(config.projectId || '')
@@ -58,11 +58,21 @@ const budget = title => ({ title, entity: 'SYNTHETIC TEST ONLY', year: '2026', r
   rows: ['CHF', 'CFA'].map((currency, index) => ({ id: `test-line-${index}`, label: 'Synthetic forecast',
     kind: 'operating', direction: 'out', currency, months: ['0', '12,50', ...Array(10).fill('')] })) });
 
-async function runCloud(config, client, { log = () => {} } = {}) {
+function createBudgetTestQueryClient(client, config, report) {
+  return { async query(options) {
+    if (report.queries >= MAX_QUERIES) refusal('QUERY_LIMIT_REACHED');
+    report.queries++;
+    return client.query({ ...options, location: config.location, useLegacySql: false,
+      useQueryCache: false, maximumBytesBilled: MAX_BYTES, jobTimeoutMs: 60000,
+      jobPrefix: `m3s_budget_test_${report.runId}_`, labels: { purpose: 'm3s_budget_test' } });
+  } };
+}
+
+async function runCloud(config, client, { log = () => {}, env = process.env } = {}) {
   // Validate even when called outside the CLI. No server.js, dotenv or production bootstrap is loaded.
   if (!config.execute) refusal('EXECUTION_REQUIRED');
-  parseArgs(['--execute', '--project', config.projectId, '--dataset', config.datasetId,
-    '--location', config.location, '--confirm', `${config.projectId}.${config.datasetId}`]);
+  config = parseArgs(['--execute', '--project', config.projectId, '--dataset', config.datasetId,
+    '--location', config.location, '--confirm', config.confirmation], env);
   const report = { mode: 'cloud', status: 'running', target: `${config.projectId}.${config.datasetId}`,
     runId: crypto.randomUUID(), checks: [], queries: 0, stage: 'dataset-guard',
     limits: ['Injected application identities; no JWT or deployed API verification.',
@@ -76,12 +86,7 @@ async function runCloud(config, client, { log = () => {} } = {}) {
     const [tables, next] = await dataset.getTables({ maxResults: 1, autoPaginate: false });
     if (tables.length || next) refusal('EMPTY_DEDICATED_DATASET_REQUIRED');
 
-    const queryClient = { async query(options) {
-      if (++report.queries > MAX_QUERIES) refusal('QUERY_LIMIT_REACHED');
-      return client.query({ ...options, location: config.location, useLegacySql: false,
-        useQueryCache: false, maximumBytesBilled: MAX_BYTES, jobTimeoutMs: 60000,
-        jobPrefix: `m3s_budget_test_${report.runId}_`, labels: { purpose: 'm3s_budget_test' } });
-    } };
+    const queryClient = createBudgetTestQueryClient(client, config, report);
     const handlersFor = (bigquery = queryClient) => createBudgetDraftHandlers({ ...config, bigquery,
       enabled: true, logger: { error() {} } });
     const handlers = handlersFor();
@@ -194,7 +199,7 @@ async function main(args = process.argv.slice(2), { env = process.env, log = val
         maxQueries: MAX_QUERIES, maximumBytesBilledPerJob: MAX_BYTES });
       return 0;
     }
-    const report = await runCloud(config, createClient(config.projectId), { log });
+    const report = await runCloud(config, createClient(config.projectId), { log, env });
     log(report); return report.status === 'passed' ? 0 : 1;
   } catch (error) {
     log({ status: 'refused', reason: error.safeCode || 'SETUP_FAILED' }); return 1;
@@ -202,4 +207,4 @@ async function main(args = process.argv.slice(2), { env = process.env, log = val
 }
 
 if (require.main === module) main().then(code => { process.exitCode = code; });
-module.exports = { parseArgs, assertTestDataset, runCloud, main };
+module.exports = { parseArgs, assertTestDataset, createBudgetTestQueryClient, runCloud, main };

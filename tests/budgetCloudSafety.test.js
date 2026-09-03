@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseArgs, runCloud, main } = require('../scripts/testBudgetCloud');
+const { parseArgs, createBudgetTestQueryClient, runCloud, main } = require('../scripts/testBudgetCloud');
 
 const args = ['--project', 'test-project', '--dataset', 'm3s_budget_test_acceptance', '--location', 'EU'];
 const execution = [...args, '--execute', '--confirm', 'test-project.m3s_budget_test_acceptance'];
@@ -79,6 +79,42 @@ test('known application dataset is refused despite test naming', () => {
 test('direct runner refuses non-execution mode before metadata', async () => {
   const fake = fixture(); await assert.rejects(runCloud({ ...config, execute: false }, fake.client), /EXECUTION_REQUIRED/);
   assert.equal(fake.metadataCalls, 0);
+});
+
+test('original target confirmation is retained and required at the direct execution boundary', async () => {
+  assert.equal(config.confirmation, 'test-project.m3s_budget_test_acceptance');
+  for (const confirmation of [undefined, '', 'other-project.m3s_budget_test_acceptance']) {
+    const fake = fixture();
+    await assert.rejects(runCloud({ ...config, confirmation }, fake.client),
+      /MISSING_ARGUMENT_VALUE|EXACT_TARGET_CONFIRMATION_REQUIRED/);
+    assert.equal(fake.metadataCalls, 0); assert.equal(fake.calls.length, 0);
+  }
+});
+
+test('changing the target after confirmation or using the application dataset prevents direct execution', async () => {
+  const fake = fixture();
+  await assert.rejects(runCloud({ ...config, datasetId: 'm3s_budget_test_other' }, fake.client),
+    /EXACT_TARGET_CONFIRMATION_REQUIRED/);
+  await assert.rejects(runCloud(config, fake.client, { env: { BIGQUERY_PROJECT: config.projectId,
+    BIGQUERY_DATASET: config.datasetId } }), /APPLICATION_DATASET_FORBIDDEN/);
+  assert.equal(fake.metadataCalls, 0); assert.equal(fake.calls.length, 0);
+});
+
+test('query limit counts exactly forty client submissions, never the rejected forty-first', async () => {
+  let submissions = 0;
+  const report = { queries: 0, runId: 'count-test' };
+  const client = createBudgetTestQueryClient({ async query() { submissions++; return [[]]; } }, config, report);
+  for (let i = 0; i < 40; i++) await client.query({ query: 'SELECT 1' });
+  for (let i = 0; i < 2; i++) await assert.rejects(client.query({ query: 'SELECT 1' }), /QUERY_LIMIT_REACHED/);
+  assert.equal(submissions, 40); assert.equal(report.queries, 40);
+});
+
+test('a failed client submission remains counted and is not retried', async () => {
+  let submissions = 0;
+  const report = { queries: 0, runId: 'failed-test' };
+  const client = createBudgetTestQueryClient({ async query() { submissions++; throw new Error('Unavailable'); } }, config, report);
+  await assert.rejects(client.query({ query: 'SELECT 1' }), /Unavailable/);
+  assert.equal(submissions, 1); assert.equal(report.queries, 1);
 });
 
 const invalidMetadata = {
