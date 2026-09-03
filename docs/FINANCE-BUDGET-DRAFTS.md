@@ -74,3 +74,11 @@ npm run budget:http:check -- --execute --non-production --url https://PREVIEW-BA
 ```
 
 Le scénario ne supprime rien : le brouillon synthétique créé reste dans le dataset de test pour l'audit et expire selon la politique de ce dataset. Il ne remplace pas la revue IAM du compte de service.
+
+### Verdict IAM attendu
+
+Pour la preview, le compte de service doit pouvoir créer les jobs de requête dans le projet et lire/écrire uniquement le dataset de test. Le candidat minimal parmi les rôles prédéfinis usuels est `roles/bigquery.jobUser` au niveau projet et `roles/bigquery.dataEditor` au niveau du seul dataset de test ; un rôle personnalisé encore plus étroit pourra ensuite retirer les opérations de structure inutiles. Le rôle Data Editor ne doit pas être accordé au niveau projet, car il permettrait aussi de créer des datasets. Refuser également les rôles de base Owner/Editor et `roles/bigquery.admin`.
+
+Contrôler séparément la politique du projet et l'accès du dataset ; relever les autres groupes ou utilisateurs qui disposent d'un accès direct. Les utilisateurs M3S ne doivent avoir aucun droit BigQuery direct : l'isolation auteur/tenant est imposée par l'API. La revue est en lecture seule et ne modifie jamais les rôles automatiquement.
+
+Sources officielles : [rôles IAM BigQuery](https://docs.cloud.google.com/bigquery/docs/access-control), [contrôle d'accès aux ressources](https://docs.cloud.google.com/bigquery/docs/control-access-to-resources-iam).
