@@ -59,19 +59,19 @@ References techniques: [transactions BigQuery](https://docs.cloud.google.com/big
 4. Verifier sur BigQuery reel: create/read/update, atomicite de l'audit, deux PUT concurrents (un seul succes), version obsolete, isolation entre deux auteurs et deux tenants, droits retires, reponse perdue, table absente, absence de montants dans les logs.
 5. Brancher le frontend avec choix explicite du brouillon, statut de sauvegarde, gestion du conflit sans ecrasement et export de secours. Puis activation de production dans le meme lot verifie.
 
-Retour arriere non destructif: retirer le flag, conserver les tables et le journal. Ne supprimer aucune donnee pour desactiver la fonction.
+Retour arriere non destructif: retirer les flags frontend puis backend, obtenir les redeploiements reussis et verifier la capacite desactivee ainsi que le refus ferme des ecritures. Conserver les tables et le journal; ne supprimer aucune donnee pour desactiver la fonction.
 
 ## Paquet unique de decision production
 
-Une seule revue GO/NO-GO doit couvrir les cinq portes ci-dessous. Une porte non documentee vaut `NO-GO`; les acquis de preview ne sont pas automatiquement transposes a la production.
+Une seule revue GO/NO-GO doit couvrir les cinq portes ci-dessous. Chaque porte recoit explicitement le verdict `GO` ou `NO-GO`, avec sa preuve. Une porte non documentee vaut `NO-GO`; le verdict global reste `NO-GO` tant que les cinq portes ne sont pas toutes `GO`. Les acquis de preview ne sont pas automatiquement transposes a la production.
 
-| Porte | Preuve attendue | Etat au 04-09-2026 |
+| Porte | Preuve attendue | Verdict candidat au 04-09-2026 |
 | --- | --- | --- |
-| `P1` Schema et conservation | DDL relus pour la cible exacte, region confirmee, expiration/conservation et sauvegarde decidees | OUVERT - aucune migration production |
-| `P2` Identite et moindre privilege | Compte de service de production identifie, `jobUser` borne et acces dataset sans droit direct des utilisateurs M3S | OUVERT - IAM preview seulement |
-| `P3` Authentification et secrets | `API_REQUIRE_AUTH=true`, secret JWT conforme, comptes pilotes et retrait de droits testes sans exposer de secret | OUVERT - recette preview seulement |
-| `P4` Exploitation et retour arriere | Alertes 5xx/409, journal sans montants, responsable, fenetre, critere d'arret et retrait des deux flags repetes | OUVERT - retour arriere documente, pas repete en production |
-| `P5` Decision et perimetre | Autorisation explicite limitee aux brouillons Budget organisation, sans personnel, approbation ni realise | FERME - aucune autorisation d'activation |
+| `P1` Schema et conservation | DDL relus pour la cible exacte, region confirmee, expiration/conservation et sauvegarde decidees | `NO-GO` - cible, region et conservation de production non confirmees |
+| `P2` Identite et moindre privilege | Compte de service de production identifie, `jobUser` borne et acces dataset sans droit direct des utilisateurs M3S | `NO-GO` - IAM valide uniquement en preview |
+| `P3` Authentification et secrets | `API_REQUIRE_AUTH=true`, secret JWT conforme, comptes pilotes et retrait de droits testes sans exposer de secret | `NO-GO` - recette authentifiee valide uniquement en preview |
+| `P4` Exploitation et retour arriere | Alertes 5xx/409, journal sans montants, responsable, fenetre, critere d'arret et retrait des deux flags repetes | `NO-GO` - surveillance et retour arriere non repetes sur la cible de production |
+| `P5` Decision et perimetre | Autorisation explicite limitee aux brouillons Budget organisation, sans personnel, approbation ni realise | `NO-GO` - aucune autorisation d'activation |
 
 ### Ordre d'execution apres un GO explicite
 
@@ -79,7 +79,7 @@ Une seule revue GO/NO-GO doit couvrir les cinq portes ci-dessous. Une porte non 
 2. Appliquer uniquement les deux DDL Budget relus, puis controler noms, region, politiques de conservation et acces effectifs.
 3. Activer le backend seul. Verifier `/capabilities`, authentification, lecture/ecriture fictive, isolement, conflit, audit et absence de fuite dans les logs.
 4. Activer ensuite le frontend. Verifier sauvegarde explicite, rechargement, bibliotheque, lecture seule, conflit sans ecrasement et export JSON de secours.
-5. Observer la fenetre convenue. Au premier critere d'arret, retirer d'abord le flag frontend puis le flag backend; conserver tables et audit pour qualification.
+5. Observer la fenetre convenue. Au premier critere d'arret, retirer d'abord le flag frontend, puis le flag backend et obtenir un redemarrage ou redeploiement backend reussi. Verifier avec un compte pilote que `/capabilities` retourne `enabled: false` et qu'une tentative de stockage echoue fermee avant de declarer `RETOUR ARRIERE`; conserver tables et audit pour qualification.
 
 Le compte rendu unique doit indiquer `GO`, `NO-GO` ou `RETOUR ARRIERE`, les cinq portes, les commits deployes et les controles effectues. Il ne doit contenir ni secret, montant, contenu de brouillon ou identifiant personnel.
 
