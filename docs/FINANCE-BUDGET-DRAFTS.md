@@ -1,7 +1,16 @@
 # Registre des brouillons Budget organisation
 
-Lot du 03-09-2026. API preparee, desactivee par defaut, sans migration ni activation de production.
-Le frontend PR326 conserve son fonctionnement en session avec export/import JSON. Il n'appelle pas encore ce registre.
+Lot initial du 03-09-2026, actualise le 04-09-2026 apres fusion ordonnee de la PR backend 47 puis de la PR frontend 327.
+Le code de sauvegarde est present sur les branches principales, mais reste desactive par defaut en production. Le frontend conserve donc son fonctionnement en session avec export/import JSON tant que les deux gardes d'activation ne sont pas explicitement ouvertes.
+
+## Etat de livraison au 04-09-2026
+
+- Backend `2de9541` et frontend `e2141df` fusionnes et publies dans cet ordre.
+- Recette Railway/BigQuery isolee et authentifiee reussie avec donnees fictives : creation/relecture, isolation auteur et tenant, lecture seule et conflit de version sans ecrasement.
+- Production fermee : aucune migration Budget executee, aucun flag backend ou frontend active et aucune donnee reelle enregistree.
+- Budget personnel, approbation, realise, partage entre auteurs et promotion institutionnelle restent hors perimetre.
+
+La fusion du code ne vaut ni autorisation de migration ni autorisation d'activation.
 
 ## Perimetre
 
@@ -31,7 +40,7 @@ Une ligne: `id`, `label`, `kind` (`operating`, `investment`, `financing`), `dire
 
 Codes: 400 entree invalide; 401 identite absente/incomplete; 403 permission absente; 404 inexistant OU autre auteur/tenant; 409 conflit de version; 503 stockage ferme, indisponible ou resultat non verifiable.
 
-Ne jamais afficher "enregistre" sur erreur. Le futur client devra conserver le brouillon local tant qu'un succes n'a pas ete confirme. Sur une ecriture au resultat incertain, la reponse contient `draftId` et `reconcileRequired: true`: relire cet ID avant toute nouvelle creation, puis comparer le contenu. Ne pas relancer aveuglement un POST. Aucun retry automatique d'ecriture dans ce module.
+Ne jamais afficher "enregistre" sur erreur. Le client conserve le brouillon local tant qu'un succes n'a pas ete confirme. Sur une ecriture au resultat incertain, la reponse contient `draftId` et `reconcileRequired: true`: relire cet ID avant toute nouvelle creation, puis comparer le contenu. Ne pas relancer aveuglement un POST. Aucun retry automatique d'ecriture dans ce module.
 
 ## Stockage et concurrence
 
@@ -51,6 +60,36 @@ References techniques: [transactions BigQuery](https://docs.cloud.google.com/big
 5. Brancher le frontend avec choix explicite du brouillon, statut de sauvegarde, gestion du conflit sans ecrasement et export de secours. Puis activation de production dans le meme lot verifie.
 
 Retour arriere non destructif: retirer le flag, conserver les tables et le journal. Ne supprimer aucune donnee pour desactiver la fonction.
+
+## Paquet unique de decision production
+
+Une seule revue GO/NO-GO doit couvrir les cinq portes ci-dessous. Une porte non documentee vaut `NO-GO`; les acquis de preview ne sont pas automatiquement transposes a la production.
+
+| Porte | Preuve attendue | Etat au 04-09-2026 |
+| --- | --- | --- |
+| `P1` Schema et conservation | DDL relus pour la cible exacte, region confirmee, expiration/conservation et sauvegarde decidees | OUVERT - aucune migration production |
+| `P2` Identite et moindre privilege | Compte de service de production identifie, `jobUser` borne et acces dataset sans droit direct des utilisateurs M3S | OUVERT - IAM preview seulement |
+| `P3` Authentification et secrets | `API_REQUIRE_AUTH=true`, secret JWT conforme, comptes pilotes et retrait de droits testes sans exposer de secret | OUVERT - recette preview seulement |
+| `P4` Exploitation et retour arriere | Alertes 5xx/409, journal sans montants, responsable, fenetre, critere d'arret et retrait des deux flags repetes | OUVERT - retour arriere documente, pas repete en production |
+| `P5` Decision et perimetre | Autorisation explicite limitee aux brouillons Budget organisation, sans personnel, approbation ni realise | FERME - aucune autorisation d'activation |
+
+### Ordre d'execution apres un GO explicite
+
+1. Figer la cible, la fenetre, les responsables et le rapport de controle. Relever les valeurs de configuration sans copier les secrets.
+2. Appliquer uniquement les deux DDL Budget relus, puis controler noms, region, politiques de conservation et acces effectifs.
+3. Activer le backend seul. Verifier `/capabilities`, authentification, lecture/ecriture fictive, isolement, conflit, audit et absence de fuite dans les logs.
+4. Activer ensuite le frontend. Verifier sauvegarde explicite, rechargement, bibliotheque, lecture seule, conflit sans ecrasement et export JSON de secours.
+5. Observer la fenetre convenue. Au premier critere d'arret, retirer d'abord le flag frontend puis le flag backend; conserver tables et audit pour qualification.
+
+Le compte rendu unique doit indiquer `GO`, `NO-GO` ou `RETOUR ARRIERE`, les cinq portes, les commits deployes et les controles effectues. Il ne doit contenir ni secret, montant, contenu de brouillon ou identifiant personnel.
+
+### Conditions qui imposent NO-GO
+
+- Cible, region, conservation, responsable ou fenetre non confirmes.
+- Droit BigQuery trop large, acces utilisateur direct, authentification facultative ou secret par defaut.
+- Frontend active avant le backend verifie, ou URL de preview presente dans un bundle de production.
+- Absence d'export de secours, de gestion 409, de surveillance ou de retour arriere immediat.
+- Demande incluant Budget personnel, donnees reelles non autorisees, approbation, realise ou partage implicite.
 
 ## Verification locale et limites
 
