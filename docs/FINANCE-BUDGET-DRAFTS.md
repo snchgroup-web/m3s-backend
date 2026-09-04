@@ -67,11 +67,57 @@ Une seule revue GO/NO-GO doit couvrir les cinq portes ci-dessous. Chaque porte r
 
 | Porte | Preuve attendue | Verdict candidat au 04-09-2026 |
 | --- | --- | --- |
-| `P1` Schema et conservation | DDL relus pour la cible exacte, region confirmee, expiration/conservation et sauvegarde decidees | `NO-GO` - cible, region et conservation de production non confirmees |
-| `P2` Identite et moindre privilege | Compte de service de production identifie, `jobUser` borne et acces dataset sans droit direct des utilisateurs M3S | `NO-GO` - IAM valide uniquement en preview |
-| `P3` Authentification et secrets | `API_REQUIRE_AUTH=true`, secret JWT conforme, comptes pilotes et retrait de droits testes sans exposer de secret | `NO-GO` - recette authentifiee valide uniquement en preview |
-| `P4` Exploitation et retour arriere | Alertes 5xx/409, journal sans montants, responsable, fenetre, critere d'arret et retrait des deux flags repetes | `NO-GO` - surveillance et retour arriere non repetes sur la cible de production |
+| `P1` Schema et conservation | DDL relus pour la cible exacte, region confirmee, expiration/conservation et sauvegarde decidees | `NO-GO` - dataset candidat observe en `US`, mais cible Budget non decidee, expiration par defaut de 60 jours non arbitree et sauvegarde non documentee |
+| `P2` Identite et moindre privilege | Compte de service de production identifie, `jobUser` borne et acces dataset sans droit direct des utilisateurs M3S | `NO-GO` - comptes backend `bigquery.admin` au niveau projet et acces herites plus larges que le moindre privilege |
+| `P3` Authentification et secrets | `API_REQUIRE_AUTH=true`, secret JWT conforme, comptes pilotes et retrait de droits testes sans exposer de secret | `NO-GO` - authentification active et stockage Budget ferme observes, mais conformite du secret et retrait de droits non prouves en production |
+| `P4` Exploitation et retour arriere | Alertes 5xx/409, journal sans montants, responsable, fenetre, critere d'arret et retrait des deux flags repetes | `NO-GO` - sante publique nominale, mais alertes, responsable, fenetre et repetition du retour arriere non prouves |
 | `P5` Decision et perimetre | Autorisation explicite limitee aux brouillons Budget organisation, sans personnel, approbation ni realise | `NO-GO` - aucune autorisation d'activation |
+
+## Collecte interne P1-P4 en lecture seule du 04-09-2026
+
+Cette collecte a ete autorisee uniquement pour qualifier la preparation de production. Elle n'a execute aucun DDL, aucune migration, aucune requete sur le contenu des tables, aucune modification IAM, aucune revelation de secret, aucune activation de flag et aucun test d'ecriture. Une absence de preuve reste un echec de porte et non une presomption de conformite.
+
+### P1 - cible, schema et conservation
+
+- Projet actif observe : `mon-projet-data-2sg`.
+- Dataset de production existant candidat : `m3s_2sg`, region `US`.
+- Expiration par defaut observee pour les tables et partitions : `5184000000` ms, soit 60 jours.
+- Les 23 tables/vues listees par leurs seules metadonnees ne comprennent ni `finance_budget_drafts_v1` ni `finance_budget_draft_events_v1`.
+- Aucun choix formel ne designe encore `m3s_2sg` comme cible Budget et aucune politique de sauvegarde/restauration n'est documentee. L'expiration de 60 jours doit etre arbitree avant creation des brouillons et du journal d'audit.
+
+Verdict `P1`: `NO-GO`.
+
+### P2 - identite et moindre privilege
+
+- Les comptes `m3s-backend@mon-projet-data-2sg.iam.gserviceaccount.com` et `m3s-backend-280@mon-projet-data-2sg.iam.gserviceaccount.com` disposent de `roles/bigquery.admin` au niveau projet.
+- Le compte preview dispose de `roles/bigquery.jobUser` au niveau projet; cette observation ne valide pas le compte de production.
+- Le dataset `m3s_2sg` accorde notamment `WRITER` a `projectWriters` et au compte `m3s-backend`, `OWNER` a `projectOwners`, et `READER` a `projectReaders` et au compte `m3s-backend`.
+- Ces droits sont plus larges que le contrat cible `jobUser` borne au projet plus acces au seul dataset necessaire. Aucun droit n'a ete modifie pendant la collecte.
+
+Verdict `P2`: `NO-GO`.
+
+### P3 - authentification, secrets et fermeture fonctionnelle
+
+- Service Railway observe : projet `optimistic-youth`, environnement `production`, service `web`, domaine `web-production-1e53c.up.railway.app`.
+- Les noms de variables comprennent `API_REQUIRE_AUTH`, `JWT_SECRET` et `M3S_AUTH_USERS_JSON`. Les valeurs sont restees masquees et n'ont pas ete copiees.
+- `FINANCE_BUDGET_DRAFTS_ENABLED` est absent de la liste de variables de production observee; le stockage Budget demeure donc desactive par defaut.
+- Le 04-09-2026, `/api/health` et `/api/info` repondent HTTP 200. Un appel non authentifie a `/api/finance/budget-drafts/capabilities` repond HTTP 401 avec la politique `no-store` attendue.
+- La longueur/rotation effective du secret, les comptes pilotes et le retrait immediat de droits n'ont pas ete testes sur la production.
+
+Verdict `P3`: `NO-GO`.
+
+### P4 - exploitation et retour arriere
+
+- Les points de sante publics du backend et le frontend Netlify repondent HTTP 200 au moment du relevé.
+- La procedure de retour arriere est documentee : retirer le flag frontend, retirer le flag backend, obtenir un redeploiement backend reussi, verifier `enabled: false`, puis verifier le refus ferme d'une ecriture.
+- Aucune preuve recevable n'etablit encore des alertes 5xx/409 actives, l'absence de montants dans les journaux, un responsable nomme, une fenetre d'observation, un critere d'arret approuve ou une repetition complete du retour arriere sur la production.
+- L'interface d'observabilite Railway n'a pas fourni de relevé exploitable pendant cette collecte; ce point est classe non demontre, sans tentative de creation d'alerte ni action sur un deploiement.
+
+Verdict `P4`: `NO-GO`.
+
+### Conclusion de collecte
+
+Les controles confirment un etat ferme et non destructif, pas une preparation suffisante a l'activation. `P1`, `P2`, `P3` et `P4` restent `NO-GO`; `P5` reste egalement `NO-GO`. Le verdict global demeure donc `NO-GO`. Le prochain paquet de decision doit regrouper les corrections des quatre portes et l'autorisation de perimetre P5, sans fragmenter l'arbitrage en micro-validations.
 
 ### Ordre d'execution apres un GO explicite
 
