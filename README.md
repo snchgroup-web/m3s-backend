@@ -144,6 +144,54 @@ Copier uniquement le JSON généré dans Railway. Le mot de passe en clair ne do
 
 ---
 
+## Recette cloud Budget (avant activation)
+
+`npm run budget:cloud:check` affiche seulement le plan : aucun acces Google,
+aucun SQL, aucune activation. Le script est independant de `server.js` et ne charge
+ni `.env.production`, ni le bootstrap des registres existants.
+
+Une seule execution groupe dix controles : schema, aller-retour CHF/CFA et mois
+vides/zero, lecture seule, separation auteur/organisation, version perimee,
+deux ecritures concurrentes, rollback atomique, reponse incertaine et audit.
+Les identites applicatives sont injectees ; le SQL utilise le vrai client Google.
+Cela ne remplace pas la recette JWT/HTTP de l'environnement deploye ni une revue IAM.
+
+Preparer uniquement dans un environnement de test explicitement autorise :
+
+- Dataset neuf et vide, nom `m3s_budget_test_...`, label `purpose=m3s_budget_test`.
+- Expiration par defaut des tables entre une heure et sept jours.
+- Projet et localisation explicites ; pas de choix automatique depuis la production.
+- Identite Google ADC limitee au test, configuree hors du code et hors du chat.
+  Elle doit pouvoir consulter les metadonnees du dataset, lister/creer les tables,
+  executer les jobs et lire/modifier ces seules tables. Ne pas reutiliser les cles
+  de production ni ajouter de droits globaux pour faire passer un test.
+- Dataset reserve a cette execution, sans autre processus concurrent.
+
+Exemple de syntaxe uniquement, noms a remplacer par l'environnement autorise :
+
+```powershell
+npm run budget:cloud:check -- --project PROJECT_ID --dataset m3s_budget_test_RUN --location EU
+npm run budget:cloud:check -- --project PROJECT_ID --dataset m3s_budget_test_RUN --location EU --execute --confirm PROJECT_ID.m3s_budget_test_RUN
+```
+
+Le mode execution cree les deux tables du module et quatre brouillons fictifs ;
+aucune lecture des autres registres, creation de dataset, mutation IAM, suppression
+ou activation automatique. Une nouvelle recette exige un autre dataset vide.
+Les tables et six evenements attendus restent inspectables jusqu'a expiration.
+En cas d'echec, ne pas relancer aveuglement : consulter l'etape et les jobs Google
+`m3s_budget_test_*`, puis qualifier le resultat avant une nouvelle execution.
+
+Chaque job est limite a 64 Mio facturables ; quarante requetes maximum par recette.
+Le delai serveur demande est de 60 secondes par job, sans garantie d'annulation
+immediate : un timeout ne prouve jamais l'absence d'ecriture. Aucune relance
+applicative automatique. Le resultat JSON ne contient ni montants ni secrets.
+
+Sources techniques : [transactions BigQuery](https://docs.cloud.google.com/bigquery/docs/transactions)
+et [limites des jobs](https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job).
+Conserver le rapport, verifier les droits effectifs et la recette authentifiee,
+puis seulement envisager l'activation conjointe backend/frontend. Le budget
+personnel et le rapprochement du realise restent hors de cette recette.
+
 **Ready? Read SETUP-INSTRUCTIONS.md and let's go! 🎉**
 
 ---

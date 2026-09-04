@@ -64,6 +64,7 @@ const {
   normalizeFinanceTransaction,
 } = require('./financeTransaction');
 const { reconcileTeamAgentAssignment } = require('./teamAgentContract');
+const { createBudgetDraftHandlers, budgetDraftsEnabled, createBudgetBodyMiddleware, createBudgetAccountMiddleware } = require('./financeBudgetDrafts');
 
 // ============================================================================
 // INITIALISATION
@@ -176,6 +177,13 @@ const managementPortfolioHandlers = createManagementPortfolioHandlers({
   datasetId: DATASET_ID,
   location: DATASET_LOCATION
 });
+const budgetDraftHandlers = createBudgetDraftHandlers({
+  bigquery,
+  projectId: PROJECT_ID,
+  datasetId: DATASET_ID,
+  location: DATASET_LOCATION,
+  enabled: budgetDraftsEnabled(process.env)
+});
 
 const isMissingBigQueryTable = (error) => {
   const message = String(error?.message || '');
@@ -224,6 +232,7 @@ app.use(cors({
   origin: createCorsOriginValidator(CORS_ORIGINS),
   credentials: true
 }));
+app.use('/api/finance/budget-drafts', createBudgetBodyMiddleware());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -421,6 +430,18 @@ app.put('/api/administration/correspondence/:id', authenticateRequest, administr
 app.delete('/api/administration/correspondence/:id', authenticateRequest, administrationRegistryHandlers.deleteCorrespondence);
 app.get('/api/administration/audit', authenticateRequest, administrationRegistryHandlers.listAuditEvents);
 app.get('/api/management/portfolio/summary', authenticateRequest, managementPortfolioHandlers.getSummary);
+
+// No schema bootstrap. Budget routes never inherit the legacy Finance authentication bypass.
+const requireCurrentBudgetAccount = createBudgetAccountMiddleware({
+  getAccounts: getConfiguredUsers,
+  defaultTenantId: process.env.M3S_DEFAULT_TENANT_ID || '2sg'
+});
+app.use('/api/finance/budget-drafts', authenticateRequest, requireCurrentBudgetAccount);
+app.get('/api/finance/budget-drafts/capabilities', budgetDraftHandlers.capabilities);
+app.get('/api/finance/budget-drafts', budgetDraftHandlers.list);
+app.get('/api/finance/budget-drafts/:id', budgetDraftHandlers.get);
+app.post('/api/finance/budget-drafts', budgetDraftHandlers.create);
+app.put('/api/finance/budget-drafts/:id', budgetDraftHandlers.update);
 
 // ============================================================================
 // 2SG INTELLIGENCE DASHBOARD
