@@ -1,4 +1,41 @@
 const seed = require('./referentiels/managementPortfolioSeed.json');
+const { assertBigQueryTableContract } = require('./bigQueryTableContract');
+
+const field = (name, type = 'STRING', mode = 'REQUIRED') => ({ name, type, mode });
+const MANAGEMENT_TABLE_CONTRACTS = Object.freeze({
+  management_portfolios: {
+    fields: [
+      field('portfolio_id'), field('tenant_id'), field('function_id'), field('title'),
+      field('status'), field('confidentiality'), field('responsible_agent_id', 'STRING', 'NULLABLE'),
+      field('source_ref'), field('verified_on', 'DATE'), field('created_at', 'TIMESTAMP'),
+      field('updated_at', 'TIMESTAMP')
+    ],
+    partitionField: null,
+    clustering: ['tenant_id', 'status']
+  },
+  management_dossiers: {
+    fields: [
+      field('dossier_id'), field('tenant_id'), field('portfolio_id'), field('dossier_type'),
+      field('display_title'), field('status'), field('confidentiality'),
+      field('responsible_agent_id', 'STRING', 'NULLABLE'), field('responsible_status'),
+      field('display_state'), field('verified_on', 'DATE'), field('display_next_action'),
+      field('source_ref'), field('evidence_ged_ref', 'STRING', 'NULLABLE'), field('record_status'),
+      field('created_at', 'TIMESTAMP'), field('updated_at', 'TIMESTAMP')
+    ],
+    partitionField: 'verified_on',
+    clustering: ['tenant_id', 'portfolio_id', 'confidentiality', 'status']
+  },
+  management_assignments: {
+    fields: [
+      field('assignment_id'), field('tenant_id'), field('object_type'), field('object_id'),
+      field('function_candidate'), field('responsibility'), field('agent_id', 'STRING', 'NULLABLE'),
+      field('assignment_status'), field('justification'), field('created_at', 'TIMESTAMP'),
+      field('updated_at', 'TIMESTAMP')
+    ],
+    partitionField: null,
+    clustering: ['tenant_id', 'object_type', 'object_id', 'responsibility']
+  }
+});
 
 const validateIdentifier = (value, label, pattern) => {
   const identifier = String(value || '').trim();
@@ -137,6 +174,10 @@ const ensureManagementPortfolio = async ({
 }) => {
   const schemaStatements = buildManagementPortfolioSchemaStatements({ projectId, datasetId });
   for (const query of schemaStatements) await bigquery.query({ query, location });
+  const dataset = bigquery.dataset(datasetId);
+  for (const [tableId, contract] of Object.entries(MANAGEMENT_TABLE_CONTRACTS)) {
+    await assertBigQueryTableContract(dataset.table(tableId), contract, 'MANAGEMENT_SCHEMA_INVALID');
+  }
   const seedOperations = buildManagementPortfolioSeedOperations({ projectId, datasetId, tenantId });
   for (const operation of seedOperations) {
     await bigquery.query({ ...operation, location });
@@ -216,6 +257,7 @@ const createManagementPortfolioHandlers = ({
 };
 
 module.exports = {
+  MANAGEMENT_TABLE_CONTRACTS,
   buildManagementPortfolioSchemaStatements,
   buildManagementPortfolioSeedOperations,
   ensureManagementPortfolio,

@@ -14,7 +14,7 @@ const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const { BigQuery } = require('@google-cloud/bigquery');
-const { createCorsOriginValidator } = require('./corsPolicy');
+const { createCorsOriginValidator, createCorsErrorHandler } = require('./corsPolicy');
 const { createDebugAccessMiddleware, createDebugSampleGuard } = require('./debugAccess');
 const {
   createMembersDirectoryHandler,
@@ -28,12 +28,10 @@ const {
 } = require('./intelligenceDashboard');
 const {
   createAdministrationRegistryHandlers,
-  ensureAdministrationRegistrySchema,
   permissionsForAccount: administrationPermissionsForAccount,
 } = require('./administrationRegistries');
 const {
   createManagementPortfolioHandlers,
-  ensureManagementPortfolio,
 } = require('./managementPortfolio');
 const {
   PERMISSIONS: FINANCE_PERMISSIONS,
@@ -64,7 +62,19 @@ const {
   normalizeFinanceTransaction,
 } = require('./financeTransaction');
 const { reconcileTeamAgentAssignment } = require('./teamAgentContract');
-const { createBudgetDraftHandlers, budgetDraftsEnabled, createBudgetBodyMiddleware, createBudgetAccountMiddleware } = require('./financeBudgetDrafts');
+const { createBudgetDraftHandlers, resolveBudgetStorageConfig, assertBudgetDatasetPolicy, createBudgetBodyMiddleware,
+  createBudgetAccountMiddleware } = require('./financeBudgetDrafts');
+const {
+  createBudgetObservabilityMiddleware,
+  isBudgetRoute,
+  normalizeBudgetRoute
+} = require('./budgetObservability');
+const {
+  assertProductionAuthConfiguration,
+  normalizeLoginIdentifier,
+  findUniqueLoginAccount,
+  resolveAccountIdentity
+} = require('./authConfiguration');
 
 // ============================================================================
 // INITIALISATION
@@ -80,7 +90,11 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://l
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
-const AUTH_SECRET = process.env.JWT_SECRET || 'm3s-development-secret-change-me';
+// Production Budget remains closed until a persistent shared key provider is integrated.
+const AUTH_SECRET_PROVISION = null;
+const AUTH_SECRET = AUTH_SECRET_PROVISION?.value
+  || process.env.JWT_SECRET
+  || 'm3s-development-secret-change-me';
 const API_REQUIRE_AUTH = process.env.API_REQUIRE_AUTH === 'true';
 const APP_REVISION = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.APP_REVISION || 'local';
 const OFFER_TAXONOMY_PATH = path.join(__dirname, 'referentiels', 'offerTaxonomy.json');
@@ -177,12 +191,19 @@ const managementPortfolioHandlers = createManagementPortfolioHandlers({
   datasetId: DATASET_ID,
   location: DATASET_LOCATION
 });
+const budgetStorage = resolveBudgetStorageConfig(process.env, {
+  projectId: PROJECT_ID,
+  applicationDatasetId: DATASET_ID,
+  defaultLocation: DATASET_LOCATION,
+  signingSecretProvision: AUTH_SECRET_PROVISION
+});
 const budgetDraftHandlers = createBudgetDraftHandlers({
   bigquery,
-  projectId: PROJECT_ID,
-  datasetId: DATASET_ID,
-  location: DATASET_LOCATION,
-  enabled: budgetDraftsEnabled(process.env)
+  projectId: budgetStorage.projectId,
+  datasetId: budgetStorage.datasetId || 'finance_budget_storage_disabled',
+  location: budgetStorage.location,
+  enabled: budgetStorage.enabled,
+  disabledReason: budgetStorage.reason
 });
 
 const isMissingBigQueryTable = (error) => {
@@ -228,6 +249,7 @@ const findOfferTaxonomyItem = (taxonomy, requestedType) => {
 // MIDDLEWARE
 // ============================================================================
 
+app.use('/api/finance/budget-drafts', createBudgetObservabilityMiddleware({ revision: APP_REVISION }));
 app.use(cors({
   origin: createCorsOriginValidator(CORS_ORIGINS),
   credentials: true
@@ -238,7 +260,10 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Logging
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  const route = isBudgetRoute(req.path)
+    ? normalizeBudgetRoute(req.path)
+    : req.path;
+  console.log(`[${new Date().toISOString()}] ${req.method} ${route}`);
   next();
 });
 
@@ -367,8 +392,8 @@ const verifyPassword = (account, password) => {
     );
   }
 
-  // Compatibility fallback for temporary local/demo configs.
-  return Boolean(account.password && account.password === password);
+  // Compatibility fallback is restricted to local/demo environments.
+  return NODE_ENV !== 'production' && Boolean(account.password && account.password === password);
 };
 
 // ============================================================================
@@ -377,8 +402,9 @@ const verifyPassword = (account, password) => {
 
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body || {};
+  const loginIdentifier = normalizeLoginIdentifier(email);
 
-  if (!email || !password) {
+  if (!loginIdentifier || !password) {
     return res.status(400).json({
       success: false,
       error: 'Email et mot de passe requis'
@@ -386,7 +412,7 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   const users = getConfiguredUsers();
-  const account = users.find((candidate) => candidate.email === email);
+  const account = findUniqueLoginAccount(users, loginIdentifier);
 
   if (!account || !verifyPassword(account, password)) {
     return res.status(401).json({
@@ -395,9 +421,12 @@ app.post('/api/auth/login', (req, res) => {
     });
   }
 
+  const accountIdentity = resolveAccountIdentity(account, process.env);
+  if (!accountIdentity) {
+    return res.status(401).json({ success: false, error: 'Email ou mot de passe incorrect' });
+  }
   const user = {
-    id: account.id || account.userId || account.email,
-    tenantId: account.tenantId || account.organizationId || process.env.M3S_DEFAULT_TENANT_ID || '2sg',
+    ...accountIdentity,
     email: account.email,
     name: account.name || account.email,
     role: account.role || 'Utilisateur',
@@ -2118,11 +2147,18 @@ app.get('/api/info', (req, res) => {
   });
 });
 
+app.use(createCorsErrorHandler());
+
 // ============================================================================
 // START SERVER
 // ============================================================================
 
 const startServer = async () => {
+  assertProductionAuthConfiguration(process.env, getConfiguredUsers(), AUTH_SECRET_PROVISION);
+  if (budgetStorage.enabled) {
+    await assertBudgetDatasetPolicy({ bigquery, storage: budgetStorage, env: process.env });
+  }
+
   try {
     const resolvedSources = await resolveFinanceSources({
       bigquery,
@@ -2142,54 +2178,6 @@ const startServer = async () => {
       errorCode: error.code || 'FINANCE_SOURCE_RESOLUTION_FAILED'
     };
     console.error('Finance source resolution warning:', error.message);
-  }
-
-  try {
-    const registrySchema = await ensureAdministrationRegistrySchema({
-      bigquery,
-      projectId: PROJECT_ID,
-      datasetId: DATASET_ID,
-      location: DATASET_LOCATION
-    });
-    console.log(`Administration registry schema ready: ${registrySchema.tables.join(', ')}`);
-  } catch (error) {
-    console.error('Administration registry schema migration warning:', error.message);
-  }
-
-  try {
-    const portfolioSchema = await ensureManagementPortfolio({
-      bigquery,
-      projectId: PROJECT_ID,
-      datasetId: DATASET_ID,
-      location: DATASET_LOCATION,
-      tenantId: process.env.M3S_DEFAULT_TENANT_ID || '2sg'
-    });
-    console.log(
-      `Management portfolio ready: ${portfolioSchema.dossiersImported} dossiers, ${portfolioSchema.assignmentsImported} assignments`
-    );
-  } catch (error) {
-    console.error('Management portfolio migration warning:', error.message);
-  }
-
-  try {
-    await Promise.all([
-      bigquery.query({
-        query: `ALTER TABLE ${financeTableRef('expenses')} ADD COLUMN IF NOT EXISTS TEAM STRING`,
-        location: financeSources.location || DATASET_LOCATION
-      }),
-      bigquery.query({
-        query: `ALTER TABLE ${financeTableRef('expenses')} ADD COLUMN IF NOT EXISTS DEPARTEMENT STRING`,
-        location: financeSources.location || DATASET_LOCATION
-      }),
-      bigquery.query({
-        query: `ALTER TABLE ${financeTableRef('income')}
-          ADD COLUMN IF NOT EXISTS DEPARTEMENT STRING`,
-        location: financeSources.location || DATASET_LOCATION
-      })
-    ]);
-    console.log('Finance schema ready: TEAM and DEPARTEMENT');
-  } catch (error) {
-    console.error('Finance schema migration warning:', error.message);
   }
 
   app.listen(PORT, () => {

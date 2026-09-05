@@ -6,6 +6,38 @@ const ARTIFACT_FIELDS = {
   pdf: 'pdf_base64',
   reference: 'reference_content'
 };
+const TABLE_SCHEMA = [
+  { name: 'edition_date', type: 'STRING', mode: 'REQUIRED' },
+  { name: 'generated_at', type: 'TIMESTAMP', mode: 'REQUIRED' },
+  { name: 'published_at', type: 'TIMESTAMP', mode: 'REQUIRED' },
+  { name: 'source_version', type: 'STRING', mode: 'REQUIRED' },
+  { name: 'html_content', type: 'STRING', mode: 'REQUIRED' },
+  { name: 'pdf_base64', type: 'STRING', mode: 'REQUIRED' },
+  { name: 'reference_content', type: 'STRING', mode: 'REQUIRED' },
+  { name: 'html_sha256', type: 'STRING', mode: 'REQUIRED' },
+  { name: 'pdf_sha256', type: 'STRING', mode: 'REQUIRED' },
+  { name: 'reference_sha256', type: 'STRING', mode: 'REQUIRED' }
+];
+
+const hasExpectedTableSchema = metadata => {
+  const fields = metadata?.schema?.fields;
+  return Array.isArray(fields)
+    && fields.length === TABLE_SCHEMA.length
+    && TABLE_SCHEMA.every((expected, index) => {
+      const actual = fields[index];
+      return actual?.name === expected.name
+        && String(actual.type || '').toUpperCase() === expected.type
+        && String(actual.mode || 'NULLABLE').toUpperCase() === expected.mode;
+    });
+};
+
+const assertExpectedTableSchema = async table => {
+  const [metadata] = await table.getMetadata();
+  if (hasExpectedTableSchema(metadata)) return;
+  const error = new Error('Intelligence Dashboard schema is invalid');
+  error.code = 'INTELLIGENCE_SCHEMA_INVALID';
+  throw error;
+};
 
 const sha256 = (value) => crypto
   .createHash('sha256')
@@ -56,38 +88,40 @@ const normalizePublication = (payload = {}) => {
   };
 };
 
+const ensureIntelligenceDashboardSchema = async ({ bigquery, datasetId, location }) => {
+  const table = bigquery.dataset(datasetId).table(TABLE_ID);
+  const [exists] = await table.exists();
+  if (exists) {
+    await assertExpectedTableSchema(table);
+    return { created: false, table: TABLE_ID };
+  }
+  try {
+    await bigquery.dataset(datasetId).createTable(TABLE_ID, { schema: TABLE_SCHEMA, location });
+    return { created: true, table: TABLE_ID };
+  } catch (error) {
+    if (!String(error?.message || '').toLowerCase().includes('already exists')) throw error;
+    await assertExpectedTableSchema(table);
+    return { created: false, table: TABLE_ID };
+  }
+};
+
 const createIntelligenceDashboardRepository = ({ bigquery, projectId, datasetId, location }) => {
   const table = bigquery.dataset(datasetId).table(TABLE_ID);
   const tableName = `\`${projectId}.${datasetId}.${TABLE_ID}\``;
 
-  const ensureTable = async () => {
+  const requireTable = async () => {
     const [exists] = await table.exists();
-    if (exists) return;
-
-    try {
-      await bigquery.dataset(datasetId).createTable(TABLE_ID, {
-        schema: [
-          { name: 'edition_date', type: 'STRING', mode: 'REQUIRED' },
-          { name: 'generated_at', type: 'TIMESTAMP', mode: 'REQUIRED' },
-          { name: 'published_at', type: 'TIMESTAMP', mode: 'REQUIRED' },
-          { name: 'source_version', type: 'STRING', mode: 'REQUIRED' },
-          { name: 'html_content', type: 'STRING', mode: 'REQUIRED' },
-          { name: 'pdf_base64', type: 'STRING', mode: 'REQUIRED' },
-          { name: 'reference_content', type: 'STRING', mode: 'REQUIRED' },
-          { name: 'html_sha256', type: 'STRING', mode: 'REQUIRED' },
-          { name: 'pdf_sha256', type: 'STRING', mode: 'REQUIRED' },
-          { name: 'reference_sha256', type: 'STRING', mode: 'REQUIRED' }
-        ],
-        location
-      });
-    } catch (error) {
-      if (!String(error?.message || '').toLowerCase().includes('already exists')) throw error;
+    if (!exists) {
+      const error = new Error('Intelligence Dashboard schema is missing');
+      error.code = 'INTELLIGENCE_SCHEMA_MISSING';
+      throw error;
     }
+    await assertExpectedTableSchema(table);
   };
 
   const publish = async (payload) => {
     const publication = normalizePublication(payload);
-    await ensureTable();
+    await requireTable();
     await bigquery.query({
       location,
       query: `
@@ -127,7 +161,7 @@ const createIntelligenceDashboardRepository = ({ bigquery, projectId, datasetId,
   };
 
   const getLatestMetadata = async () => {
-    await ensureTable();
+    await requireTable();
     const [rows] = await bigquery.query({
       location,
       query: `
@@ -153,7 +187,7 @@ const createIntelligenceDashboardRepository = ({ bigquery, projectId, datasetId,
   const getLatestArtifact = async (artifactType) => {
     const field = ARTIFACT_FIELDS[artifactType];
     if (!field) throw new Error('Type de livrable non pris en charge');
-    await ensureTable();
+    await requireTable();
     const [rows] = await bigquery.query({
       location,
       query: `
@@ -166,12 +200,15 @@ const createIntelligenceDashboardRepository = ({ bigquery, projectId, datasetId,
     return rows[0] || null;
   };
 
-  return { ensureTable, publish, getLatestMetadata, getLatestArtifact };
+  return { requireTable, publish, getLatestMetadata, getLatestArtifact };
 };
 
 module.exports = {
   TABLE_ID,
+  TABLE_SCHEMA,
+  hasExpectedTableSchema,
   createIntelligenceDashboardRepository,
+  ensureIntelligenceDashboardSchema,
   isPublishKeyValid,
   normalizePublication
 };
