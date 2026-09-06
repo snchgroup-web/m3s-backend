@@ -192,6 +192,13 @@ test('application log analyzer accepts only the sanitized Budget event contract'
   assert.equal(logs.analyzeApplication(
     [{ message: JSON.stringify(safe) }], revision, { 200: 1 }
   ).status, 'passed');
+  const truncatedNested = logs.analyzeApplication([
+    { message: JSON.stringify(safe) },
+    { message: '{"event":"budget_request","status":200' }
+  ], revision, { 200: 1 });
+  assert.equal(truncatedNested.malformedRecords, 1);
+  assert.equal(truncatedNested.unreadableApplicationRecords, 1);
+  assert.deepEqual(truncatedNested.stopReasons, ['MALFORMED_LOG_RECORDS']);
   const unsafe = logs.analyzeApplication([{ ...safe, amount: 42 }], revision, { 200: 1 });
   assert.equal(unsafe.status, 'stop');
   assert.deepEqual(unsafe.unsafeFields, ['amount']);

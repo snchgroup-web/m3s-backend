@@ -149,7 +149,10 @@ function parseExpectedWindow(startUtc, endUtc) {
 }
 
 function analyzeApplication(lines, expectedRevision, expectedStatuses = {}, malformedRecords = 0) {
-  const events = lines.map(applicationEvent).filter(Boolean);
+  const parsedEvents = lines.map(applicationEvent);
+  const unreadableApplicationRecords = parsedEvents.filter(event => !event).length;
+  const totalMalformedRecords = malformedRecords + unreadableApplicationRecords;
+  const events = parsedEvents.filter(Boolean);
   const unsafeFields = [...new Set(events.flatMap(event => Object.keys(event)
     .filter(key => !SAFE_EVENT_FIELDS.has(key))))].sort();
   const missingFields = [...new Set(events.flatMap(event => [...SAFE_EVENT_FIELDS]
@@ -170,7 +173,7 @@ function analyzeApplication(lines, expectedRevision, expectedStatuses = {}, malf
     (expectedStatuses[status] || 0) !== (actualStatuses[status] || 0)
   )).sort();
   const stopReasons = [];
-  if (malformedRecords) stopReasons.push('MALFORMED_LOG_RECORDS');
+  if (totalMalformedRecords) stopReasons.push('MALFORMED_LOG_RECORDS');
   if (!events.length) stopReasons.push('NO_BUDGET_EVENTS');
   if (unsafeFields.length) stopReasons.push('UNSAFE_EVENT_FIELDS');
   if (missingFields.length) stopReasons.push('MISSING_EVENT_FIELDS');
@@ -180,7 +183,8 @@ function analyzeApplication(lines, expectedRevision, expectedStatuses = {}, malf
   if (statusMismatches.length) stopReasons.push('EVENT_STATUS_MISMATCH');
   return { kind: 'application', status: stopReasons.length ? 'stop' : 'passed',
     events: events.length, expectedRevision, unsafeFields, missingFields,
-    invalidEvents, invalidRevisions, malformedRecords, duplicateCorrelationIds,
+    invalidEvents, invalidRevisions, malformedRecords: totalMalformedRecords,
+    unreadableApplicationRecords, duplicateCorrelationIds,
     expectedStatuses, actualStatuses, statusMismatches,
     alert: stopReasons.length ? 'BUDGET_PREVIEW_STOP' : null, stopReasons };
 }
