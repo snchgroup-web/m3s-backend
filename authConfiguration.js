@@ -109,6 +109,7 @@ function isSharedSigningKeyProvider(provider) {
 function selectSigningKeyProvider(env = {}, configuredProvider = null) {
   const legacyConfigured = typeof env.JWT_SECRET === 'string' && env.JWT_SECRET.length > 0;
   if (env.M3S_AUTH_SIGNING_MODE === 'shared') return configuredProvider;
+  if (env.M3S_AUTH_SIGNING_MODE === 'legacy') return null;
   if (env.M3S_AUTH_SIGNING_MODE && env.M3S_AUTH_SIGNING_MODE !== 'legacy') return null;
   return legacyConfigured ? null : configuredProvider;
 }
@@ -266,12 +267,15 @@ function inspectProductionAuthConfiguration(env = {}, accounts = [], signingKeyP
     && !isSharedSigningKeyProvider(signingKeyProvider)) {
     return { ready: false, reason: 'signing-key-provider-invalid' };
   }
+  const configuredSigningSecret = typeof env.JWT_SECRET === 'string' && env.JWT_SECRET.length > 0;
+  if (env.M3S_AUTH_SIGNING_MODE === 'legacy' && !configuredSigningSecret) {
+    return { ready: false, reason: 'signing-secret-not-ready' };
+  }
   const production = env.NODE_ENV === 'production';
   const budgetRequested = env.FINANCE_BUDGET_DRAFTS_ENABLED === 'true';
   if (production && !budgetRequested) {
     return { ready: true, reason: 'production-budget-disabled' };
   }
-  const configuredSigningSecret = typeof env.JWT_SECRET === 'string' && env.JWT_SECRET.length > 0;
   if (production && configuredSigningSecret) {
     return { ready: false, reason: 'operator-signing-secret-forbidden' };
   }

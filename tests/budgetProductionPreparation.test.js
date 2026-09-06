@@ -77,6 +77,9 @@ test('production authentication requires a persistent shared signing key provide
   assert.equal(inspectProductionAuthConfiguration({ NODE_ENV: 'production',
     M3S_AUTH_SIGNING_MODE: 'invalid', JWT_SECRET: JWT_SECRET_FIXTURE }, []).reason,
   'signing-mode-invalid');
+  assert.equal(inspectProductionAuthConfiguration({ NODE_ENV: 'production',
+    M3S_AUTH_SIGNING_MODE: 'legacy', ...signingKeysEnv() }, [], provider).reason,
+  'signing-secret-not-ready');
   assert.deepEqual(inspectProductionAuthConfiguration({ NODE_ENV: 'production',
     M3S_AUTH_SIGNING_MODE: 'shared', JWT_SECRET: JWT_SECRET_FIXTURE, ...signingKeysEnv() }, [], provider),
   { ready: true, reason: 'production-budget-disabled' });
@@ -222,6 +225,7 @@ test('legacy-to-shared cutover signs explicitly and verifies both formats', () =
   assert.equal(verifyJwtToken(legacyToken, { provider, now }), null);
   assert.equal(verifyJwtToken(sharedToken, { provider, now }).id, 'shared');
   assert.equal(selectSigningKeyProvider({}, provider), provider);
+  assert.equal(selectSigningKeyProvider({ M3S_AUTH_SIGNING_MODE: 'legacy' }, provider), null);
   assert.equal(selectSigningKeyProvider({ M3S_AUTH_SIGNING_MODE: 'invalid' }, provider), null);
 });
 
