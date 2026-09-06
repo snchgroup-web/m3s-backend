@@ -148,7 +148,9 @@ Une activation Budget en production interdit `JWT_SECRET` et exige un trousseau 
 M3S_AUTH_SIGNING_KEYS_JSON={"activeKeyId":"budget-AAAA-MM","keys":[{"id":"budget-AAAA-MM","secret":"<43_caracteres_base64url>"}]}
 ```
 
-Le trousseau accepte au maximum trois clés fortes et distinctes. Pour une rotation sans interruption, ajouter la nouvelle clé, la désigner par `activeKeyId`, redéployer toutes les instances, puis retirer l'ancienne après expiration ou révocation des jetons concernés. Les JWT portent un `kid`; une clé retirée ou inconnue est refusée. Aucun endpoint ni journal n'expose les clés.
+Le trousseau accepte au maximum trois clés fortes et distinctes. Sa préparation n'invalide pas les sessions historiques : tant que `JWT_SECRET` reste défini, le serveur continue à l'utiliser et n'active pas silencieusement le nouveau fournisseur.
+
+Une rotation sans interruption suit trois temps : ajouter la nouvelle clé tout en gardant l'ancienne comme `activeKeyId`, puis redéployer toutes les instances ; changer ensuite `activeKeyId` et redéployer toutes les instances ; retirer enfin l'ancienne clé après expiration ou révocation des jetons concernés. Les JWT portent un `kid`; une clé retirée ou inconnue est refusée. Aucun endpoint ni journal n'expose les clés.
 
 Copier uniquement le JSON généré dans Railway. Le mot de passe en clair ne doit pas être commité.
 

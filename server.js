@@ -72,6 +72,7 @@ const {
 const {
   assertProductionAuthConfiguration,
   createEnvironmentSigningKeyProvider,
+  selectSigningKeyProvider,
   signJwtToken,
   verifyJwtToken,
   normalizeLoginIdentifier,
@@ -93,7 +94,9 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://l
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
-const AUTH_KEY_PROVIDER = createEnvironmentSigningKeyProvider(process.env);
+const CONFIGURED_AUTH_KEY_PROVIDER = createEnvironmentSigningKeyProvider(process.env);
+// Pre-provisioning the shared ring must not invalidate legacy sessions before the explicit cutover.
+const AUTH_KEY_PROVIDER = selectSigningKeyProvider(process.env, CONFIGURED_AUTH_KEY_PROVIDER);
 const AUTH_SECRET = process.env.JWT_SECRET
   || 'm3s-development-secret-change-me';
 const API_REQUIRE_AUTH = process.env.API_REQUIRE_AUTH === 'true';

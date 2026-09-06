@@ -106,6 +106,11 @@ function isSharedSigningKeyProvider(provider) {
     && provider.keys.some(key => key.id === provider.activeKeyId));
 }
 
+function selectSigningKeyProvider(env = {}, configuredProvider = null) {
+  const legacyConfigured = typeof env.JWT_SECRET === 'string' && env.JWT_SECRET.length > 0;
+  return legacyConfigured ? null : configuredProvider;
+}
+
 function signingKey(provider, keyId) {
   if (!isSharedSigningKeyProvider(provider)) return null;
   return provider.keys.find(key => key.id === keyId) || null;
@@ -165,9 +170,13 @@ function verifyJwtToken(token, { provider = null, fallbackSecret = null, now = (
     || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) return null;
   const payload = parseBase64UrlJson(encodedBody);
   const currentTime = Math.floor(now() / 1000);
+  const lifetime = payload && Number.isInteger(payload.exp) && Number.isInteger(payload.iat)
+    ? payload.exp - payload.iat
+    : null;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)
     || !Number.isInteger(payload.iat) || !Number.isInteger(payload.exp)
-    || payload.iat > currentTime + 60 || payload.exp <= currentTime || payload.exp <= payload.iat) return null;
+    || payload.iat > currentTime + 60 || payload.exp <= currentTime
+    || lifetime < 60 || lifetime > 24 * 60 * 60) return null;
   return payload;
 }
 
@@ -298,6 +307,7 @@ module.exports = {
   hasStrongSigningSecret,
   createEnvironmentSigningKeyProvider,
   isSharedSigningKeyProvider,
+  selectSigningKeyProvider,
   signJwtToken,
   verifyJwtToken,
   inspectProductionAuthConfiguration,

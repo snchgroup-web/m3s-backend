@@ -14,6 +14,7 @@ const {
   hasStrongSigningSecret,
   createEnvironmentSigningKeyProvider,
   isSharedSigningKeyProvider,
+  selectSigningKeyProvider,
   signJwtToken,
   verifyJwtToken,
   hasValidPasswordCredential,
@@ -179,17 +180,23 @@ test('shared signing key provider supports bounded multi-instance rotation and r
   const oldKey = { id: 'budget-2026-08', secret: signingSecret('old-shared-signing-key') };
   const newKey = { id: 'budget-2026-09', secret: signingSecret('new-shared-signing-key') };
   const now = () => Date.parse('2026-09-06T12:00:00Z');
-  const oldProvider = createEnvironmentSigningKeyProvider(signingKeysEnv(oldKey.id, [oldKey]));
-  const rotatingEnv = signingKeysEnv(newKey.id, [newKey, oldKey]);
-  const firstInstance = createEnvironmentSigningKeyProvider(rotatingEnv);
-  const secondInstance = createEnvironmentSigningKeyProvider(rotatingEnv);
-  const oldToken = signJwtToken({ id: 'user-a', tenantId: 'org-a' }, { provider: oldProvider, now });
+  const stagedProvider = createEnvironmentSigningKeyProvider(signingKeysEnv(oldKey.id, [oldKey, newKey]));
+  const oldToken = signJwtToken({ id: 'user-a', tenantId: 'org-a' }, { provider: stagedProvider, now });
+  const activatedEnv = signingKeysEnv(newKey.id, [newKey, oldKey]);
+  const firstInstance = createEnvironmentSigningKeyProvider(activatedEnv);
+  const secondInstance = createEnvironmentSigningKeyProvider(activatedEnv);
+  assert.equal(verifyJwtToken(oldToken, { provider: firstInstance, now }).id, 'user-a');
   const newToken = signJwtToken({ id: 'user-a', tenantId: 'org-a' }, { provider: firstInstance, now });
-  assert.equal(verifyJwtToken(oldToken, { provider: secondInstance, now }).id, 'user-a');
   assert.equal(verifyJwtToken(newToken, { provider: secondInstance, now }).tenantId, 'org-a');
   const retiredProvider = createEnvironmentSigningKeyProvider(signingKeysEnv(newKey.id, [newKey]));
   assert.equal(verifyJwtToken(oldToken, { provider: retiredProvider, now }), null);
   assert.equal(verifyJwtToken(newToken, { provider: retiredProvider, now }).id, 'user-a');
+});
+
+test('legacy signing remains selected while JWT_SECRET is configured', () => {
+  const provider = createEnvironmentSigningKeyProvider(signingKeysEnv());
+  assert.equal(selectSigningKeyProvider({ JWT_SECRET: JWT_SECRET_FIXTURE }, provider), null);
+  assert.equal(selectSigningKeyProvider({}, provider), provider);
 });
 
 test('shared signing key provider rejects malformed rings and unknown key ids', () => {
@@ -214,6 +221,14 @@ test('shared signing key provider rejects malformed rings and unknown key ids', 
   const header = JSON.parse(Buffer.from(encodedHeader, 'base64url').toString('utf8'));
   const unknownHeader = Buffer.from(JSON.stringify({ ...header, kid: 'unknown-key' })).toString('base64url');
   assert.equal(verifyJwtToken(`${unknownHeader}.${body}.${signature}`, {
+    provider, now: () => 1000000
+  }), null);
+  assert.throws(() => signJwtToken({ id: 'user-a' }, { provider, lifetimeSeconds: 59 }));
+  const excessiveLifetimeBody = Buffer.from(JSON.stringify({ id: 'user-a', iat: 1000,
+    exp: 1000 + 24 * 60 * 60 + 1 })).toString('base64url');
+  const excessiveSignature = crypto.createHmac('sha256', JWT_SECRET_FIXTURE)
+    .update(`${encodedHeader}.${excessiveLifetimeBody}`).digest('base64url');
+  assert.equal(verifyJwtToken(`${encodedHeader}.${excessiveLifetimeBody}.${excessiveSignature}`, {
     provider, now: () => 1000000
   }), null);
 });
@@ -561,7 +576,7 @@ test('Finance DDL is identifier-safe and absent from normal server startup', () 
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.doesNotMatch(server, /ensureAdministrationRegistrySchema|ensureManagementPortfolio|ALTER TABLE/);
   assert.match(server, /resolveBudgetStorageConfig/);
-  assert.match(server, /createEnvironmentSigningKeyProvider\(process\.env\)/);
+  assert.match(server, /selectSigningKeyProvider\(process\.env, CONFIGURED_AUTH_KEY_PROVIDER\)/);
   assert.match(server, /revision: APP_REVISION/);
   assert.match(server, /findUniqueLoginAccount\(users, loginIdentifier\)/);
   assert.match(server, /isBudgetRoute\(req\.path\)/);

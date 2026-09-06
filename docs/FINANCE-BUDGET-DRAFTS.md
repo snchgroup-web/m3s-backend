@@ -463,8 +463,9 @@ Ce candidat traite uniquement les ecarts techniques encore reproductibles locale
 - Les identifiants sont bornes et uniques; les secrets doivent etre des valeurs aleatoires canoniques de 32 octets en base64url, fortes et distinctes.
 - Les cles restent non enumerables dans l'objet fournisseur afin d'eviter leur serialisation accidentelle. Aucun secret n'est journalise ou renvoye par une API.
 - Les JWT emis avec le fournisseur portent `alg=HS256`, `typ=JWT` et un `kid`. Une signature inconnue, une cle retiree, un en-tete non canonique, une duree hors de 60 secondes a 24 heures ou un jeton expire est refuse.
-- Une rotation conserve temporairement l'ancienne cle comme cle de verification, utilise la nouvelle pour signer, puis refuse l'ancien jeton des que l'ancienne cle est retiree.
+- Une rotation sans interruption separe la diffusion et l'activation : premier deploiement avec les deux cles et l'ancienne encore active; deuxieme deploiement avec la nouvelle active apres diffusion complete; retrait de l'ancienne seulement apres expiration ou revocation des jetons concernes.
 - En production avec Budget demande, `JWT_SECRET` reste interdit et le trousseau partage est obligatoire. En test, le trousseau ou le secret fort historique sont acceptes.
+- La presence anticipee du trousseau ne remplace pas `JWT_SECRET` tant que celui-ci reste configure; les sessions historiques ne sont donc pas invalidees avant la bascule explicite.
 - Le middleware Budget relit le compte courant apres validation du JWT : un jeton deja emis est refuse en `401` des que le compte est desactive ou ne correspond plus au tenant/principal.
 
 ### P4 - revision de sante
@@ -478,6 +479,6 @@ Ce candidat traite uniquement les ecarts techniques encore reproductibles locale
 - Rotation simulee entre deux instances partageant le meme trousseau : ancien et nouveau jetons verifies pendant la transition, ancien jeton refuse apres retrait de l'ancienne cle.
 - Trousseaux malformes, cle active absente, doublons, plus de trois cles, secret faible et `kid` inconnu refuses.
 - Jeton deja emis puis compte desactive : acces Budget refuse en `401`.
-- Suite backend : 109/109 tests; CORS : 9/9; `git diff --check` propre.
+- Suite backend : 110/110 tests; CORS : 9/9; `git diff --check` propre.
 
 Verdicts inchanges : `P3 NO-GO` jusqu'a recette sur deux instances isolees avec responsables et fenetre; `P4 NO-GO` jusqu'aux alertes, seuils, canal et double retour arriere. `P1`, `P2`, `P5` et le verdict global restent egalement `NO-GO`.
