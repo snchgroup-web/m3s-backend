@@ -109,8 +109,8 @@ function validApplicationEvent(event, expectedRevision) {
     && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(event.timestamp)
     && Number.isFinite(Date.parse(event.timestamp))
     && typeof event.correlationId === 'string'
-    && event.correlationId.length > 0
-    && event.correlationId.length <= 128
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      .test(event.correlationId)
     && ['completed', 'aborted'].includes(event.outcome)
     && ['GET', 'POST', 'PUT'].includes(event.method)
     && /^\/api\/finance\/budget-drafts(?:\/capabilities|\/:id|\/:invalid)?$/.test(event.route)
@@ -156,6 +156,10 @@ function analyzeApplication(lines, expectedRevision, expectedStatuses = {}, malf
     .filter(key => !Object.hasOwn(event, key))))].sort();
   const invalidEvents = events.filter(event => !validApplicationEvent(event, expectedRevision)).length;
   const invalidRevisions = events.filter(event => event.revision !== expectedRevision).length;
+  const correlationIds = events.map(event => event.correlationId);
+  const duplicateCorrelationIds = [...new Set(correlationIds.filter((id, index) => (
+    correlationIds.indexOf(id) !== index
+  )))].sort();
   const actualStatuses = events.reduce((counts, event) => {
     const status = String(event.status);
     counts[status] = (counts[status] || 0) + 1;
@@ -172,10 +176,11 @@ function analyzeApplication(lines, expectedRevision, expectedStatuses = {}, malf
   if (missingFields.length) stopReasons.push('MISSING_EVENT_FIELDS');
   if (invalidRevisions) stopReasons.push('UNAUTHORIZED_EVENT_REVISION');
   if (invalidEvents) stopReasons.push('INVALID_EVENT_CONTRACT');
+  if (duplicateCorrelationIds.length) stopReasons.push('DUPLICATE_CORRELATION_IDS');
   if (statusMismatches.length) stopReasons.push('EVENT_STATUS_MISMATCH');
   return { kind: 'application', status: stopReasons.length ? 'stop' : 'passed',
     events: events.length, expectedRevision, unsafeFields, missingFields,
-    invalidEvents, invalidRevisions, malformedRecords,
+    invalidEvents, invalidRevisions, malformedRecords, duplicateCorrelationIds,
     expectedStatuses, actualStatuses, statusMismatches,
     alert: stopReasons.length ? 'BUDGET_PREVIEW_STOP' : null, stopReasons };
 }

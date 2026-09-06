@@ -174,10 +174,14 @@ async function runPreviewTransitions(config, {
 
     await gate(PHASES[2]);
     phaseStartedAt = now();
-    const newProviderToken = await login(config.primaryUrl);
+    const [newProviderToken, secondaryNewProviderToken] = await Promise.all([
+      login(config.primaryUrl), login(config.secondaryUrl)
+    ]);
     assert.equal(tokenHeader(newProviderToken)?.kid, 'preview-new');
+    assert.equal(tokenHeader(secondaryNewProviderToken)?.kid, 'preview-new');
     await bothCapabilities(oldProviderToken);
     await bothCapabilities(newProviderToken);
+    await bothCapabilities(secondaryNewProviderToken);
     await observe(PHASES[2], phaseStartedAt);
     report.phases.push(PHASES[2]);
 

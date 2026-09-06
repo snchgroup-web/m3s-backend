@@ -180,7 +180,8 @@ test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
 test('application log analyzer accepts only the sanitized Budget event contract', () => {
   const revision = '5abd8df142065a11a631490c440328c752fe8cdd';
   const safe = { event: 'budget_request', timestamp: '2026-09-06T00:00:00.000Z',
-    correlationId: 'test', outcome: 'completed', method: 'GET',
+    correlationId: '123e4567-e89b-42d3-a456-426614174000',
+    outcome: 'completed', method: 'GET',
     route: '/api/finance/budget-drafts', status: 200, durationMs: 12,
     code: null, revision };
   assert.equal(logs.analyzeApplication(
@@ -200,6 +201,9 @@ test('application log analyzer accepts only the sanitized Budget event contract'
   assert.deepEqual(logs.analyzeApplication(
     [{ ...safe, method: 'BANANA' }], revision, { 200: 1 }
   ).stopReasons, ['INVALID_EVENT_CONTRACT']);
+  assert.deepEqual(logs.analyzeApplication([
+    safe, { ...safe, timestamp: '2026-09-06T00:00:01.000Z' }
+  ], revision, { 200: 2 }).stopReasons, ['DUPLICATE_CORRELATION_IDS']);
   assert.deepEqual(logs.analyzeApplication([safe], revision, { 200: 1, 401: 1 }).stopReasons,
     ['EVENT_STATUS_MISMATCH']);
   assert.deepEqual(logs.parseArgs(['--application', '--expected-revision', revision,
