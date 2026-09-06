@@ -281,8 +281,9 @@ const signToken = payload => signJwtToken(payload, {
 });
 
 const parseToken = token => verifyJwtToken(token, {
-  provider: AUTH_KEY_PROVIDER,
-  fallbackSecret: AUTH_SECRET
+  provider: CONFIGURED_AUTH_KEY_PROVIDER,
+  fallbackSecret: AUTH_SECRET,
+  allowLegacyFallback: Boolean(CONFIGURED_AUTH_KEY_PROVIDER && process.env.JWT_SECRET)
 });
 
 const authenticateRequest = (req, res, next) => {

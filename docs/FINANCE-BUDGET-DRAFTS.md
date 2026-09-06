@@ -465,7 +465,7 @@ Ce candidat traite uniquement les ecarts techniques encore reproductibles locale
 - Les JWT emis avec le fournisseur portent `alg=HS256`, `typ=JWT` et un `kid`. Une signature inconnue, une cle retiree, un en-tete non canonique, une duree hors de 60 secondes a 24 heures ou un jeton expire est refuse.
 - Une rotation sans interruption separe la diffusion et l'activation : premier deploiement avec les deux cles et l'ancienne encore active; deuxieme deploiement avec la nouvelle active apres diffusion complete; retrait de l'ancienne seulement apres expiration ou revocation des jetons concernes.
 - En production avec Budget demande, `JWT_SECRET` reste interdit et le trousseau partage est obligatoire. En test, le trousseau ou le secret fort historique sont acceptes.
-- La presence anticipee du trousseau ne remplace pas `JWT_SECRET` tant que celui-ci reste configure; les sessions historiques ne sont donc pas invalidees avant la bascule explicite.
+- La migration depuis `JWT_SECRET` utilise un mode explicite : trousseau distribue avec mode `legacy`, puis `M3S_AUTH_SIGNING_MODE=shared` avec double verification, puis retrait de `JWT_SECRET` apres expiration ou revocation. Les anciennes et nouvelles instances restent ainsi compatibles pendant chaque deploiement progressif.
 - Le middleware Budget relit le compte courant apres validation du JWT : un jeton deja emis est refuse en `401` des que le compte est desactive ou ne correspond plus au tenant/principal.
 
 ### P4 - revision de sante

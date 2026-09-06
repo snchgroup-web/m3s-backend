@@ -108,6 +108,8 @@ function isSharedSigningKeyProvider(provider) {
 
 function selectSigningKeyProvider(env = {}, configuredProvider = null) {
   const legacyConfigured = typeof env.JWT_SECRET === 'string' && env.JWT_SECRET.length > 0;
+  if (env.M3S_AUTH_SIGNING_MODE === 'shared') return configuredProvider;
+  if (env.M3S_AUTH_SIGNING_MODE && env.M3S_AUTH_SIGNING_MODE !== 'legacy') return null;
   return legacyConfigured ? null : configuredProvider;
 }
 
@@ -149,18 +151,22 @@ function parseBase64UrlJson(value) {
   }
 }
 
-function verifyJwtToken(token, { provider = null, fallbackSecret = null, now = () => Date.now() } = {}) {
+function verifyJwtToken(token, { provider = null, fallbackSecret = null, allowLegacyFallback = false,
+  now = () => Date.now() } = {}) {
   if (typeof token !== 'string' || token.length > 16384) return null;
   const parts = token.split('.');
   if (parts.length !== 3) return null;
   const [encodedHeader, encodedBody, signature] = parts;
   const header = parseBase64UrlJson(encodedHeader);
   const providerReady = isSharedSigningKeyProvider(provider);
-  const expectedHeaderFields = providerReady ? ['alg', 'kid', 'typ'] : ['alg', 'typ'];
+  const providerToken = providerReady && typeof header?.kid === 'string';
+  const legacyToken = !providerToken && (!providerReady || allowLegacyFallback);
+  const expectedHeaderFields = providerToken ? ['alg', 'kid', 'typ'] : ['alg', 'typ'];
   if (!header || typeof header !== 'object' || Array.isArray(header)
     || Object.keys(header).sort().join(',') !== expectedHeaderFields.join(',')
     || header.alg !== 'HS256' || header.typ !== 'JWT') return null;
-  const secret = providerReady ? signingKey(provider, header.kid)?.secret : fallbackSecret;
+  const secret = providerToken ? signingKey(provider, header.kid)?.secret
+    : legacyToken ? fallbackSecret : null;
   if (typeof secret !== 'string' || !secret || !/^[A-Za-z0-9_-]{43}$/.test(signature)) return null;
   const expected = crypto.createHmac('sha256', secret)
     .update(`${encodedHeader}.${encodedBody}`).digest('base64url');

@@ -148,9 +148,9 @@ Une activation Budget en production interdit `JWT_SECRET` et exige un trousseau 
 M3S_AUTH_SIGNING_KEYS_JSON={"activeKeyId":"budget-AAAA-MM","keys":[{"id":"budget-AAAA-MM","secret":"<43_caracteres_base64url>"}]}
 ```
 
-Le trousseau accepte au maximum trois clés fortes et distinctes. Sa préparation n'invalide pas les sessions historiques : tant que `JWT_SECRET` reste défini, le serveur continue à l'utiliser et n'active pas silencieusement le nouveau fournisseur.
+Le trousseau accepte au maximum trois clés fortes et distinctes. Sa préparation n'invalide pas les sessions historiques : tant que `JWT_SECRET` reste défini et que `M3S_AUTH_SIGNING_MODE` vaut `legacy` ou reste absent, le serveur continue à signer avec l'ancien secret. Pendant cette coexistence, il vérifie les deux formats.
 
-Une rotation sans interruption suit trois temps : ajouter la nouvelle clé tout en gardant l'ancienne comme `activeKeyId`, puis redéployer toutes les instances ; changer ensuite `activeKeyId` et redéployer toutes les instances ; retirer enfin l'ancienne clé après expiration ou révocation des jetons concernés. Les JWT portent un `kid`; une clé retirée ou inconnue est refusée. Aucun endpoint ni journal n'expose les clés.
+La migration initiale suit trois déploiements : distribuer le trousseau avec le mode `legacy`; passer ensuite `M3S_AUTH_SIGNING_MODE=shared` tout en conservant `JWT_SECRET`, afin de signer avec le trousseau et de vérifier les deux formats; retirer enfin `JWT_SECRET` après expiration ou révocation des anciens jetons. Une rotation ultérieure du trousseau suit aussi trois temps : distribuer les deux clés avec l'ancienne active, activer la nouvelle après propagation complète, puis retirer l'ancienne. Les JWT du trousseau portent un `kid`; une clé retirée ou inconnue est refusée. Aucun endpoint ni journal n'expose les clés.
 
 Copier uniquement le JSON généré dans Railway. Le mot de passe en clair ne doit pas être commité.
 

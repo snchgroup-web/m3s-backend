@@ -193,10 +193,27 @@ test('shared signing key provider supports bounded multi-instance rotation and r
   assert.equal(verifyJwtToken(newToken, { provider: retiredProvider, now }).id, 'user-a');
 });
 
-test('legacy signing remains selected while JWT_SECRET is configured', () => {
+test('legacy-to-shared cutover signs explicitly and verifies both formats', () => {
   const provider = createEnvironmentSigningKeyProvider(signingKeysEnv());
-  assert.equal(selectSigningKeyProvider({ JWT_SECRET: JWT_SECRET_FIXTURE }, provider), null);
+  const now = () => Date.parse('2026-09-06T12:00:00Z');
+  const legacyEnv = { JWT_SECRET: JWT_SECRET_FIXTURE };
+  assert.equal(selectSigningKeyProvider(legacyEnv, provider), null);
+  const legacyToken = signJwtToken({ id: 'legacy' }, {
+    provider: selectSigningKeyProvider(legacyEnv, provider), fallbackSecret: JWT_SECRET_FIXTURE, now
+  });
+  const sharedEnv = { ...legacyEnv, M3S_AUTH_SIGNING_MODE: 'shared' };
+  assert.equal(selectSigningKeyProvider(sharedEnv, provider), provider);
+  const sharedToken = signJwtToken({ id: 'shared' }, {
+    provider: selectSigningKeyProvider(sharedEnv, provider), fallbackSecret: JWT_SECRET_FIXTURE, now
+  });
+  const dualVerification = { provider, fallbackSecret: JWT_SECRET_FIXTURE,
+    allowLegacyFallback: true, now };
+  assert.equal(verifyJwtToken(legacyToken, dualVerification).id, 'legacy');
+  assert.equal(verifyJwtToken(sharedToken, dualVerification).id, 'shared');
+  assert.equal(verifyJwtToken(legacyToken, { provider, now }), null);
+  assert.equal(verifyJwtToken(sharedToken, { provider, now }).id, 'shared');
   assert.equal(selectSigningKeyProvider({}, provider), provider);
+  assert.equal(selectSigningKeyProvider({ M3S_AUTH_SIGNING_MODE: 'invalid' }, provider), null);
 });
 
 test('shared signing key provider rejects malformed rings and unknown key ids', () => {
