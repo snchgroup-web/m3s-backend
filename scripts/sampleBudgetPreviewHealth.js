@@ -56,16 +56,15 @@ async function sampleHealth(config, {
       durations.push(now() - started);
       if (response.status !== 200) refusal('HEALTH_UNAVAILABLE');
     } finally { clearTimeout(timer); }
-    if (index + 1 < samples) {
-      const nextSampleAt = phaseStartedAt + ((index + 1) * intervalMs);
-      await sleep(Math.max(0, nextSampleAt - now()));
-    }
+    const nextSampleAt = phaseStartedAt + ((index + 1) * intervalMs);
+    await sleep(Math.max(0, nextSampleAt - now()));
   }
   const ordered = [...durations].sort((left, right) => left - right);
   const p95Ms = ordered[Math.max(0, Math.ceil(ordered.length * 0.95) - 1)] || 0;
   const maxMs = Math.max(...durations);
   if (p95Ms > 1500 || maxMs > 3000) refusal('HEALTH_LATENCY_THRESHOLD');
   return { mode: 'preview-health', phase: config.phase, target: config.baseUrl,
+    startUtc: new Date(phaseStartedAt).toISOString(), endUtc: new Date(now()).toISOString(),
     status: 'passed', samples: durations.length, intervalMs, p95Ms, maxMs };
 }
 
@@ -76,7 +75,8 @@ async function main(args = process.argv.slice(2), {
     const config = parseArgs(args);
     if (!config.execute) {
       log({ mode: 'plan', networkAccess: false, executionAuthorized: false,
-        phases: [...PHASES], samples: SAMPLES, intervalMs: INTERVAL_MS });
+        phases: [...PHASES], samples: SAMPLES, intervalMs: INTERVAL_MS,
+        windowMs: SAMPLES * INTERVAL_MS });
       return 0;
     }
     const report = await sampleHealth(config, { fetchImpl });

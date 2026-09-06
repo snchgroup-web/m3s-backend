@@ -133,15 +133,15 @@ async function runPreviewTransitions(config, {
       ]);
       responses.forEach(response => assert.equal(response.status, 200));
       durations.push(now() - started);
-      if (index + 1 < samples) {
-        const nextSampleAt = phaseStartedAt + ((index + 1) * intervalMs);
-        await sleep(Math.max(0, nextSampleAt - now()));
-      }
+      const nextSampleAt = phaseStartedAt + ((index + 1) * intervalMs);
+      await sleep(Math.max(0, nextSampleAt - now()));
     }
     const p95Ms = percentile95(durations);
     const maxMs = Math.max(...durations);
     if (p95Ms > 1500 || maxMs > 3000) refusal('OBSERVATION_LATENCY_THRESHOLD');
-    log({ phase, healthSamples: samples * 2, p95Ms, maxMs, status: 'passed' });
+    log({ phase, startUtc: new Date(phaseStartedAt).toISOString(),
+      endUtc: new Date(now()).toISOString(), healthSamples: samples * 2,
+      p95Ms, maxMs, status: 'passed' });
   };
 
   const report = { mode: 'preview-p3-p4', status: 'running', phases: [],
@@ -218,7 +218,9 @@ async function main(args = process.argv.slice(2), {
     const config = parseArgs(args, env);
     if (!config.execute) {
       log({ mode: 'plan', networkAccess: false, executionAuthorized: false, phases: PHASES,
-        observation: { samplesPerService: OBSERVATION_SAMPLES, intervalMs: OBSERVATION_INTERVAL_MS },
+        observation: { samplesPerService: OBSERVATION_SAMPLES,
+          intervalMs: OBSERVATION_INTERVAL_MS,
+          windowMs: OBSERVATION_SAMPLES * OBSERVATION_INTERVAL_MS },
         requires: ['Two distinct non-production preview URLs.', 'One pre-provisioned fictional owner.',
           'Exact target confirmation.', 'Operator confirmation after every Railway mutation.'] });
       return 0;

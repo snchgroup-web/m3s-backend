@@ -23,7 +23,7 @@ function applicationEvent(line) {
   return null;
 }
 
-function analyzeHttp(lines, expected409 = 0) {
+function analyzeHttp(lines, expected409 = 0, malformedRecords = 0) {
   const allRows = lines.filter(row => Number.isInteger(Number(row.httpStatus)));
   const healthRows = allRows.filter(row => ['/api/health', '/health']
     .includes(String(row.path || '')));
@@ -38,6 +38,7 @@ function analyzeHttp(lines, expected409 = 0) {
   const p95Ms = percentile95(durations);
   const maxMs = durations.length ? Math.max(...durations) : 0;
   const stopReasons = [];
+  if (malformedRecords) stopReasons.push('MALFORMED_LOG_RECORDS');
   if (!rows.length || durations.length !== rows.length) stopReasons.push('INCOMPLETE_HTTP_LOGS');
   if (rows.length < 20) stopReasons.push('INSUFFICIENT_HTTP_SAMPLES');
   if (healthRows.length < 20) stopReasons.push('INSUFFICIENT_HEALTH_SAMPLES');
@@ -50,7 +51,7 @@ function analyzeHttp(lines, expected409 = 0) {
   if (maxMs > 3000) stopReasons.push('HTTP_MAX_THRESHOLD');
   return { kind: 'http', status: stopReasons.length ? 'stop' : 'passed',
     totalHttpRows: allRows.length, samples: rows.length, healthSamples: healthRows.length,
-    failures5xx, healthFailures,
+    failures5xx, healthFailures, malformedRecords,
     conflicts409, expected409, p95Ms, maxMs,
     alert: stopReasons.length ? 'BUDGET_PREVIEW_STOP' : null, stopReasons };
 }
@@ -97,7 +98,7 @@ function parseExpectedStatuses(value) {
   return result;
 }
 
-function analyzeApplication(lines, expectedRevision, expectedStatuses = {}) {
+function analyzeApplication(lines, expectedRevision, expectedStatuses = {}, malformedRecords = 0) {
   const events = lines.map(applicationEvent).filter(Boolean);
   const unsafeFields = [...new Set(events.flatMap(event => Object.keys(event)
     .filter(key => !SAFE_EVENT_FIELDS.has(key))))].sort();
@@ -115,6 +116,7 @@ function analyzeApplication(lines, expectedRevision, expectedStatuses = {}) {
     (expectedStatuses[status] || 0) !== (actualStatuses[status] || 0)
   )).sort();
   const stopReasons = [];
+  if (malformedRecords) stopReasons.push('MALFORMED_LOG_RECORDS');
   if (!events.length) stopReasons.push('NO_BUDGET_EVENTS');
   if (unsafeFields.length) stopReasons.push('UNSAFE_EVENT_FIELDS');
   if (missingFields.length) stopReasons.push('MISSING_EVENT_FIELDS');
@@ -123,7 +125,8 @@ function analyzeApplication(lines, expectedRevision, expectedStatuses = {}) {
   if (statusMismatches.length) stopReasons.push('EVENT_STATUS_MISMATCH');
   return { kind: 'application', status: stopReasons.length ? 'stop' : 'passed',
     events: events.length, expectedRevision, unsafeFields, missingFields,
-    invalidEvents, invalidRevisions, expectedStatuses, actualStatuses, statusMismatches,
+    invalidEvents, invalidRevisions, malformedRecords,
+    expectedStatuses, actualStatuses, statusMismatches,
     alert: stopReasons.length ? 'BUDGET_PREVIEW_STOP' : null, stopReasons };
 }
 
@@ -161,14 +164,16 @@ async function main(args = process.argv.slice(2), {
     }
     const reader = readline.createInterface({ input, crlfDelay: Infinity });
     const lines = [];
+    let malformedRecords = 0;
     for await (const line of reader) {
       if (!line.trim()) continue;
       const parsed = parseJson(line);
-      if (parsed) lines.push(parsed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) lines.push(parsed);
+      else malformedRecords += 1;
     }
     const report = config.mode === 'http'
-      ? analyzeHttp(lines, config.expected409)
-      : analyzeApplication(lines, config.expectedRevision, config.expectedStatuses);
+      ? analyzeHttp(lines, config.expected409, malformedRecords)
+      : analyzeApplication(lines, config.expectedRevision, config.expectedStatuses, malformedRecords);
     log(report);
     return report.status === 'passed' ? 0 : 2;
   } catch (error) {

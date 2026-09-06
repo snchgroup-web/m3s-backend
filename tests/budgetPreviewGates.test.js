@@ -53,10 +53,12 @@ test('preview transition runner preserves tokens across all six operator gates',
   const old = token('preview-old');
   const current = token('preview-new');
   let phase = 'LEGACY_BASELINE';
+  let clock = 0;
   const prompts = [];
   const observations = [];
   const response = (status, payload = {}) => ({ status, async json() { return payload; } });
   const fetchImpl = async (url, options = {}) => {
+    clock += 10;
     const path = new URL(url).pathname;
     const authorization = options.headers?.Authorization || '';
     const bearer = authorization.replace(/^Bearer /, '');
@@ -92,7 +94,8 @@ test('preview transition runner preserves tokens across all six operator gates',
       phase = next;
       return `CONFIRM ${next}`;
     },
-    sleep: async () => {},
+    sleep: async delay => { clock += delay; },
+    now: () => clock,
     samples: transitions.OBSERVATION_SAMPLES,
     intervalMs: transitions.OBSERVATION_INTERVAL_MS,
     log: value => observations.push(value)
@@ -101,6 +104,9 @@ test('preview transition runner preserves tokens across all six operator gates',
   assert.deepEqual(prompts, transitions.PHASES);
   assert.deepEqual(report.phases, ['LEGACY_BASELINE', ...transitions.PHASES]);
   assert.deepEqual(observations.map(item => item.phase), report.phases);
+  observations.forEach(item => {
+    assert.equal(Date.parse(item.endUtc) - Date.parse(item.startUtc), 300000);
+  });
   assert.equal(JSON.stringify(report).includes('signature'), false);
 });
 
@@ -202,7 +208,9 @@ test('final preview health sampler requires twenty successful bounded observatio
   assert.equal(report.status, 'passed');
   assert.equal(report.samples, 20);
   assert.equal(calls, 20);
-  assert.deepEqual(sleepDelays, Array(19).fill(14000));
+  assert.deepEqual(sleepDelays, Array(20).fill(14000));
+  assert.equal(report.startUtc, '1970-01-01T00:00:00.000Z');
+  assert.equal(report.endUtc, '1970-01-01T00:05:00.000Z');
   await assert.rejects(() => health.sampleHealth(config, {
     fetchImpl: async () => ({ status: 503 }), sleep: async () => {},
     samples: health.SAMPLES, intervalMs: health.INTERVAL_MS
@@ -217,4 +225,18 @@ test('alert self-test emits a safe stop marker and exits with alert code', async
   assert.equal(code, 2);
   assert.deepEqual(output[0].stopReasons, ['HTTP_5XX', 'HEALTH_UNAVAILABLE']);
   assert.equal(output[0].alert, 'BUDGET_PREVIEW_STOP');
+});
+
+test('log analyzer stops when a nonempty Railway record is malformed', async () => {
+  const lines = Array.from({ length: 20 }, () => JSON.stringify({
+    httpStatus: 200, totalDuration: 20, path: '/api/health'
+  }));
+  lines.splice(10, 0, '{truncated');
+  const output = [];
+  const code = await logs.main(['--http', '--expected-409', '0'], {
+    input: Readable.from(`${lines.join('\n')}\n`), log: value => output.push(value)
+  });
+  assert.equal(code, 2);
+  assert.equal(output[0].malformedRecords, 1);
+  assert.deepEqual(output[0].stopReasons, ['MALFORMED_LOG_RECORDS']);
 });
