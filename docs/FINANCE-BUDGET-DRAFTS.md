@@ -482,3 +482,38 @@ Ce candidat traite uniquement les ecarts techniques encore reproductibles locale
 - Suite backend : 110/110 tests; CORS : 9/9; `git diff --check` propre.
 
 Verdicts inchanges : `P3 NO-GO` jusqu'a recette sur deux instances isolees avec responsables et fenetre; `P4 NO-GO` jusqu'aux alertes, seuils, canal et double retour arriere. `P1`, `P2`, `P5` et le verdict global restent egalement `NO-GO`.
+
+## BUDGET-GATES-REV-002 V0.1 - qualification post-fusion P3-P4
+
+### Reference et portee
+
+- Autorisation de fusion : Cheikh, Direction 2SG, le 06-09-2026.
+- Candidat revu : `2834c44dfac666c9d4ba42b696344ff52bcd92af`.
+- Fusion par squash : PR backend 55, commit `52876c59a82b2073bcda28fc6211725bbc28c46b`.
+- Controle d'integrite : arbre du commit fusionne identique a l'arbre du candidat revu; worktree de controle propre.
+- Portee : qualification des preuves nouvelles P3-P4 uniquement. Aucune cle, variable, IAM, DDL, migration, ressource, donnee ou activation Budget n'est autorisee par ce relevé.
+
+### Preuves qualifiees en une fois
+
+| Porte | Preuve recevable apres fusion | Limite | Qualification |
+| --- | --- | --- | --- |
+| `P3` | 110/110 tests couvrent trousseau borne, rotation simulee entre deux instances, double verification pendant la transition, retrait de l'ancienne cle et refus d'un jeton deja emis apres desactivation du compte; CORS 9/9; cinq remarques de revue corrigees et resolues; revue finale sans nouveau constat; GitGuardian vert | Simulation locale uniquement; aucun trousseau partage configure, aucune recette sur deux instances isolees effectivement deployees, aucun responsable ou proprietaire IAM nomme et aucune fenetre de rotation approuvee | Preuve technique partielle; `NO-GO` maintenu |
+| `P4` | Railway sert exactement la revision `52876c59a82b2073bcda28fc6211725bbc28c46b`; `/api/health` repond `200` avec BigQuery connecte; les capacites Budget sans authentification restent refusees `401` avec `Cache-Control: no-store` | Seule la preuve de correlation sante/revision est fermee; responsables, suppleant, canal, seuils 5xx/409, fenetre, critere d'arret, tests d'alertes et deux exercices complets de retour arriere restent absents | Ecart revision ferme; `NO-GO` maintenu |
+
+### Exceptions restantes
+
+1. `P3` : nommer responsable securite et proprietaire IAM; fixer une fenetre; executer en preview une recette multi-instance sur identites fictives avec rotation, retrait de cle, desactivation et retrait immediat de droit, sans exposer de secret.
+2. `P4` : nommer responsable et suppleant; choisir le canal; fixer fenetre, seuils et critere d'arret; tester alertes et telemetrie; repeter deux fois le retour arriere frontend puis backend jusqu'au refus ferme des ecritures et a la disponibilite de l'export JSON.
+
+### Verdict groupe
+
+| Porte | Verdict | Evolution |
+| --- | --- | --- |
+| `P3` | `NO-GO` | Capacites de code et simulations locales acceptees comme preuves partielles; exploitation partagee non prouvee |
+| `P4` | `NO-GO` | Correlation de la revision deployee prouvee; exploitation, alertes et retour arriere non prouves |
+| `P1` | `NO-GO` | Inchange |
+| `P2` | `NO-GO` | Inchange |
+| `P5` | `NO-GO` | Inchange et toujours conditionne par P1-P4 |
+| **Global** | **`NO-GO`** | Aucune activation autorisee |
+
+Prochaine etape Fast Track : preparer un seul paquet d'autorisation ciblee pour la recette preview P3-P4, en nommant environnement, acteurs, fenetre, commandes, valeurs non sensibles, controles et retour arriere. Cette preparation n'autorise ni configuration de production ni execution implicite.
