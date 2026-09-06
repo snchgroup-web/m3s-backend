@@ -226,7 +226,15 @@ test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
     '1970-01-01T00:02:00.000Z', '1970-01-01T00:07:00.000Z'
   ));
   assert.equal(guarded.status, 'passed');
+  assert.equal(guarded.auditStartCovered, true);
   assert.equal(guarded.cadenceHealthSamples, 20);
+  const missingAuditPrefix = logs.analyzeHttp(guardedRows.slice(1), 0, 0,
+    logs.parseExpectedWindow(
+      '1970-01-01T00:00:00.000Z', '1970-01-01T00:07:00.000Z',
+      '1970-01-01T00:02:00.000Z', '1970-01-01T00:07:00.000Z'
+    ));
+  assert.equal(missingAuditPrefix.auditStartCovered, false);
+  assert.deepEqual(missingAuditPrefix.stopReasons, ['INCOMPLETE_HTTP_TIME_COVERAGE']);
   assert.throws(() => logs.parseArgs(['--http', '--expected-409', '0']),
     /HTTP_EXPECTATIONS_REQUIRED/);
 });

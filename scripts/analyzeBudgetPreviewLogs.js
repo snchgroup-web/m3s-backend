@@ -84,6 +84,7 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindo
       && allTimes.every(timestamp => (
         timestamp >= expectedWindow.startMs && timestamp <= expectedWindow.endMs
       ))
+      && allTimes[0] <= expectedWindow.startMs + toleranceMs
       && cadenceHealthTimes.length > 0
       && cadenceHealthTimes[0] <= expectedWindow.healthStartMs + toleranceMs
       && cadenceHealthTimes.at(-1) >= expectedWindow.healthEndMs - toleranceMs
@@ -112,6 +113,7 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindo
     expectedEndUtc: expectedWindow?.endUtc || null,
     expectedHealthStartUtc: expectedWindow?.healthStartUtc || null,
     expectedHealthEndUtc: expectedWindow?.healthEndUtc || null,
+    auditStartCovered: expectedWindow ? allTimes[0] <= expectedWindow.startMs + 30000 : null,
     cadenceHealthSamples: cadenceHealthTimes.length,
     temporalCoverageComplete, maxHealthGapMs,
     conflicts409, expected409, p95Ms, maxMs,
