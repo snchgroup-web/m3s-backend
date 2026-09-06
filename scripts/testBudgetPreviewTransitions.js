@@ -123,9 +123,8 @@ async function runPreviewTransitions(config, {
     const answer = await prompt(`Type CONFIRM ${phase} after the bounded Railway changes: `);
     if (answer !== `CONFIRM ${phase}`) refusal(`OPERATOR_GATE_${phase}_REFUSED`);
   };
-  const observe = async phase => {
+  const observe = async (phase, phaseStartedAt) => {
     const durations = [];
-    const phaseStartedAt = now();
     for (let index = 0; index < samples; index++) {
       const started = now();
       const responses = await Promise.all([
@@ -152,40 +151,46 @@ async function runPreviewTransitions(config, {
     const legacyToken = await login(config.primaryUrl);
     let oldProviderToken;
     assert.equal(tokenHeader(legacyToken)?.kid, undefined);
+    let phaseStartedAt = now();
     await bothCapabilities(legacyToken);
-    await observe('LEGACY_BASELINE');
+    await observe('LEGACY_BASELINE', phaseStartedAt);
     report.phases.push('LEGACY_BASELINE');
 
     await gate(PHASES[0]);
+    phaseStartedAt = now();
     await bothCapabilities(legacyToken);
     oldProviderToken = await login(config.primaryUrl);
     assert.equal(tokenHeader(oldProviderToken)?.kid, 'preview-old');
     await bothCapabilities(oldProviderToken);
-    await observe(PHASES[0]);
+    await observe(PHASES[0], phaseStartedAt);
     report.phases.push(PHASES[0]);
 
     await gate(PHASES[1]);
+    phaseStartedAt = now();
     await bothCapabilities(legacyToken);
     await bothCapabilities(oldProviderToken);
-    await observe(PHASES[1]);
+    await observe(PHASES[1], phaseStartedAt);
     report.phases.push(PHASES[1]);
 
     await gate(PHASES[2]);
+    phaseStartedAt = now();
     const newProviderToken = await login(config.primaryUrl);
     assert.equal(tokenHeader(newProviderToken)?.kid, 'preview-new');
     await bothCapabilities(oldProviderToken);
     await bothCapabilities(newProviderToken);
-    await observe(PHASES[2]);
+    await observe(PHASES[2], phaseStartedAt);
     report.phases.push(PHASES[2]);
 
     await gate(PHASES[3]);
+    phaseStartedAt = now();
     await bothCapabilities(legacyToken, 401);
     await bothCapabilities(oldProviderToken, 401);
     await bothCapabilities(newProviderToken);
-    await observe(PHASES[3]);
+    await observe(PHASES[3], phaseStartedAt);
     report.phases.push(PHASES[3]);
 
     await gate(PHASES[4]);
+    phaseStartedAt = now();
     await bothCapabilities(newProviderToken, 200, false);
     const deniedBudget = syntheticBudget('permission-revocation');
     const denied = await Promise.all([config.primaryUrl, config.secondaryUrl].map(baseUrl => call(
@@ -193,12 +198,13 @@ async function runPreviewTransitions(config, {
         body: { budget: deniedBudget } }
     )));
     denied.forEach(response => assert.equal(response.status, 403));
-    await observe(PHASES[4]);
+    await observe(PHASES[4], phaseStartedAt);
     report.phases.push(PHASES[4]);
 
     await gate(PHASES[5]);
+    phaseStartedAt = now();
     await bothCapabilities(newProviderToken, 401);
-    await observe(PHASES[5]);
+    await observe(PHASES[5], phaseStartedAt);
     report.phases.push(PHASES[5]);
     report.status = 'passed';
   } catch (error) {
