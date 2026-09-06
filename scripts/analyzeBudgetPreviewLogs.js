@@ -23,8 +23,24 @@ function applicationEvent(line) {
   return null;
 }
 
-function analyzeHttp(lines, expected409 = 0, malformedRecords = 0) {
-  const allRows = lines.filter(row => Number.isInteger(Number(row.httpStatus)));
+function validUtc(value) {
+  return typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
+    && Number.isFinite(Date.parse(value));
+}
+
+function validHttpRecord(row) {
+  return row && typeof row === 'object'
+    && Number.isInteger(Number(row.httpStatus))
+    && Number.isFinite(Number(row.totalDuration))
+    && typeof row.path === 'string'
+    && row.path.startsWith('/')
+    && validUtc(row.timestamp);
+}
+
+function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindow = null) {
+  const invalidHttpRecords = lines.filter(row => !validHttpRecord(row)).length;
+  const allRows = lines.filter(validHttpRecord);
   const healthRows = allRows.filter(row => ['/api/health', '/health']
     .includes(String(row.path || '')));
   const rows = allRows.filter(row => (
@@ -37,8 +53,28 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0) {
   const conflicts409 = statuses.filter(status => status === 409).length;
   const p95Ms = percentile95(durations);
   const maxMs = durations.length ? Math.max(...durations) : 0;
+  const healthTimes = healthRows.map(row => Date.parse(row.timestamp)).sort((left, right) => left - right);
+  const allTimes = allRows.map(row => Date.parse(row.timestamp)).sort((left, right) => left - right);
+  const maxHealthGapMs = healthTimes.slice(1).reduce((maximum, timestamp, index) => (
+    Math.max(maximum, timestamp - healthTimes[index])
+  ), 0);
+  let temporalCoverageComplete = null;
+  if (expectedWindow) {
+    const toleranceMs = 30000;
+    temporalCoverageComplete = allTimes.length > 0
+      && allTimes.every(timestamp => (
+        timestamp >= expectedWindow.startMs && timestamp <= expectedWindow.endMs
+      ))
+      && healthTimes[0] <= expectedWindow.startMs + toleranceMs
+      && healthTimes.at(-1) >= expectedWindow.endMs - toleranceMs
+      && maxHealthGapMs <= toleranceMs;
+  }
   const stopReasons = [];
   if (malformedRecords) stopReasons.push('MALFORMED_LOG_RECORDS');
+  if (invalidHttpRecords) stopReasons.push('INVALID_HTTP_LOG_RECORDS');
+  if (expectedWindow && !temporalCoverageComplete) {
+    stopReasons.push('INCOMPLETE_HTTP_TIME_COVERAGE');
+  }
   if (!rows.length || durations.length !== rows.length) stopReasons.push('INCOMPLETE_HTTP_LOGS');
   if (rows.length < 20) stopReasons.push('INSUFFICIENT_HTTP_SAMPLES');
   if (healthRows.length < 20) stopReasons.push('INSUFFICIENT_HEALTH_SAMPLES');
@@ -51,7 +87,10 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0) {
   if (maxMs > 3000) stopReasons.push('HTTP_MAX_THRESHOLD');
   return { kind: 'http', status: stopReasons.length ? 'stop' : 'passed',
     totalHttpRows: allRows.length, samples: rows.length, healthSamples: healthRows.length,
-    failures5xx, healthFailures, malformedRecords,
+    failures5xx, healthFailures, malformedRecords, invalidHttpRecords,
+    expectedStartUtc: expectedWindow?.startUtc || null,
+    expectedEndUtc: expectedWindow?.endUtc || null,
+    temporalCoverageComplete, maxHealthGapMs,
     conflicts409, expected409, p95Ms, maxMs,
     alert: stopReasons.length ? 'BUDGET_PREVIEW_STOP' : null, stopReasons };
 }
@@ -98,6 +137,14 @@ function parseExpectedStatuses(value) {
   return result;
 }
 
+function parseExpectedWindow(startUtc, endUtc) {
+  if (!validUtc(startUtc) || !validUtc(endUtc)) throw new Error('HTTP_WINDOW_INVALID');
+  const startMs = Date.parse(startUtc);
+  const endMs = Date.parse(endUtc);
+  if (endMs <= startMs) throw new Error('HTTP_WINDOW_INVALID');
+  return { startUtc, endUtc, startMs, endMs };
+}
+
 function analyzeApplication(lines, expectedRevision, expectedStatuses = {}, malformedRecords = 0) {
   const events = lines.map(applicationEvent).filter(Boolean);
   const unsafeFields = [...new Set(events.flatMap(event => Object.keys(event)
@@ -142,10 +189,12 @@ function parseArgs(args) {
       expectedStatuses: parseExpectedStatuses(args[4]) };
   }
   if (args[0] === '--http') {
-    if (args.length !== 3 || args[1] !== '--expected-409' || !/^\d+$/.test(args[2])) {
-      throw new Error('EXPECTED_409_REQUIRED');
+    if (args.length !== 7 || args[1] !== '--expected-409' || !/^\d+$/.test(args[2])
+      || args[3] !== '--start-utc' || args[5] !== '--end-utc') {
+      throw new Error('HTTP_EXPECTATIONS_REQUIRED');
     }
-    return { mode: 'http', expected409: Number(args[2]) };
+    return { mode: 'http', expected409: Number(args[2]),
+      expectedWindow: parseExpectedWindow(args[4], args[6]) };
   }
   throw new Error('INVALID_ARGUMENTS');
 }
@@ -157,7 +206,8 @@ async function main(args = process.argv.slice(2), {
     const config = parseArgs(args);
     if (config.selfTest) {
       const report = analyzeHttp(Array.from({ length: 20 }, () => ({
-        httpStatus: 500, totalDuration: 10, path: '/api/health'
+        httpStatus: 500, totalDuration: 10, path: '/api/health',
+        timestamp: '2026-09-06T00:00:00.000Z'
       })), 0);
       log(report);
       return report.status === 'stop' && report.stopReasons.includes('HTTP_5XX') ? 2 : 1;
@@ -172,7 +222,7 @@ async function main(args = process.argv.slice(2), {
       else malformedRecords += 1;
     }
     const report = config.mode === 'http'
-      ? analyzeHttp(lines, config.expected409, malformedRecords)
+      ? analyzeHttp(lines, config.expected409, malformedRecords, config.expectedWindow)
       : analyzeApplication(lines, config.expectedRevision, config.expectedStatuses, malformedRecords);
     log(report);
     return report.status === 'passed' ? 0 : 2;
@@ -184,4 +234,4 @@ async function main(args = process.argv.slice(2), {
 
 if (require.main === module) main().then(code => { process.exitCode = code; });
 module.exports = { analyzeHttp, analyzeApplication, validApplicationEvent,
-  parseExpectedStatuses, parseArgs, main };
+  validHttpRecord, parseExpectedStatuses, parseExpectedWindow, parseArgs, main };

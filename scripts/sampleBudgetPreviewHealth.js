@@ -1,7 +1,8 @@
 const { normalizeUrl } = require('./testBudgetHttp');
 
 const PHASES = new Set([
-  'HTTP_ACCEPTANCE', 'ROLLBACK_1_CLOSED', 'ROLLBACK_2_CLOSED', 'FINAL_CLEANUP'
+  'RUN_GUARD', 'HTTP_ACCEPTANCE', 'ROLLBACK_1_CLOSED',
+  'ROLLBACK_2_CLOSED', 'FINAL_CLEANUP'
 ]);
 const SAMPLES = 20;
 const INTERVAL_MS = 15000;

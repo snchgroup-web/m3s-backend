@@ -7,6 +7,9 @@ const health = require('../scripts/sampleBudgetPreviewHealth');
 
 const primary = 'https://preview-a.example.test/api';
 const secondary = 'https://preview-b.example.test/api';
+const httpRecord = (value, index = 0) => ({
+  timestamp: new Date(index * 15000).toISOString(), ...value
+});
 
 test('preview transition plan is offline and execution requires two exact non-production targets', async () => {
   let fetched = false;
@@ -114,33 +117,56 @@ test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
   const passed = logs.analyzeHttp([
     ...Array.from({ length: 20 }, (_, index) => ({
       httpStatus: 200, totalDuration: 100 + index, path: '/api/health'
-    })),
-    { httpStatus: 409, totalDuration: 120, path: '/api/finance/budget-drafts/:id' }
+    })).map(httpRecord),
+    httpRecord({ httpStatus: 409, totalDuration: 120,
+      path: '/api/finance/budget-drafts/:id' }, 19)
   ], 1);
   assert.equal(passed.status, 'passed');
-  const stopped = logs.analyzeHttp(Array.from({ length: 20 }, () => ({
+  const stopped = logs.analyzeHttp(Array.from({ length: 20 }, (_, index) => httpRecord({
     httpStatus: 500, totalDuration: 3100, path: '/api/health'
-  })), 0);
+  }, index)), 0);
   assert.equal(stopped.status, 'stop');
   assert.deepEqual(stopped.stopReasons, [
     'HTTP_5XX', 'HEALTH_UNAVAILABLE', 'HTTP_P95_THRESHOLD', 'HTTP_MAX_THRESHOLD'
   ]);
-  const unavailable = logs.analyzeHttp(Array.from({ length: 20 }, () => ({
+  const unavailable = logs.analyzeHttp(Array.from({ length: 20 }, (_, index) => httpRecord({
     httpStatus: 404, totalDuration: 20, path: '/api/health'
-  })), 0);
+  }, index)), 0);
   assert.deepEqual(unavailable.stopReasons, ['HEALTH_UNAVAILABLE']);
   const crossRoute5xx = logs.analyzeHttp([
-    ...Array.from({ length: 20 }, () => ({
+    ...Array.from({ length: 20 }, (_, index) => httpRecord({
       httpStatus: 200, totalDuration: 20, path: '/api/health'
-    })),
-    { httpStatus: 503, totalDuration: 5, path: '/api/auth/login' }
+    }, index)),
+    httpRecord({ httpStatus: 503, totalDuration: 5, path: '/api/auth/login' }, 19)
   ], 0);
   assert.equal(crossRoute5xx.failures5xx, 1);
   assert.deepEqual(crossRoute5xx.stopReasons, ['HTTP_5XX']);
-  const noHealth = logs.analyzeHttp(Array.from({ length: 20 }, () => ({
+  const noHealth = logs.analyzeHttp(Array.from({ length: 20 }, (_, index) => httpRecord({
     httpStatus: 200, totalDuration: 20, path: '/api/finance/budget-drafts/capabilities'
-  })), 0);
+  }, index)), 0);
   assert.deepEqual(noHealth.stopReasons, ['INSUFFICIENT_HEALTH_SAMPLES']);
+  const incomplete = logs.analyzeHttp([
+    ...Array.from({ length: 20 }, (_, index) => httpRecord({
+      httpStatus: 200, totalDuration: 20, path: '/api/health'
+    }, index)),
+    { timestamp: new Date(300000).toISOString(), path: '/api/health', totalDuration: 20 }
+  ], 0);
+  assert.deepEqual(incomplete.stopReasons, ['INVALID_HTTP_LOG_RECORDS']);
+  const gap = Array.from({ length: 20 }, (_, index) => httpRecord({
+    httpStatus: 200, totalDuration: 20, path: '/api/health'
+  }, index < 10 ? index : index + 3));
+  assert.deepEqual(logs.analyzeHttp(gap, 0, 0, logs.parseExpectedWindow(
+    '1970-01-01T00:00:00.000Z', '1970-01-01T00:05:45.000Z'
+  )).stopReasons, ['INCOMPLETE_HTTP_TIME_COVERAGE']);
+  assert.deepEqual(logs.parseArgs(['--http', '--expected-409', '0',
+    '--start-utc', '1970-01-01T00:00:00.000Z',
+    '--end-utc', '1970-01-01T00:05:00.000Z']), {
+    mode: 'http', expected409: 0,
+    expectedWindow: { startUtc: '1970-01-01T00:00:00.000Z',
+      endUtc: '1970-01-01T00:05:00.000Z', startMs: 0, endMs: 300000 }
+  });
+  assert.throws(() => logs.parseArgs(['--http', '--expected-409', '0']),
+    /HTTP_EXPECTATIONS_REQUIRED/);
 });
 
 test('application log analyzer accepts only the sanitized Budget event contract', () => {
@@ -228,12 +254,14 @@ test('alert self-test emits a safe stop marker and exits with alert code', async
 });
 
 test('log analyzer stops when a nonempty Railway record is malformed', async () => {
-  const lines = Array.from({ length: 20 }, () => JSON.stringify({
+  const lines = Array.from({ length: 20 }, (_, index) => JSON.stringify(httpRecord({
     httpStatus: 200, totalDuration: 20, path: '/api/health'
-  }));
+  }, index)));
   lines.splice(10, 0, '{truncated');
   const output = [];
-  const code = await logs.main(['--http', '--expected-409', '0'], {
+  const code = await logs.main(['--http', '--expected-409', '0',
+    '--start-utc', '1970-01-01T00:00:00.000Z',
+    '--end-utc', '1970-01-01T00:05:00.000Z'], {
     input: Readable.from(`${lines.join('\n')}\n`), log: value => output.push(value)
   });
   assert.equal(code, 2);
