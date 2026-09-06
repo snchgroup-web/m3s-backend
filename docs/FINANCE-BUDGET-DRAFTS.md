@@ -540,6 +540,9 @@ Prochaine etape Fast Track : preparer un seul paquet d'autorisation ciblee pour 
 | Tables autorisees | `finance_budget_drafts_v1`, `finance_budget_draft_events_v1` existantes |
 | Donnees | Trois identites et brouillons fictifs; aucune donnee reelle ou personnelle |
 | Duree candidate | 60 minutes maximum a compter de l'heure de debut consignee |
+| Site frontend | Netlify `m3s-frontend-v2`, source `snchgroup-web/m3s-frontend-v2` au commit `e2141df74a38739fb72ae0902f9cce62894f0a0a` |
+| Frontend actif de reference | Deploy Preview 327, `https://deploy-preview-327--m3s-frontend-v2.netlify.app` |
+| Branche de retour candidate | `codex/budget-p3-p4-preview-rollback-20260906`, issue exactement de `e2141df`; URL Deploy Preview attribuee par Netlify a consigner avant le premier test |
 
 ### Acteurs candidats a confirmer en une fois
 
@@ -549,7 +552,8 @@ Prochaine etape Fast Track : preparer un seul paquet d'autorisation ciblee pour 
 | Operateur technique | Codex | Configuration preview, recette, preuves nettoyees et retour arriere |
 | Responsable securite preview | Cheikh | Validation des resultats P3 et absence de secret dans les preuves |
 | Proprietaire IAM preview | Cheikh | Confirmation que les droits existants restent limites au dataset test |
-| Suppleant / canal d'alerte | Non nomme | Exception bloquante P4 a renseigner avant execution |
+| Suppleante proposee | Chantal | Recevoir le signal STOP et confirmer que Cheikh ou Codex reste joignable; a confirmer par Cheikh |
+| Canal d'alerte propose | Tache Codex courante | Alerte horodatee dans cette conversation, sans Telegram ni donnee sensible; a confirmer par Cheikh |
 
 ### Mutations preview soumises au prochain GO
 
@@ -573,9 +577,34 @@ Prochaine etape Fast Track : preparer un seul paquet d'autorisation ciblee pour 
 
 1. Verifier `/api/health` sur chaque instance et rapprocher chaque reponse de la revision autorisee.
 2. Produire des reponses controlees `401`, `403`, `409` et nominales; verifier les evenements structures sans corps, montant, titre, email, token, brouillon, utilisateur ou tenant.
-3. Relever disponibilite, latence, taux `5xx` et tendance `409` pendant la fenetre. Aucun `5xx` artificiel n'est provoque contre la production.
-4. Tester le canal d'alerte retenu et consigner seuils, responsable, suppleant, critere d'arret et heure de reception.
+3. Relever disponibilite, latence, taux `5xx` et tendance `409` selon les seuils fixes ci-dessous. Aucun `5xx` artificiel n'est provoque contre la production.
+4. Tester le canal d'alerte confirme et consigner responsable, suppleante, critere d'arret et heure de reception.
 5. Executer deux fois le retour arriere : fermer frontend preview, fermer backend preview, redeployer avec succes, verifier `enabled:false`, ecriture refusee et export JSON disponible.
+
+### Seuils et fenetres proposes avant execution
+
+- Fenetre totale : 60 minutes maximum, heure de debut et heure de fin cible consignees avant la premiere mutation.
+- Observation : un controle toutes les 15 secondes pendant cinq minutes apres chaque deploiement ou changement de mode.
+- Disponibilite : 100 % des controles `/api/health`; un seul echec ou statut autre que `200` impose `STOP`.
+- Latence : sur au moins 20 requetes controlees par phase, p95 inferieur ou egal a 1 500 ms et maximum inferieur ou egal a 3 000 ms; tout depassement impose `STOP`.
+- Erreurs `5xx` : zero pendant toute la fenetre; le premier `5xx` non attendu impose `STOP` et retour arriere.
+- Conflits `409` : exactement un conflit provoque par phase de recette et aucun conflit spontane; plus d'un `409` ou plus de 5 % des requetes impose `STOP`.
+- Refus `401`/`403` : admis seulement dans les cas negatifs nommes; tout refus nominal impose `STOP`.
+- Canal : alerte test envoyee dans la tache Codex courante avant la premiere mutation; absence d'accuse de Cheikh ou de la suppleante signifie `EXECUTION NO-GO`.
+
+### Operations exactes soumises au prochain GO
+
+1. Depuis le worktree backend propre, verifier le plan sans reseau : `npm run budget:http:check -- --plan`.
+2. Controler les deux cibles avant mutation avec `Invoke-WebRequest` sur `https://m3s-backend-preview-production.up.railway.app/api/health` et `https://deploy-preview-327--m3s-frontend-v2.netlify.app`; exiger `200`.
+3. Dans une console PowerShell locale sans journalisation, capturer deux secrets fictifs distincts de 32 octets sans les afficher, construire le format strict attendu, puis placer seulement le JSON final dans le presse-papiers : `$old = & node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64url'))"; $new = & node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64url'))"; $keys = @{ activeKeyId = 'preview-old'; keys = @(@{ id = 'preview-old'; secret = $old }, @{ id = 'preview-new'; secret = $new }) } | ConvertTo-Json -Depth 4 -Compress; Set-Clipboard -Value $keys`. Coller immediatement la valeur dans Railway sans la journaliser; apres enregistrement, executer `Set-Clipboard -Value ''; Remove-Variable old,new,keys` et fermer la console. Ne jamais committer ni inclure ces valeurs dans le rapport.
+4. Dans Railway, ouvrir uniquement le projet `m3s-budget-preview-20260904`, service `m3s-backend-preview`; sous `Settings > Source`, selectionner `snchgroup-web/m3s-backend`, branche `main`, puis sous `Deployments` exiger le commit `5abd8df142065a11a631490c440328c752fe8cdd` avant de poursuivre.
+5. Dans `Variables`, utiliser l'editeur du service pour ajouter `M3S_AUTH_SIGNING_KEYS_JSON` et `M3S_AUTH_SIGNING_MODE=legacy`, sans modifier les autres noms. Sous `Deployments`, lancer `Deploy` et attendre `/api/health = 200` avec la revision exacte.
+6. Pour la seconde instance, utiliser `New > GitHub Repo`, choisir le meme depot et la meme branche, nommer exactement le service `m3s-backend-preview-b`, recopier par l'interface Railway les seules variables du service preview, generer un domaine Railway et consigner son URL. Stopper si la revision, le dataset ou une variable non sensible differe.
+7. Executer la recette HTTP uniquement avec les six variables `BUDGET_HTTP_*` chargees dans le processus courant et la commande exacte `npm run budget:http:check -- --execute --non-production --url https://m3s-backend-preview-production.up.railway.app/api --confirm https://m3s-backend-preview-production.up.railway.app/api`.
+8. Pour le frontend, creer dans `snchgroup-web/m3s-frontend-v2` la branche exacte `codex/budget-p3-p4-preview-rollback-20260906` depuis `e2141df`; ouvrir une PR vers `main` afin d'obtenir une seule URL Deploy Preview. Le premier commit ne change que le commentaire de cadrage et conserve `REACT_APP_BUDGET_STORAGE_ENABLED=true`; consigner le SHA et l'URL avant test.
+9. Pour chaque exercice de fermeture frontend, modifier uniquement `netlify.toml` en remplacant `REACT_APP_BUDGET_STORAGE_ENABLED = "true"` par `"false"`, pousser sur la meme branche, attendre le meme Deploy Preview en `200`, verifier l'absence des actions serveur Budget et la presence de l'export JSON; revenir ensuite au commit actif avant le second exercice. Ne jamais publier ce deploy comme production.
+10. Pour chaque fermeture backend, mettre uniquement `FINANCE_BUDGET_DRAFTS_ENABLED=false` sur les deux services preview, redeployer, verifier capacite fermee et ecriture refusee; remettre `true` seulement pour demarrer le second exercice, puis terminer obligatoirement avec `false`.
+11. Fin de fenetre : supprimer `m3s-backend-preview-b`, retirer `M3S_AUTH_SIGNING_KEYS_JSON` et `M3S_AUTH_SIGNING_MODE`, conserver `FINANCE_BUDGET_DRAFTS_ENABLED=false`, fermer sans fusion la PR frontend temporaire et verifier une derniere fois sante, refus d'ecriture et production inchangee.
 
 ### Criteres d'arret immediat
 
@@ -583,7 +612,7 @@ Prochaine etape Fast Track : preparer un seul paquet d'autorisation ciblee pour 
 - Valeur sensible affichee, copiee dans un journal ou ajoutee au depot.
 - Acces a une donnee reelle, personnelle, a un dataset non autorise ou a la production.
 - Regression de sante, `5xx` non controle, isolation rompue ou refus de fermeture.
-- Depassement de 60 minutes, absence du responsable, du suppleant ou du canal confirme.
+- Depassement de 60 minutes, absence du responsable, de la suppleante ou du canal confirme, ou franchissement d'un seuil ci-dessus.
 
 ### Preuves attendues et retour arriere
 
@@ -594,4 +623,4 @@ Prochaine etape Fast Track : preparer un seul paquet d'autorisation ciblee pour 
 
 ### Arbitrage unique requis avant execution
 
-L'execution reste interdite tant qu'une confirmation unique ne valide pas simultanement : les quatre roles, le canal d'alerte, la fenetre de 60 minutes, la revision `5abd8df`, le projet et les services Railway nommes, le dataset test, les mutations preview ci-dessus et le retour arriere. Cette confirmation ne vaudra jamais autorisation de production, P5 ou ouverture du Budget personnel.
+L'execution reste interdite tant qu'une confirmation unique ne valide pas simultanement : Cheikh comme autorite, responsable securite et proprietaire IAM preview; Codex comme operateur; Chantal comme suppleante; la tache Codex courante comme canal; les seuils et la fenetre de 60 minutes; la revision `5abd8df`; le projet, les deux services Railway, le site Netlify, la branche frontend, le dataset test; les onze operations exactes ci-dessus et le retour arriere. L'URL Netlify attribuee et le domaine du second service sont des sorties de creation a consigner avant test; toute autre cible impose `STOP`. Cette confirmation ne vaudra jamais autorisation de production, P5 ou ouverture du Budget personnel.
