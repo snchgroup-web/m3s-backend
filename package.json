@@ -24,6 +24,8 @@
     "budget:schema:print": "node scripts/printBudgetSchema.js",
     "budget:cloud:check": "node scripts/testBudgetCloud.js",
     "budget:http:check": "node scripts/testBudgetHttp.js",
+    "budget:preview:transitions": "node scripts/testBudgetPreviewTransitions.js",
+    "budget:preview:logs": "node scripts/analyzeBudgetPreviewLogs.js",
     "schema:migrate:isolated": "node scripts/runSchemaMigrations.js",
     "schema:migrate:application": "node scripts/runSchemaMigrations.js --application",
     "test:finance-scope": "node scripts/testFinanceDataScope.js",
