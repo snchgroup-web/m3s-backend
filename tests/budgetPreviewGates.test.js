@@ -228,6 +228,7 @@ test('application log analyzer accepts only the sanitized Budget event contract'
 });
 
 test('final preview health sampler is inert by default and target-bound for execution', async () => {
+  const revision = '5abd8df142065a11a631490c440328c752fe8cdd';
   let fetched = false;
   const output = [];
   assert.equal(await health.main([], {
@@ -236,24 +237,29 @@ test('final preview health sampler is inert by default and target-bound for exec
   assert.equal(fetched, false);
   assert.equal(output[0].networkAccess, false);
   assert.throws(() => health.parseArgs(['--execute', '--non-production', '--url', primary,
-    '--confirm', 'https://wrong.example.test/api', '--phase', 'FINAL_CLEANUP']),
+    '--confirm', 'https://wrong.example.test/api', '--phase', 'FINAL_CLEANUP',
+    '--expected-revision', revision]),
   /EXACT_TARGET_CONFIRMATION_REQUIRED/);
   assert.throws(() => health.parseArgs(['--execute', '--non-production', '--url',
     'https://seneswiss-group.com/api', '--confirm', 'https://seneswiss-group.com/api',
-    '--phase', 'FINAL_CLEANUP']), /PRODUCTION_TARGET_FORBIDDEN/);
+    '--phase', 'FINAL_CLEANUP', '--expected-revision', revision]), /PRODUCTION_TARGET_FORBIDDEN/);
+  assert.throws(() => health.parseArgs(['--execute', '--non-production', '--url', primary,
+    '--confirm', primary, '--phase', 'FINAL_CLEANUP']), /EXPECTED_REVISION_REQUIRED/);
 });
 
 test('final preview health sampler requires twenty successful bounded observations', async () => {
+  const revision = '5abd8df142065a11a631490c440328c752fe8cdd';
   let calls = 0;
   let clock = 0;
   const sleepDelays = [];
-  const config = { baseUrl: primary, confirmation: primary, phase: 'ROLLBACK_1_CLOSED' };
+  const config = { baseUrl: primary, confirmation: primary, phase: 'ROLLBACK_1_CLOSED',
+    expectedRevision: revision };
   const report = await health.sampleHealth(config, {
     fetchImpl: async url => {
       assert.equal(url, `${primary}/health`);
       calls += 1;
       clock += 1000;
-      return { status: 200 };
+      return { status: 200, async json() { return { revision }; } };
     },
     sleep: async delay => { sleepDelays.push(delay); clock += delay; },
     now: () => clock, samples: health.SAMPLES, intervalMs: health.INTERVAL_MS
@@ -268,6 +274,10 @@ test('final preview health sampler requires twenty successful bounded observatio
     fetchImpl: async () => ({ status: 503 }), sleep: async () => {},
     samples: health.SAMPLES, intervalMs: health.INTERVAL_MS
   }), /HEALTH_UNAVAILABLE/);
+  await assert.rejects(() => health.sampleHealth(config, {
+    fetchImpl: async () => ({ status: 200, async json() { return { revision: '0'.repeat(40) }; } }),
+    sleep: async () => {}, samples: health.SAMPLES, intervalMs: health.INTERVAL_MS
+  }), /HEALTH_REVISION_MISMATCH/);
 });
 
 test('alert self-test emits a safe stop marker and exits with alert code', async () => {
