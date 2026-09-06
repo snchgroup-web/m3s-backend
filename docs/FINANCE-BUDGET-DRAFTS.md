@@ -407,7 +407,7 @@ Statut du plan : `EN COURS`. La collecte ci-dessous est en lecture seule et ne c
 #### S0 - gel de reference
 
 - Reference backend : `origin/main` au commit `d7812d8` apres fusion de `BUDGET-GATES-REV-001 V0.7`.
-- Candidat documentaire du plan : commit `3bb9ea0`, PR backend 54.
+- Structure documentaire et relevé initial du plan : commit immuable `cb1326d`, parent du correctif de traçabilité dans la PR backend 54.
 - Etat de depart : stockage Budget ferme, aucune table Budget dans le dataset applicatif observe et aucune activation autorisee.
 
 #### S1 - collecte interne bornee
