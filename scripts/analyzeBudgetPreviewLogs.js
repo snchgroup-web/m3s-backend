@@ -24,9 +24,10 @@ function applicationEvent(line) {
 }
 
 function validUtc(value) {
-  return typeof value === 'string'
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
-    && Number.isFinite(Date.parse(value));
+  if (typeof value !== 'string'
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
 }
 
 function validHttpRecord(row) {
@@ -69,6 +70,9 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindo
   const maxMs = durations.length ? Math.max(...durations) : 0;
   const healthTimes = healthRows.map(row => Date.parse(row.timestamp)).sort((left, right) => left - right);
   const allTimes = allRows.map(row => Date.parse(row.timestamp)).sort((left, right) => left - right);
+  const auditStartHealthTimes = expectedWindow ? healthTimes.filter(timestamp => (
+    timestamp >= expectedWindow.startMs && timestamp <= expectedWindow.startMs + 30000
+  )) : [];
   const cadenceHealthTimes = expectedWindow
     ? healthTimes.filter(timestamp => (
       timestamp >= expectedWindow.healthStartMs && timestamp <= expectedWindow.healthEndMs
@@ -84,7 +88,7 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindo
       && allTimes.every(timestamp => (
         timestamp >= expectedWindow.startMs && timestamp <= expectedWindow.endMs
       ))
-      && allTimes[0] <= expectedWindow.startMs + toleranceMs
+      && auditStartHealthTimes.length > 0
       && cadenceHealthTimes.length > 0
       && cadenceHealthTimes[0] <= expectedWindow.healthStartMs + toleranceMs
       && cadenceHealthTimes.at(-1) >= expectedWindow.healthEndMs - toleranceMs
@@ -113,7 +117,7 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindo
     expectedEndUtc: expectedWindow?.endUtc || null,
     expectedHealthStartUtc: expectedWindow?.healthStartUtc || null,
     expectedHealthEndUtc: expectedWindow?.healthEndUtc || null,
-    auditStartCovered: expectedWindow ? allTimes[0] <= expectedWindow.startMs + 30000 : null,
+    auditStartCovered: expectedWindow ? auditStartHealthTimes.length > 0 : null,
     cadenceHealthSamples: cadenceHealthTimes.length,
     temporalCoverageComplete, maxHealthGapMs,
     conflicts409, expected409, p95Ms, maxMs,
@@ -126,9 +130,7 @@ function validApplicationEvent(event, expectedRevision) {
   return fields.length === expectedFields.length
     && fields.every((field, index) => field === expectedFields[index])
     && event.event === 'budget_request'
-    && typeof event.timestamp === 'string'
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(event.timestamp)
-    && Number.isFinite(Date.parse(event.timestamp))
+    && validUtc(event.timestamp)
     && typeof event.correlationId === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
       .test(event.correlationId)

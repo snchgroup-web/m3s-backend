@@ -218,7 +218,7 @@ test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
       healthStartMs: 0, healthEndMs: 300000 }
   });
   const guardedRows = [httpRecord({ httpStatus: 200, totalDuration: 10,
-    path: '/api/auth/login' }, 0), ...Array.from({ length: 20 }, (_, index) => httpRecord({
+    path: '/api/health' }, 0), ...Array.from({ length: 20 }, (_, index) => httpRecord({
     httpStatus: 200, totalDuration: 20, path: '/api/health'
   }, index + 8))];
   const guarded = logs.analyzeHttp(guardedRows, 0, 0, logs.parseExpectedWindow(
@@ -235,6 +235,12 @@ test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
     ));
   assert.equal(missingAuditPrefix.auditStartCovered, false);
   assert.deepEqual(missingAuditPrefix.stopReasons, ['INCOMPLETE_HTTP_TIME_COVERAGE']);
+  const unrelatedAuditPrefix = [{ ...guardedRows[0], path: '/api/auth/login' },
+    ...guardedRows.slice(1)];
+  assert.deepEqual(logs.analyzeHttp(unrelatedAuditPrefix, 0, 0, logs.parseExpectedWindow(
+    '1970-01-01T00:00:00.000Z', '1970-01-01T00:07:00.000Z',
+    '1970-01-01T00:02:00.000Z', '1970-01-01T00:07:00.000Z'
+  )).stopReasons, ['INCOMPLETE_HTTP_TIME_COVERAGE']);
   assert.throws(() => logs.parseArgs(['--http', '--expected-409', '0']),
     /HTTP_EXPECTATIONS_REQUIRED/);
 });
@@ -297,6 +303,11 @@ test('application log analyzer accepts only the sanitized Budget event contract'
   });
   assert.throws(() => logs.parseExpectedStatuses('200:1,200:2'),
     /EXPECTED_STATUSES_INVALID/);
+  assert.equal(logs.validHttpRecord({ httpStatus: 200, totalDuration: 10,
+    path: '/api/health', timestamp: '2026-02-30T00:00:00.000Z' }), false);
+  assert.deepEqual(logs.analyzeApplication([
+    { ...safe, timestamp: '2026-02-30T00:00:00.000Z' }
+  ], revision, { 200: 1 }).stopReasons, ['INVALID_EVENT_CONTRACT']);
 });
 
 test('final preview health sampler is inert by default and target-bound for execution', async () => {
