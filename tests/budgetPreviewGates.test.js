@@ -322,6 +322,33 @@ test('final preview health sampler requires twenty successful bounded observatio
     fetchImpl: async () => ({ status: 200, async json() { return { revision: '0'.repeat(40) }; } }),
     sleep: async () => {}, samples: health.SAMPLES, intervalMs: health.INTERVAL_MS
   }), /HEALTH_REVISION_MISMATCH/);
+  let slowClock = 0;
+  await assert.rejects(() => health.sampleHealth(config, {
+    fetchImpl: async () => ({ status: 200,
+      async json() { slowClock += 2000; return { revision }; } }),
+    sleep: async delay => { slowClock += delay; }, now: () => slowClock,
+    samples: health.SAMPLES, intervalMs: health.INTERVAL_MS
+  }), /HEALTH_LATENCY_THRESHOLD/);
+});
+
+test('deployment health guard accepts only the original and pinned revisions', async () => {
+  const original = '52876c59a82b2073bcda28fc6211725bbc28c46b';
+  const pinned = '5abd8df142065a11a631490c440328c752fe8cdd';
+  const config = { baseUrl: primary, confirmation: primary, phase: 'DEPLOYMENT_GUARD',
+    allowedRevisions: [original, pinned] };
+  let clock = 0;
+  let calls = 0;
+  const report = await health.sampleHealth(config, {
+    fetchImpl: async () => ({ status: 200,
+      async json() { calls += 1; return { revision: calls < 10 ? original : pinned }; } }),
+    sleep: async delay => { clock += delay; }, now: () => clock,
+    samples: health.SAMPLES, intervalMs: health.INTERVAL_MS
+  });
+  assert.equal(report.status, 'passed');
+  assert.deepEqual(report.allowedRevisions, [original, pinned]);
+  assert.throws(() => health.parseArgs(['--execute', '--non-production', '--url', primary,
+    '--confirm', primary, '--phase', 'DEPLOYMENT_GUARD', '--allowed-revisions', original]),
+  /TWO_ALLOWED_REVISIONS_REQUIRED/);
 });
 
 test('alert self-test emits a safe stop marker and exits with alert code', async () => {

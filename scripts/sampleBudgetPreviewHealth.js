@@ -1,7 +1,7 @@
 const { normalizeUrl } = require('./testBudgetHttp');
 
 const PHASES = new Set([
-  'RUN_GUARD', 'HTTP_ACCEPTANCE', 'ROLLBACK_1_CLOSED',
+  'DEPLOYMENT_GUARD', 'RUN_GUARD', 'HTTP_ACCEPTANCE', 'ROLLBACK_1_CLOSED',
   'ROLLBACK_2_CLOSED', 'FINAL_CLEANUP'
 ]);
 const SAMPLES = 20;
@@ -13,7 +13,7 @@ function parseArgs(args) {
   for (let index = 0; index < args.length; index++) {
     const key = args[index];
     if (!['--plan', '--execute', '--non-production', '--url', '--confirm', '--phase',
-      '--expected-revision'].includes(key)
+      '--expected-revision', '--allowed-revisions'].includes(key)
       || Object.hasOwn(flags, key)) refusal('INVALID_ARGUMENTS');
     if (['--plan', '--execute', '--non-production'].includes(key)) flags[key] = true;
     else {
@@ -30,15 +30,23 @@ function parseArgs(args) {
   }
   if (execute && flags['--confirm'] !== baseUrl) refusal('EXACT_TARGET_CONFIRMATION_REQUIRED');
   if (execute && !PHASES.has(flags['--phase'])) refusal('BOUNDED_PHASE_REQUIRED');
-  if (execute && !/^[0-9a-f]{40}$/i.test(flags['--expected-revision'] || '')) {
+  const expectedRevision = flags['--expected-revision']?.toLowerCase();
+  const allowedRevisions = flags['--allowed-revisions']?.split(',').map(value => value.toLowerCase());
+  if (execute && flags['--phase'] === 'DEPLOYMENT_GUARD') {
+    if (expectedRevision || allowedRevisions?.length !== 2
+      || new Set(allowedRevisions).size !== 2
+      || allowedRevisions.some(value => !/^[0-9a-f]{40}$/.test(value))) {
+      refusal('TWO_ALLOWED_REVISIONS_REQUIRED');
+    }
+  } else if (execute && (!/^[0-9a-f]{40}$/.test(expectedRevision || '') || allowedRevisions)) {
     refusal('EXPECTED_REVISION_REQUIRED');
   }
   if (!execute && (flags['--non-production'] || flags['--confirm'] || flags['--phase']
-    || flags['--expected-revision'])) {
+    || flags['--expected-revision'] || flags['--allowed-revisions'])) {
     refusal('EXECUTION_FLAGS_REQUIRE_EXECUTE');
   }
   return { execute, baseUrl, confirmation: flags['--confirm'], phase: flags['--phase'],
-    expectedRevision: flags['--expected-revision']?.toLowerCase() };
+    expectedRevision, allowedRevisions };
 }
 
 async function sampleHealth(config, {
@@ -48,9 +56,11 @@ async function sampleHealth(config, {
   samples = SAMPLES,
   intervalMs = INTERVAL_MS
 } = {}) {
+  const revisionArgs = config.phase === 'DEPLOYMENT_GUARD'
+    ? ['--allowed-revisions', config.allowedRevisions?.join(',')]
+    : ['--expected-revision', config.expectedRevision];
   config = parseArgs(['--execute', '--non-production', '--url', config.baseUrl,
-    '--confirm', config.confirmation, '--phase', config.phase,
-    '--expected-revision', config.expectedRevision]);
+    '--confirm', config.confirmation, '--phase', config.phase, ...revisionArgs]);
   if (typeof fetchImpl !== 'function') refusal('FETCH_UNAVAILABLE');
   if (samples !== SAMPLES || intervalMs !== INTERVAL_MS) refusal('OBSERVATION_WINDOW_FIXED');
   const durations = [];
@@ -61,11 +71,12 @@ async function sampleHealth(config, {
     const started = now();
     try {
       const response = await fetchImpl(`${config.baseUrl}/health`, { signal: controller.signal });
-      durations.push(now() - started);
       if (response.status !== 200) refusal('HEALTH_UNAVAILABLE');
       let payload;
       try { payload = await response.json(); } catch { refusal('HEALTH_REVISION_UNAVAILABLE'); }
-      if (payload?.revision !== config.expectedRevision) refusal('HEALTH_REVISION_MISMATCH');
+      const authorizedRevisions = config.allowedRevisions || [config.expectedRevision];
+      if (!authorizedRevisions.includes(payload?.revision)) refusal('HEALTH_REVISION_MISMATCH');
+      durations.push(now() - started);
     } finally { clearTimeout(timer); }
     const nextSampleAt = phaseStartedAt + ((index + 1) * intervalMs);
     await sleep(Math.max(0, nextSampleAt - now()));
@@ -76,6 +87,7 @@ async function sampleHealth(config, {
   if (p95Ms > 1500 || maxMs > 3000) refusal('HEALTH_LATENCY_THRESHOLD');
   return { mode: 'preview-health', phase: config.phase, target: config.baseUrl,
     expectedRevision: config.expectedRevision,
+    allowedRevisions: config.allowedRevisions || null,
     startUtc: new Date(phaseStartedAt).toISOString(), endUtc: new Date(now()).toISOString(),
     status: 'passed', samples: durations.length, intervalMs, p95Ms, maxMs };
 }
