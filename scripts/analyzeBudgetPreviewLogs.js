@@ -53,6 +53,24 @@ function validApplicationMethodRoute(method, route) {
   return allowed[route]?.has(method) === true;
 }
 
+function validApplicationStatusCode(status, code) {
+  const allowed = {
+    200: [null],
+    201: [null],
+    400: ['BUDGET_INVALID_BODY', 'BUDGET_INVALID_ID', 'BUDGET_INVALID_PAYLOAD',
+      'BUDGET_INVALID_QUERY'],
+    401: [null, 'BUDGET_UNAUTHENTICATED'],
+    403: ['BUDGET_FORBIDDEN'],
+    404: ['BUDGET_NOT_FOUND'],
+    409: ['BUDGET_CONFLICT'],
+    413: ['BUDGET_INVALID_BODY'],
+    415: ['BUDGET_JSON_REQUIRED'],
+    499: ['CLIENT_CLOSED_REQUEST'],
+    503: ['BUDGET_STORAGE_DISABLED', 'BUDGET_STORAGE_UNAVAILABLE']
+  };
+  return allowed[status]?.includes(code) === true;
+}
+
 function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindow = null) {
   const invalidHttpRecords = lines.filter(row => !validHttpRecord(row)).length;
   const allRows = lines.filter(validHttpRecord);
@@ -145,6 +163,7 @@ function validApplicationEvent(event, expectedRevision) {
     && event.durationMs >= 0
     && (event.code === null || (typeof event.code === 'string'
       && /^[A-Z][A-Z0-9_]{0,63}$/.test(event.code)))
+    && validApplicationStatusCode(event.status, event.code)
     && (event.outcome === 'aborted'
       ? event.status === 499 && event.code === 'CLIENT_CLOSED_REQUEST'
       : event.status !== 499 && event.code !== 'CLIENT_CLOSED_REQUEST')
@@ -283,5 +302,5 @@ async function main(args = process.argv.slice(2), {
 
 if (require.main === module) main().then(code => { process.exitCode = code; });
 module.exports = { analyzeHttp, analyzeApplication, validApplicationEvent,
-  validApplicationMethodRoute,
+  validApplicationMethodRoute, validApplicationStatusCode,
   validHttpRecord, parseExpectedStatuses, parseExpectedWindow, parseArgs, main };

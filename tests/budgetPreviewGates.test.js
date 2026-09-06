@@ -284,6 +284,16 @@ test('application log analyzer accepts only the sanitized Budget event contract'
     [{ ...safe, method: 'PUT', route: '/api/finance/budget-drafts' }],
     revision, { 200: 1 }
   ).stopReasons, ['INVALID_EVENT_CONTRACT']);
+  assert.deepEqual(logs.analyzeApplication(
+    [{ ...safe, code: 'BUDGET_CONFLICT' }], revision, { 200: 1 }
+  ).stopReasons, ['INVALID_EVENT_CONTRACT']);
+  assert.deepEqual(logs.analyzeApplication(
+    [{ ...safe, status: 409 }], revision, { 409: 1 }
+  ).stopReasons, ['INVALID_EVENT_CONTRACT']);
+  assert.equal(logs.validApplicationStatusCode(409, 'BUDGET_CONFLICT'), true);
+  assert.equal(logs.validApplicationStatusCode(401, null), true);
+  assert.equal(logs.validApplicationStatusCode(401, 'BUDGET_UNAUTHENTICATED'), true);
+  assert.equal(logs.validApplicationStatusCode(401, 'BUDGET_CONFLICT'), false);
   assert.equal(logs.validApplicationMethodRoute('PUT', '/api/finance/budget-drafts/:id'), true);
   assert.deepEqual(logs.analyzeApplication(
     [{ ...safe, outcome: 'aborted' }], revision, { 200: 1 }
