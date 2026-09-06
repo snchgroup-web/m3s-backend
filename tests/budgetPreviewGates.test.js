@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { Readable } = require('node:stream');
 const transitions = require('../scripts/testBudgetPreviewTransitions');
 const logs = require('../scripts/analyzeBudgetPreviewLogs');
+const health = require('../scripts/sampleBudgetPreviewHealth');
 
 const primary = 'https://preview-a.example.test/api';
 const secondary = 'https://preview-b.example.test/api';
@@ -139,19 +140,65 @@ test('application log analyzer accepts only the sanitized Budget event contract'
     correlationId: 'test', outcome: 'completed', method: 'GET',
     route: '/api/finance/budget-drafts', status: 200, durationMs: 12,
     code: null, revision };
-  assert.equal(logs.analyzeApplication([{ message: JSON.stringify(safe) }], revision).status, 'passed');
-  const unsafe = logs.analyzeApplication([{ ...safe, amount: 42 }], revision);
+  assert.equal(logs.analyzeApplication(
+    [{ message: JSON.stringify(safe) }], revision, { 200: 1 }
+  ).status, 'passed');
+  const unsafe = logs.analyzeApplication([{ ...safe, amount: 42 }], revision, { 200: 1 });
   assert.equal(unsafe.status, 'stop');
   assert.deepEqual(unsafe.unsafeFields, ['amount']);
   const missing = { ...safe };
   delete missing.durationMs;
-  assert.deepEqual(logs.analyzeApplication([missing], revision).stopReasons,
+  assert.deepEqual(logs.analyzeApplication([missing], revision, { 200: 1 }).stopReasons,
     ['MISSING_EVENT_FIELDS', 'INVALID_EVENT_CONTRACT']);
-  assert.deepEqual(logs.analyzeApplication([{ ...safe, revision: '0'.repeat(40) }], revision).stopReasons,
+  assert.deepEqual(logs.analyzeApplication(
+    [{ ...safe, revision: '0'.repeat(40) }], revision, { 200: 1 }
+  ).stopReasons,
     ['UNAUTHORIZED_EVENT_REVISION', 'INVALID_EVENT_CONTRACT']);
-  assert.deepEqual(logs.parseArgs(['--application', '--expected-revision', revision]), {
-    mode: 'application', expectedRevision: revision
+  assert.deepEqual(logs.analyzeApplication([safe], revision, { 200: 1, 401: 1 }).stopReasons,
+    ['EVENT_STATUS_MISMATCH']);
+  assert.deepEqual(logs.parseArgs(['--application', '--expected-revision', revision,
+    '--expected-statuses', '200:3,201:1,401:1,404:2,409:1']), {
+    mode: 'application', expectedRevision: revision,
+    expectedStatuses: { 200: 3, 201: 1, 401: 1, 404: 2, 409: 1 }
   });
+  assert.throws(() => logs.parseExpectedStatuses('200:1,200:2'),
+    /EXPECTED_STATUSES_INVALID/);
+});
+
+test('final preview health sampler is inert by default and target-bound for execution', async () => {
+  let fetched = false;
+  const output = [];
+  assert.equal(await health.main([], {
+    fetchImpl() { fetched = true; }, log: value => output.push(value)
+  }), 0);
+  assert.equal(fetched, false);
+  assert.equal(output[0].networkAccess, false);
+  assert.throws(() => health.parseArgs(['--execute', '--non-production', '--url', primary,
+    '--confirm', 'https://wrong.example.test/api', '--phase', 'FINAL_CLEANUP']),
+  /EXACT_TARGET_CONFIRMATION_REQUIRED/);
+  assert.throws(() => health.parseArgs(['--execute', '--non-production', '--url',
+    'https://seneswiss-group.com/api', '--confirm', 'https://seneswiss-group.com/api',
+    '--phase', 'FINAL_CLEANUP']), /PRODUCTION_TARGET_FORBIDDEN/);
+});
+
+test('final preview health sampler requires twenty successful bounded observations', async () => {
+  let calls = 0;
+  const config = { baseUrl: primary, confirmation: primary, phase: 'ROLLBACK_1_CLOSED' };
+  const report = await health.sampleHealth(config, {
+    fetchImpl: async url => {
+      assert.equal(url, `${primary}/health`);
+      calls += 1;
+      return { status: 200 };
+    },
+    sleep: async () => {}, samples: health.SAMPLES, intervalMs: health.INTERVAL_MS
+  });
+  assert.equal(report.status, 'passed');
+  assert.equal(report.samples, 20);
+  assert.equal(calls, 20);
+  await assert.rejects(() => health.sampleHealth(config, {
+    fetchImpl: async () => ({ status: 503 }), sleep: async () => {},
+    samples: health.SAMPLES, intervalMs: health.INTERVAL_MS
+  }), /HEALTH_UNAVAILABLE/);
 });
 
 test('alert self-test emits a safe stop marker and exits with alert code', async () => {

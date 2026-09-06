@@ -81,7 +81,23 @@ function validApplicationEvent(event, expectedRevision) {
     && event.revision === expectedRevision;
 }
 
-function analyzeApplication(lines, expectedRevision) {
+function parseExpectedStatuses(value) {
+  if (typeof value !== 'string' || !value) throw new Error('EXPECTED_STATUSES_REQUIRED');
+  const result = {};
+  for (const item of value.split(',')) {
+    const match = /^(\d{3}):(\d+)$/.exec(item);
+    if (!match) throw new Error('EXPECTED_STATUSES_INVALID');
+    const status = Number(match[1]);
+    const count = Number(match[2]);
+    if (status < 100 || status > 599 || count > 10000 || Object.hasOwn(result, status)) {
+      throw new Error('EXPECTED_STATUSES_INVALID');
+    }
+    result[status] = count;
+  }
+  return result;
+}
+
+function analyzeApplication(lines, expectedRevision, expectedStatuses = {}) {
   const events = lines.map(applicationEvent).filter(Boolean);
   const unsafeFields = [...new Set(events.flatMap(event => Object.keys(event)
     .filter(key => !SAFE_EVENT_FIELDS.has(key))))].sort();
@@ -89,15 +105,25 @@ function analyzeApplication(lines, expectedRevision) {
     .filter(key => !Object.hasOwn(event, key))))].sort();
   const invalidEvents = events.filter(event => !validApplicationEvent(event, expectedRevision)).length;
   const invalidRevisions = events.filter(event => event.revision !== expectedRevision).length;
+  const actualStatuses = events.reduce((counts, event) => {
+    const status = String(event.status);
+    counts[status] = (counts[status] || 0) + 1;
+    return counts;
+  }, {});
+  const statusKeys = new Set([...Object.keys(expectedStatuses), ...Object.keys(actualStatuses)]);
+  const statusMismatches = [...statusKeys].filter(status => (
+    (expectedStatuses[status] || 0) !== (actualStatuses[status] || 0)
+  )).sort();
   const stopReasons = [];
   if (!events.length) stopReasons.push('NO_BUDGET_EVENTS');
   if (unsafeFields.length) stopReasons.push('UNSAFE_EVENT_FIELDS');
   if (missingFields.length) stopReasons.push('MISSING_EVENT_FIELDS');
   if (invalidRevisions) stopReasons.push('UNAUTHORIZED_EVENT_REVISION');
   if (invalidEvents) stopReasons.push('INVALID_EVENT_CONTRACT');
+  if (statusMismatches.length) stopReasons.push('EVENT_STATUS_MISMATCH');
   return { kind: 'application', status: stopReasons.length ? 'stop' : 'passed',
     events: events.length, expectedRevision, unsafeFields, missingFields,
-    invalidEvents, invalidRevisions,
+    invalidEvents, invalidRevisions, expectedStatuses, actualStatuses, statusMismatches,
     alert: stopReasons.length ? 'BUDGET_PREVIEW_STOP' : null, stopReasons };
 }
 
@@ -105,9 +131,12 @@ function parseArgs(args) {
   if (args.length === 1 && args[0] === '--self-test-alert') return { selfTest: true };
   if (!['--http', '--application'].includes(args[0])) throw new Error('MODE_REQUIRED');
   if (args[0] === '--application') {
-    if (args.length !== 3 || args[1] !== '--expected-revision'
-      || !/^[0-9a-f]{40}$/i.test(args[2])) throw new Error('EXPECTED_REVISION_REQUIRED');
-    return { mode: 'application', expectedRevision: args[2].toLowerCase() };
+    if (args.length !== 5 || args[1] !== '--expected-revision'
+      || !/^[0-9a-f]{40}$/i.test(args[2]) || args[3] !== '--expected-statuses') {
+      throw new Error('APPLICATION_EXPECTATIONS_REQUIRED');
+    }
+    return { mode: 'application', expectedRevision: args[2].toLowerCase(),
+      expectedStatuses: parseExpectedStatuses(args[4]) };
   }
   if (args[0] === '--http') {
     if (args.length !== 3 || args[1] !== '--expected-409' || !/^\d+$/.test(args[2])) {
@@ -138,7 +167,8 @@ async function main(args = process.argv.slice(2), {
       if (parsed) lines.push(parsed);
     }
     const report = config.mode === 'http'
-      ? analyzeHttp(lines, config.expected409) : analyzeApplication(lines, config.expectedRevision);
+      ? analyzeHttp(lines, config.expected409)
+      : analyzeApplication(lines, config.expectedRevision, config.expectedStatuses);
     log(report);
     return report.status === 'passed' ? 0 : 2;
   } catch (error) {
@@ -148,4 +178,5 @@ async function main(args = process.argv.slice(2), {
 }
 
 if (require.main === module) main().then(code => { process.exitCode = code; });
-module.exports = { analyzeHttp, analyzeApplication, validApplicationEvent, parseArgs, main };
+module.exports = { analyzeHttp, analyzeApplication, validApplicationEvent,
+  parseExpectedStatuses, parseArgs, main };
