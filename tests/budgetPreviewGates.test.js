@@ -243,6 +243,15 @@ test('application log analyzer accepts only the sanitized Budget event contract'
     [{ ...safe, method: 'BANANA' }], revision, { 200: 1 }
   ).stopReasons, ['INVALID_EVENT_CONTRACT']);
   assert.deepEqual(logs.analyzeApplication(
+    [{ ...safe, method: 'POST', route: '/api/finance/budget-drafts/capabilities' }],
+    revision, { 200: 1 }
+  ).stopReasons, ['INVALID_EVENT_CONTRACT']);
+  assert.deepEqual(logs.analyzeApplication(
+    [{ ...safe, method: 'PUT', route: '/api/finance/budget-drafts' }],
+    revision, { 200: 1 }
+  ).stopReasons, ['INVALID_EVENT_CONTRACT']);
+  assert.equal(logs.validApplicationMethodRoute('PUT', '/api/finance/budget-drafts/:id'), true);
+  assert.deepEqual(logs.analyzeApplication(
     [{ ...safe, outcome: 'aborted' }], revision, { 200: 1 }
   ).stopReasons, ['INVALID_EVENT_CONTRACT']);
   const aborted = { ...safe, correlationId: '123e4567-e89b-42d3-a456-426614174001',

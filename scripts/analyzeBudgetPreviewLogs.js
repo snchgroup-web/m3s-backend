@@ -42,6 +42,16 @@ function validHttpRecord(row) {
     && validUtc(row.timestamp);
 }
 
+function validApplicationMethodRoute(method, route) {
+  const allowed = {
+    '/api/finance/budget-drafts': new Set(['GET', 'POST']),
+    '/api/finance/budget-drafts/capabilities': new Set(['GET']),
+    '/api/finance/budget-drafts/:id': new Set(['GET', 'PUT']),
+    '/api/finance/budget-drafts/:invalid': new Set(['GET', 'POST', 'PUT'])
+  };
+  return allowed[route]?.has(method) === true;
+}
+
 function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindow = null) {
   const invalidHttpRecords = lines.filter(row => !validHttpRecord(row)).length;
   const allRows = lines.filter(validHttpRecord);
@@ -114,6 +124,7 @@ function validApplicationEvent(event, expectedRevision) {
     && ['completed', 'aborted'].includes(event.outcome)
     && ['GET', 'POST', 'PUT'].includes(event.method)
     && /^\/api\/finance\/budget-drafts(?:\/capabilities|\/:id|\/:invalid)?$/.test(event.route)
+    && validApplicationMethodRoute(event.method, event.route)
     && Number.isInteger(event.status)
     && event.status >= 100
     && event.status <= 599
@@ -249,4 +260,5 @@ async function main(args = process.argv.slice(2), {
 
 if (require.main === module) main().then(code => { process.exitCode = code; });
 module.exports = { analyzeHttp, analyzeApplication, validApplicationEvent,
+  validApplicationMethodRoute,
   validHttpRecord, parseExpectedStatuses, parseExpectedWindow, parseArgs, main };
