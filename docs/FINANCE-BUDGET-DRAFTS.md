@@ -279,3 +279,176 @@ Une valeur inconnue reste explicitement `A DECIDER` et maintient la porte concer
 ### Prochain micro-lot candidat
 
 Preparer, sans l'executer, un paquet `BUDGET-GATES-PLAN-001` contenant les cinq fiches de preuve pre-remplies avec les acquis ci-dessus, les champs d'exception encore vides et un compte rendu GO/NO-GO unique. Aucune autre fiche intermediaire n'est requise. Le lancement d'une collecte interne ou d'une action cloud devra faire l'objet d'une autorisation explicite distincte et bornee.
+
+## BUDGET-GATES-PLAN-001 V1.0 - plan probatoire groupe P1-P5
+
+### Decision et portee
+
+- Autorite : Cheikh, Direction 2SG.
+- Decision du 06-09-2026 : plan autorise et valide avec ses etapes probatoires requises.
+- Objet : qualifier en une seule trajectoire les cinq portes de preparation du pilote Budget organisation.
+- Autorise : preparation documentaire, controles locaux, collecte interne bornee en lecture seule, consultation de metadonnees non sensibles, tests sur donnees fictives en environnement isole, revue technique et compte rendu groupe.
+- Non autorise par ce plan : lecture ou copie de secrets, mutation IAM, DDL ou migration cloud, creation de dataset ou table, ecriture de donnees reelles, modification de variable, rotation de secret de production, deploiement, activation backend/frontend ou ouverture du Budget personnel.
+- Regle : une autorisation de travail ne vaut pas preuve. Chaque porte reste `NO-GO` jusqu'a satisfaction de tous ses criteres et prononce explicite de son verdict.
+
+### Parametres communs pre-remplis
+
+| Champ | Valeur de travail | Etat |
+| --- | --- | --- |
+| Projet observe | `mon-projet-data-2sg` | Observe le 04-09-2026 |
+| Dataset applicatif existant | `m3s_2sg`, region `US`, expiration par defaut 60 jours | Observe; non retenu comme cible Budget |
+| Dataset Budget recommande | `m3s_budget_prod`, meme projet, region `US` | Candidat; non cree |
+| Perimetre fonctionnel | Brouillons Budget organisation uniquement | Confirme |
+| Hors perimetre | Budget personnel, approbation, realise, donnees reelles | Confirme |
+| Code de reference | `main` apres `d7812d8`; micro-lot P1-P4 dans `b2faa9b` | Fusionne |
+| Etat fonctionnel | Stockage Budget desactive; acces non authentifie refuse | Observe |
+| Donnees de recette | Trois identites fictives sur deux tenants; aucune donnee reelle | Requis |
+| Rapport final | Un seul compte rendu P1-P5, exceptions uniquement | Requis |
+
+### Fiche P1 - schema, conservation et restauration
+
+| Champ | Valeur pre-remplie |
+| --- | --- |
+| Objectif | Prouver que la cible Budget exacte protege les schemas, la conservation et la restauration attendus. |
+| Acquis | `FINANCE_BUDGET_DATASET` est distinct; le runtime controle projet, region, label, schemas, partitionnement, clustering et expirations avant ouverture. |
+| Cible candidate | Projet `mon-projet-data-2sg`; dataset `m3s_budget_prod`; region `US`; label `purpose=m3s_budget_production`. |
+| Valeurs a decider | Conservation des brouillons; conservation du journal; retention des sauvegardes; frequence; responsable donnees; validateur Finance. |
+| Methode autorisee | Relire les DDL et le plan; consulter les metadonnees de la cible si elle existe; executer localement les validateurs sur doubles fictifs; preparer un protocole de sauvegarde/restauration isole. |
+| Preuves recevables | Export horodate des metadonnees; politique de conservation versionnee; sortie nettoyee du validateur; compte rendu de sauvegarde et restauration fictive reussie. |
+| Critere `GO` | Cible exacte approuvee; aucune expiration non voulue; contrats conformes; politique approuvee; restauration fictive reussie; responsables nommes. |
+| Etat initial | Dataset non cree, politique et exercice non confirmes. |
+| Verdict initial | `NO-GO` |
+
+### Fiche P2 - identites techniques et moindre privilege
+
+| Champ | Valeur pre-remplie |
+| --- | --- |
+| Objectif | Separer migration et runtime sans rupture des fonctions ni acces direct des utilisateurs M3S aux donnees BigQuery. |
+| Acquis | DDL retire du demarrage HTTP; migrations explicites fermees par defaut; schemas applicatifs controles lors de la commande autorisee. |
+| Identites observees | `m3s-backend@mon-projet-data-2sg.iam.gserviceaccount.com` et `m3s-backend-280@mon-projet-data-2sg.iam.gserviceaccount.com`, actuellement `bigquery.admin` au projet. |
+| Valeurs a decider | Identite runtime definitive; identite de migration temporaire; validateur IAM; ordre de retrait; politique de retour arriere. |
+| Methode autorisee | Inventorier en lecture seule politiques projet/dataset, principaux, groupes, appartenances et heritages; rapprocher les permissions des chemins runtime; rejouer les tests de non-regression et les plans sans execution. |
+| Preuves recevables | Matrice avant/apres exhaustive; absence demontree d'acces direct pour tout utilisateur ou groupe M3S; plans horodates; controle de derive; tests Finance, Administration, Management, Intelligence, Budget et CORS. |
+| Critere `GO` | Comptes nommes; runtime au moindre privilege; migration separee; aucun acces direct M3S; retrait administrateur prouve sans regression et retour arriere documente. |
+| Etat initial | Droits administrateur et heritages larges encore observes; retrait non execute. |
+| Verdict initial | `NO-GO` |
+
+### Fiche P3 - authentification, cles et revocation
+
+| Champ | Valeur pre-remplie |
+| --- | --- |
+| Objectif | Prouver une authentification fermee, une cle partagee durable et une revocation immediate sur plusieurs instances. |
+| Acquis | Production refuse secret faible, mot de passe en clair, compte desactive et identites ambigues; aucune cle ephemere par processus n'est admise. |
+| Recette requise | Auteur Finance lecture/ecriture; second auteur du meme tenant; auteur d'un second tenant; variante lecture seule ou retrait de `finance:write`. |
+| Valeurs a decider | Gestionnaire de cles persistant; responsable securite; proprietaire IAM; fenetre de rotation; duree de token; mecanisme de revocation. |
+| Methode autorisee | Controler la configuration sans afficher les valeurs; generer uniquement des secrets fictifs; tester localement et en environnement isole la connexion, l'isolation, la rotation multi-instance, la desactivation et le retrait de droit. |
+| Preuves recevables | Rapport sans secret des trois identites et principaux distincts; isolation auteur/tenant; rotation reussie sur au moins deux instances; ancien secret refuse; jeton deja emis refuse apres desactivation; droit retire immediatement. |
+| Critere `GO` | Toutes les recettes passent, responsables et fenetre sont nommes, aucune valeur sensible n'apparait dans les preuves. |
+| Etat initial | Gestionnaire partage absent; rotation multi-instance et revocation apres emission non prouvees. |
+| Verdict initial | `NO-GO` |
+
+### Fiche P4 - observabilite et retour arriere
+
+| Champ | Valeur pre-remplie |
+| --- | --- |
+| Objectif | Prouver la detection des incidents, la correlation avec la revision deployee et un retour arriere complet. |
+| Acquis | Evenements Budget structures et nettoyes; correlation, statut, duree, code, revision et fermeture client `499`; sante HTTP 200 observee. |
+| Signaux requis | Disponibilite, latence, taux `5xx`, tendance `409`, sante de deploiement, revision backend effectivement servie. |
+| Valeurs a decider | Responsable et suppleant; canal; seuils; fenetre pilote; critere d'arret; commits backend/frontend de retour. |
+| Methode autorisee | Inspecter le format des journaux sans contenu metier; tester localement alertes et sonde; preparer puis repeter en environnement isole le retrait frontend, le retrait backend et le refus ferme des ecritures. |
+| Preuves recevables | Exemple nettoye; configuration versionnee des signaux; tests d'alerte; reponse de sante liee a la revision approuvee; chronologie complete de retour arriere et etat final ferme. |
+| Critere `GO` | Responsabilites, seuils et canal approuves; alertes et sonde testees; revision prouvee; exercice complet reussi deux fois sans suppression de donnees. |
+| Etat initial | Seuils, responsables, canal, revision servie et exercice complet non confirmes. |
+| Verdict initial | `NO-GO` |
+
+### Fiche P5 - decision de pilote et activation
+
+| Champ | Valeur pre-remplie |
+| --- | --- |
+| Objectif | Encadrer un pilote limite apres passage de P1 a P4, sans extension implicite. |
+| Perimetre candidat | Brouillons Budget organisation; creation, reprise, conflit de version et export de secours. |
+| Exclusions | Budget personnel, enveloppe approuvee, realise, donnees reelles non autorisees, automatisation de paiement et acces BigQuery direct. |
+| Valeurs a decider | Utilisateurs pilotes; duree; volume maximum; approbateurs metier/Finance/Administration; criteres d'arret; ordre backend puis frontend; date de revue. |
+| Methode autorisee | Preparer la fiche de decision avec cases explicites; verifier les quatre verdicts precedents; ne presenter l'activation que si P1-P4 sont tous `GO`. |
+| Preuves recevables | Decision datee et signee; liste bornee des utilisateurs; duree et volume; criteres d'arret; ordre d'activation et retour arriere; quatre verdicts `GO` references. |
+| Critere `GO` | Autorisation explicite et limitee prononcee par les trois approbateurs apres P1-P4 `GO`. |
+| Etat initial | Le travail probatoire est autorise; l'activation et ses parametres ne le sont pas. |
+| Verdict initial | `NO-GO` |
+
+### Sequence Fast Track autorisee
+
+1. `S0 - Gel de reference` : fixer commits, cibles, date, acteurs et exclusions; verifier que Budget reste ferme.
+2. `S1 - Collecte interne` : reunir en lecture seule les metadonnees P1, la matrice IAM P2, les configurations non sensibles P3 et les capacites de supervision P4.
+3. `S2 - Preuves locales et isolees` : rejouer les tests, plans sans execution, validateurs, recettes fictives et simulations de retour arriere.
+4. `S3 - Revue d'exceptions` : ne remonter que les champs non satisfaits, contradictions, donnees sensibles detectees ou regressions.
+5. `S4 - Verdict groupe` : renseigner les cinq verdicts independants et calculer le verdict global; une seule porte `NO-GO` impose `NO-GO` global.
+6. `S5 - Eventuel lot cloud` : interdit tant qu'une autorisation distincte ne nomme pas exactement cible, commandes, acteurs, fenetre et retour arriere.
+7. `S6 - Eventuelle activation` : interdite avant cinq `GO`, decision P5 explicite et ordre backend puis frontend controle.
+
+### Compte rendu GO/NO-GO unique - etat initial
+
+| Porte | Preuves disponibles | Exceptions ouvertes | Verdict |
+| --- | --- | --- | --- |
+| `P1` | Garde-fous code, cible candidate et contrat de validation | Politique, cible approuvee, sauvegarde/restauration, responsables | `NO-GO` |
+| `P2` | Migrations explicites et tests de schema | Identites, matrice effective, absence d'acces M3S direct, retrait admin, non-regression executee | `NO-GO` |
+| `P3` | Fermeture auth et validations de secrets/comptes | Gestionnaire partage, rotation multi-instance, trois identites, revocation de token | `NO-GO` |
+| `P4` | Journal nettoye, sante et procedure de retour | Seuils, acteurs, canal, revision deployee, alertes et exercice repete | `NO-GO` |
+| `P5` | Perimetre et exclusions documentes | Utilisateurs, duree, volume, approbateurs, arret et autorisation d'activation | `NO-GO` |
+| **Global** | Plan autorise et pre-rempli | Les cinq portes contiennent encore des exceptions probatoires | **`NO-GO`** |
+
+### Regle de cloture
+
+Le plan passe en statut `EXECUTE` seulement lorsque les sorties de `S1` a `S4` sont jointes au meme paquet et que chaque valeur inconnue est remplacee par une preuve, une decision ou un ajournement motive. Aucun silence, succes de test local ou fusion de code ne vaut autorisation cloud ou `GO` de porte.
+
+### Releve d'execution S0-S4 V0.1 du 06-09-2026
+
+Statut du plan : `EN COURS`. La collecte ci-dessous est en lecture seule et ne contient ni secret, ni contenu de table, ni donnee Budget.
+
+#### S0 - gel de reference
+
+- Reference backend : `origin/main` au commit `d7812d8` apres fusion de `BUDGET-GATES-REV-001 V0.7`.
+- Candidat documentaire du plan : commit `3bb9ea0`, PR backend 54.
+- Etat de depart : stockage Budget ferme, aucune table Budget dans le dataset applicatif observe et aucune activation autorisee.
+
+#### S1 - collecte interne bornee
+
+- Une identite Google Cloud active permet la lecture des metadonnees; son nom et ses jetons ne sont pas consignes.
+- Projet configure : `mon-projet-data-2sg`.
+- Dataset applicatif `m3s_2sg` : region `US`; expiration par defaut des tables et partitions `5184000000` ms; 23 tables ou vues; aucune table `finance_budget_*`; aucun label de finalite observe.
+- Dataset candidat `m3s_budget_prod` : inexistant au moment du controle. Aucune tentative de creation n'a ete faite.
+- Empreinte SHA-256 de la politique IAM projet lue : `a64132531181d7ff48b4ed9b130a364f44303cd153f3d0a3580e601e00d12a32`.
+- Roles pertinents observes au projet : deux principaux de type compte de service avec `roles/bigquery.admin`; un compte de service avec `roles/bigquery.jobUser`; un compte de service avec `roles/editor`; un utilisateur avec `roles/owner`.
+- Acces du dataset : groupes speciaux `projectWriters`, `projectOwners` et `projectReaders`; un compte backend explicitement lecteur et redacteur; un proprietaire utilisateur explicite. L'appartenance aux groupes speciaux et la qualification du proprietaire comme utilisateur M3S ne sont pas demontrees par cette interface; l'absence d'acces direct M3S ne peut donc pas etre prononcee.
+- Sante backend : `/api/health` et `/api/info` repondent `200`; `/api/finance/budget-drafts/capabilities` sans authentification repond `401` avec `Cache-Control: no-store`.
+- Les reponses de sante n'exposent aucune revision de deploiement. Aucun outil Railway local n'est disponible pour prouver les alertes, seuils ou canaux pendant ce relevé.
+
+#### S2 - preuves locales et isolees
+
+- Plan de migration isolee : succes, `targetMode: isolated`, `cloudAccess:false`, `executionAuthorized:false`.
+- Plan de migration applicative : succes, `targetMode: application`, `cloudAccess:false`, `executionAuthorized:false`.
+- DDL Budget imprime pour la cible candidate sans connexion cloud : 12 lignes, empreinte SHA-256 `98975824ded97d7436f840b65a3e02175536eae3f8cf38346c971de2315640b6`.
+- Tests cibles Budget et preparation de production : 99/99 reussis.
+- Suite backend complete : 106/106 reussie; `git diff --check` propre.
+
+#### S3 - exceptions uniquement
+
+| Porte | Exception apres collecte |
+| --- | --- |
+| `P1` | La cible recommandee n'existe pas; politique de conservation, responsables, sauvegarde et restauration fictive non fournis. |
+| `P2` | Deux comptes restent administrateurs BigQuery; groupes speciaux et proprietaire ont un acces effectif; appartenance M3S non resolue; aucune politique apres retrait ni non-regression cloud. |
+| `P3` | Aucun gestionnaire de cles partage, responsable, rotation multi-instance ou essai de revocation sur environnement reel isole n'est disponible. |
+| `P4` | Sante sans revision; seuils, responsables, canal, alertes, sonde de deploiement et double exercice de retour arriere non prouves. |
+| `P5` | Utilisateurs, duree, volume, approbateurs, criteres d'arret et decision d'activation restent a decider apres P1-P4. |
+
+#### S4 - verdict groupe V0.1
+
+| Porte | Verdict | Motif court |
+| --- | --- | --- |
+| `P1` | `NO-GO` | Cible et politique probatoire incompletes |
+| `P2` | `NO-GO` | Moindre privilege et absence d'acces direct non prouves |
+| `P3` | `NO-GO` | Cles partagees et revocation non prouvees |
+| `P4` | `NO-GO` | Exploitation et retour arriere non prouves |
+| `P5` | `NO-GO` | Activation non instruite et conditionnee par P1-P4 |
+| **Global** | **`NO-GO`** | Cinq portes encore ouvertes |
+
+Prochaine action utile : faire revoir ce paquet unique, puis transformer les exceptions P1-P4 en un lot d'execution isole et explicitement cible. La preparation de ce lot reste autorisee; sa mutation cloud demeure soumise a une autorisation distincte nommant les ressources, commandes et fenetre exactes.
