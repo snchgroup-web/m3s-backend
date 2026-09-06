@@ -54,6 +54,7 @@ test('preview transition runner preserves tokens across all six operator gates',
   const current = token('preview-new');
   let phase = 'LEGACY_BASELINE';
   const prompts = [];
+  const observations = [];
   const response = (status, payload = {}) => ({ status, async json() { return payload; } });
   const fetchImpl = async (url, options = {}) => {
     const path = new URL(url).pathname;
@@ -93,11 +94,13 @@ test('preview transition runner preserves tokens across all six operator gates',
     },
     sleep: async () => {},
     samples: transitions.OBSERVATION_SAMPLES,
-    intervalMs: transitions.OBSERVATION_INTERVAL_MS
+    intervalMs: transitions.OBSERVATION_INTERVAL_MS,
+    log: value => observations.push(value)
   });
   assert.equal(report.status, 'passed');
   assert.deepEqual(prompts, transitions.PHASES);
   assert.deepEqual(report.phases, ['LEGACY_BASELINE', ...transitions.PHASES]);
+  assert.deepEqual(observations.map(item => item.phase), report.phases);
   assert.equal(JSON.stringify(report).includes('signature'), false);
 });
 
@@ -183,18 +186,23 @@ test('final preview health sampler is inert by default and target-bound for exec
 
 test('final preview health sampler requires twenty successful bounded observations', async () => {
   let calls = 0;
+  let clock = 0;
+  const sleepDelays = [];
   const config = { baseUrl: primary, confirmation: primary, phase: 'ROLLBACK_1_CLOSED' };
   const report = await health.sampleHealth(config, {
     fetchImpl: async url => {
       assert.equal(url, `${primary}/health`);
       calls += 1;
+      clock += 1000;
       return { status: 200 };
     },
-    sleep: async () => {}, samples: health.SAMPLES, intervalMs: health.INTERVAL_MS
+    sleep: async delay => { sleepDelays.push(delay); clock += delay; },
+    now: () => clock, samples: health.SAMPLES, intervalMs: health.INTERVAL_MS
   });
   assert.equal(report.status, 'passed');
   assert.equal(report.samples, 20);
   assert.equal(calls, 20);
+  assert.deepEqual(sleepDelays, Array(19).fill(14000));
   await assert.rejects(() => health.sampleHealth(config, {
     fetchImpl: async () => ({ status: 503 }), sleep: async () => {},
     samples: health.SAMPLES, intervalMs: health.INTERVAL_MS

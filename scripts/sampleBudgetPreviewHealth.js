@@ -37,6 +37,7 @@ function parseArgs(args) {
 async function sampleHealth(config, {
   fetchImpl = global.fetch,
   sleep = delay => new Promise(resolve => setTimeout(resolve, delay)),
+  now = Date.now,
   samples = SAMPLES,
   intervalMs = INTERVAL_MS
 } = {}) {
@@ -45,16 +46,20 @@ async function sampleHealth(config, {
   if (typeof fetchImpl !== 'function') refusal('FETCH_UNAVAILABLE');
   if (samples !== SAMPLES || intervalMs !== INTERVAL_MS) refusal('OBSERVATION_WINDOW_FIXED');
   const durations = [];
+  const phaseStartedAt = now();
   for (let index = 0; index < samples; index++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
-    const started = Date.now();
+    const started = now();
     try {
       const response = await fetchImpl(`${config.baseUrl}/health`, { signal: controller.signal });
-      durations.push(Date.now() - started);
+      durations.push(now() - started);
       if (response.status !== 200) refusal('HEALTH_UNAVAILABLE');
     } finally { clearTimeout(timer); }
-    if (index + 1 < samples) await sleep(intervalMs);
+    if (index + 1 < samples) {
+      const nextSampleAt = phaseStartedAt + ((index + 1) * intervalMs);
+      await sleep(Math.max(0, nextSampleAt - now()));
+    }
   }
   const ordered = [...durations].sort((left, right) => left - right);
   const p95Ms = ordered[Math.max(0, Math.ceil(ordered.length * 0.95) - 1)] || 0;

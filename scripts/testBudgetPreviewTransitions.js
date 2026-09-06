@@ -66,6 +66,7 @@ async function runPreviewTransitions(config, {
   fetchImpl = global.fetch,
   prompt = null,
   sleep = delay => new Promise(resolve => setTimeout(resolve, delay)),
+  now = Date.now,
   samples = OBSERVATION_SAMPLES,
   intervalMs = OBSERVATION_INTERVAL_MS,
   log = () => {}
@@ -82,7 +83,7 @@ async function runPreviewTransitions(config, {
   const call = async (baseUrl, path, { method = 'GET', token, body } = {}) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
-    const started = Date.now();
+    const started = now();
     try {
       const response = await fetchImpl(`${baseUrl}${path}`, {
         method,
@@ -91,7 +92,7 @@ async function runPreviewTransitions(config, {
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal
       });
-      const durationMs = Date.now() - started;
+      const durationMs = now() - started;
       let payload = null;
       try { payload = await response.json(); } catch { /* Status is still measured. */ }
       metrics.push({ status: response.status, durationMs, path });
@@ -124,14 +125,18 @@ async function runPreviewTransitions(config, {
   };
   const observe = async phase => {
     const durations = [];
+    const phaseStartedAt = now();
     for (let index = 0; index < samples; index++) {
-      const started = Date.now();
+      const started = now();
       const responses = await Promise.all([
         call(config.primaryUrl, '/health'), call(config.secondaryUrl, '/health')
       ]);
       responses.forEach(response => assert.equal(response.status, 200));
-      durations.push(Date.now() - started);
-      if (index + 1 < samples) await sleep(intervalMs);
+      durations.push(now() - started);
+      if (index + 1 < samples) {
+        const nextSampleAt = phaseStartedAt + ((index + 1) * intervalMs);
+        await sleep(Math.max(0, nextSampleAt - now()));
+      }
     }
     const p95Ms = percentile95(durations);
     const maxMs = Math.max(...durations);
@@ -162,7 +167,7 @@ async function runPreviewTransitions(config, {
     await gate(PHASES[1]);
     await bothCapabilities(legacyToken);
     await bothCapabilities(oldProviderToken);
-    await observe('SHARED_BOTH');
+    await observe(PHASES[1]);
     report.phases.push(PHASES[1]);
 
     await gate(PHASES[2]);
