@@ -517,3 +517,81 @@ Verdicts inchanges : `P3 NO-GO` jusqu'a recette sur deux instances isolees avec 
 | **Global** | **`NO-GO`** | Aucune activation autorisee |
 
 Prochaine etape Fast Track : preparer un seul paquet d'autorisation ciblee pour la recette preview P3-P4, en nommant environnement, acteurs, fenetre, commandes, valeurs non sensibles, controles et retour arriere. Cette preparation n'autorise ni configuration de production ni execution implicite.
+
+## BUDGET-GATES-AUT-001 V0.1 - paquet candidat de recette preview P3-P4
+
+### Decision actuelle
+
+- Autorite : Cheikh, Direction 2SG.
+- Decision : preparation du paquet autorisee le 06-09-2026; aucune execution implicite.
+- Statut : `PRET A ARBITRER`, `EXECUTION NO-GO`.
+- Objet unique : produire les preuves P3-P4 manquantes dans une preview isolee, avec des identites et donnees fictives seulement.
+
+### Cible bornee
+
+| Element | Valeur candidate |
+| --- | --- |
+| Projet Railway | `m3s-budget-preview-20260904` uniquement |
+| Service principal | `m3s-backend-preview` |
+| URL | `https://m3s-backend-preview-production.up.railway.app` |
+| Revision backend | `5abd8df142065a11a631490c440328c752fe8cdd` |
+| Projet Google | `mon-projet-data-2sg` |
+| Dataset | `m3s_budget_test_20260903`, region `US`, usage test uniquement |
+| Tables autorisees | `finance_budget_drafts_v1`, `finance_budget_draft_events_v1` existantes |
+| Donnees | Trois identites et brouillons fictifs; aucune donnee reelle ou personnelle |
+| Duree candidate | 60 minutes maximum a compter de l'heure de debut consignee |
+
+### Acteurs candidats a confirmer en une fois
+
+| Role | Candidat | Responsabilite |
+| --- | --- | --- |
+| Autorite et critere d'arret | Cheikh | GO/STOP, perimetre et fermeture de la fenetre |
+| Operateur technique | Codex | Configuration preview, recette, preuves nettoyees et retour arriere |
+| Responsable securite preview | Cheikh | Validation des resultats P3 et absence de secret dans les preuves |
+| Proprietaire IAM preview | Cheikh | Confirmation que les droits existants restent limites au dataset test |
+| Suppleant / canal d'alerte | Non nomme | Exception bloquante P4 a renseigner avant execution |
+
+### Mutations preview soumises au prochain GO
+
+1. Deployer la revision exacte `5abd8df142065a11a631490c440328c752fe8cdd` sur le seul projet Railway isole.
+2. Conserver les variables BigQuery, CORS, Budget et comptes fictifs existantes; ne jamais afficher leurs valeurs.
+3. Generer hors journal un trousseau fictif borne, puis ajouter uniquement `M3S_AUTH_SIGNING_KEYS_JSON` et `M3S_AUTH_SIGNING_MODE` dans la preview.
+4. Creer temporairement, si Railway ne permet pas deux replicas isoles et observables du service principal, un second service `m3s-backend-preview-b` dans le meme projet, sur la meme revision et le meme dataset test. Aucun domaine, service ou replica de production n'est concerne.
+5. Modifier uniquement les comptes fictifs de la preview pour tester successivement retrait de `finance:write` et desactivation; restaurer ensuite leur configuration fictive initiale ou fermer les services.
+6. Supprimer le service temporaire, retirer le trousseau fictif et remettre le stockage preview a l'etat ferme a la fin de la fenetre, succes ou echec.
+
+### Recette P3 groupee
+
+1. Pre-vol : verifier revision, sante, trois connexions fictives, capacites et refus sans authentification.
+2. Coexistence : distribuer le meme trousseau aux deux instances en mode `legacy`; confirmer qu'un jeton historique reste accepte.
+3. Bascule : passer une instance en mode `shared`, puis l'autre; verifier sur chaque instance les jetons avec et sans `kid` pendant la transition.
+4. Rotation : distribuer ancienne et nouvelle cles avec l'ancienne active; activer la nouvelle apres propagation; retirer l'ancienne et verifier son refus immediat.
+5. Revocation : avec un jeton encore valide, retirer `finance:write`, puis desactiver le compte fictif; verifier respectivement le refus d'ecriture et le refus `401` sans attendre l'expiration.
+6. Isolation : rejouer auteur, tenant et conflit de version avec les trois identites fictives, sans conserver de contenu metier dans le rapport.
+
+### Recette P4 groupee
+
+1. Verifier `/api/health` sur chaque instance et rapprocher chaque reponse de la revision autorisee.
+2. Produire des reponses controlees `401`, `403`, `409` et nominales; verifier les evenements structures sans corps, montant, titre, email, token, brouillon, utilisateur ou tenant.
+3. Relever disponibilite, latence, taux `5xx` et tendance `409` pendant la fenetre. Aucun `5xx` artificiel n'est provoque contre la production.
+4. Tester le canal d'alerte retenu et consigner seuils, responsable, suppleant, critere d'arret et heure de reception.
+5. Executer deux fois le retour arriere : fermer frontend preview, fermer backend preview, redeployer avec succes, verifier `enabled:false`, ecriture refusee et export JSON disponible.
+
+### Criteres d'arret immediat
+
+- Mauvais projet, environnement, service, dataset ou revision.
+- Valeur sensible affichee, copiee dans un journal ou ajoutee au depot.
+- Acces a une donnee reelle, personnelle, a un dataset non autorise ou a la production.
+- Regression de sante, `5xx` non controle, isolation rompue ou refus de fermeture.
+- Depassement de 60 minutes, absence du responsable, du suppleant ou du canal confirme.
+
+### Preuves attendues et retour arriere
+
+- Un rapport nettoye unique avec horodatages, revisions, statuts, latences, resultats P3-P4 et aucun secret.
+- Deux chronologies de rotation et deux chronologies de retour arriere, chaque etape marquee `SUCCES`, `ECHEC` ou `NON EXECUTEE`.
+- Etat final obligatoire : service temporaire absent, variables fictives retirees, stockage preview ferme, production inchangee, donnees fictives seulement.
+- Au premier critere d'arret : cesser les tests, fermer les flags preview, retirer la configuration de signature fictive, redeployer la revision saine, verifier sante et refus d'ecriture, puis classer `RETOUR ARRIERE`.
+
+### Arbitrage unique requis avant execution
+
+L'execution reste interdite tant qu'une confirmation unique ne valide pas simultanement : les quatre roles, le canal d'alerte, la fenetre de 60 minutes, la revision `5abd8df`, le projet et les services Railway nommes, le dataset test, les mutations preview ci-dessus et le retour arriere. Cette confirmation ne vaudra jamais autorisation de production, P5 ou ouverture du Budget personnel.
