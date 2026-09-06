@@ -71,6 +71,15 @@ test('production authentication requires a persistent shared signing key provide
   assert.deepEqual(inspectProductionAuthConfiguration({
     NODE_ENV: 'production', API_REQUIRE_AUTH: 'true', JWT_SECRET: JWT_SECRET_FIXTURE
   }, []), { ready: true, reason: 'production-budget-disabled' });
+  assert.equal(inspectProductionAuthConfiguration({ NODE_ENV: 'production',
+    M3S_AUTH_SIGNING_MODE: 'shared', JWT_SECRET: JWT_SECRET_FIXTURE }, []).reason,
+  'signing-key-provider-invalid');
+  assert.equal(inspectProductionAuthConfiguration({ NODE_ENV: 'production',
+    M3S_AUTH_SIGNING_MODE: 'invalid', JWT_SECRET: JWT_SECRET_FIXTURE }, []).reason,
+  'signing-mode-invalid');
+  assert.deepEqual(inspectProductionAuthConfiguration({ NODE_ENV: 'production',
+    M3S_AUTH_SIGNING_MODE: 'shared', JWT_SECRET: JWT_SECRET_FIXTURE, ...signingKeysEnv() }, [], provider),
+  { ready: true, reason: 'production-budget-disabled' });
   assert.deepEqual(inspectProductionAuthConfiguration(env, hashed, provider),
     { ready: true, reason: 'ready' });
   assert.equal(inspectProductionAuthConfiguration({ ...env, API_REQUIRE_AUTH: 'false' }, hashed,

@@ -258,6 +258,14 @@ function inspectProductionAuthConfiguration(env = {}, accounts = [], signingKeyP
   if (!['production', 'development', 'test'].includes(env.NODE_ENV)) {
     return { ready: false, reason: 'runtime-environment-not-explicit' };
   }
+  if (env.M3S_AUTH_SIGNING_MODE
+    && !['legacy', 'shared'].includes(env.M3S_AUTH_SIGNING_MODE)) {
+    return { ready: false, reason: 'signing-mode-invalid' };
+  }
+  if (env.M3S_AUTH_SIGNING_MODE === 'shared'
+    && !isSharedSigningKeyProvider(signingKeyProvider)) {
+    return { ready: false, reason: 'signing-key-provider-invalid' };
+  }
   const production = env.NODE_ENV === 'production';
   const budgetRequested = env.FINANCE_BUDGET_DRAFTS_ENABLED === 'true';
   if (production && !budgetRequested) {
