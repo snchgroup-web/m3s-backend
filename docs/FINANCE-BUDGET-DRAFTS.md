@@ -119,6 +119,79 @@ Verdict `P4`: `NO-GO`.
 
 Les controles confirment un etat ferme et non destructif, pas une preparation suffisante a l'activation. `P1`, `P2`, `P3` et `P4` restent `NO-GO`; `P5` reste egalement `NO-GO`. Le verdict global demeure donc `NO-GO`. Le prochain paquet de decision doit regrouper les corrections des quatre portes et l'autorisation de perimetre P5, sans fragmenter l'arbitrage en micro-validations.
 
+## Paquet Fast Track candidat de correction P1-P4 V0.1
+
+Ce paquet prepare les choix en une seule revue sans les executer. Son eventuelle confirmation autorise uniquement la preparation technique et les preuves en environnement isole. Elle n'autorise ni mutation IAM, ni creation de dataset/table en production, ni modification de secret, ni flag, ni activation, ni donnee reelle. `P5` reste une decision d'activation separee.
+
+### Contraintes confirmees par le code
+
+- Le backend utilise actuellement un client BigQuery et un `BIGQUERY_DATASET` communs aux modules Finance, Administration, Management, Intelligence et Budget.
+- Au demarrage, le serveur resout les sources Finance, cree ou complete encore certains schemas Administration/Management et execute trois `ALTER TABLE` Finance. Le depot Intelligence peut aussi creer paresseusement `intelligence_dashboard_editions` pendant une publication ou une lecture si la table manque. Retirer `bigquery.admin` sans extraire tous ces chemins DDL, transition ni test pourrait donc degrader d'autres fonctions.
+- Le module Budget n'execute aucun bootstrap de schema, mais ses tables utilisent le dataset commun et heriteraient de son expiration par defaut de 60 jours.
+- Le middleware Budget impose toujours une identite authentifiee, relit le compte courant et ses droits, masque les erreurs de stockage et ne journalise ni corps, ni montant, ni identifiant utilisateur.
+- Le journal HTTP global enregistre methode et chemin, mais pas encore le statut final, la duree ou un identifiant de correlation. Railway fournit les metriques d'infrastructure, pas les taux d'erreurs applicatifs.
+
+### Matrice de decision groupee
+
+| Porte | Option recommandee | Alternative acceptable | Option refusee | Decision encore requise |
+| --- | --- | --- | --- | --- |
+| `P1` Cible et conservation | Ajouter un dataset dedie `m3s_budget_prod` dans le meme projet et la meme region `US`, avec configuration Budget separee; ne pas appliquer l'expiration globale de 60 jours aux deux tables | Conserver `m3s_2sg` mais neutraliser explicitement l'expiration des deux tables Budget et documenter leur isolation logique | Creer les tables en heritant silencieusement de 60 jours, ou changer de region sans adaptation | Choix A/B; durees de conservation des brouillons, du journal et des sauvegardes; responsable de restauration |
+| `P2` IAM | Separer l'identite de migration de l'identite d'execution; sortir tous les DDL du demarrage et des requetes Intelligence, puis donner au runtime `jobUser` au projet et les seuls droits de donnees necessaires au dataset | Transition en deux temps avec compte actuel maintenu temporairement, inventaire de permissions et retrait de `bigquery.admin` seulement apres recette complete | Retirer `bigquery.admin` directement ou conserver durablement les droits administrateur projet | Identite runtime cible, identite de migration, ordre de retrait et validateur IAM |
+| `P3` Authentification | Interdire les mots de passe en clair en production, verifier secret et rotation sans les afficher, puis tester trois comptes pilotes fictifs repartis sur deux tenants, y compris retrait de droit | Conserver le magasin actuel uniquement si toutes les entrees production sont hachees et si le retrait de droit est prouve avant activation | Activer avec authentification facultative, secret par defaut, compte desactive encore utilisable ou droits portes seulement par l'ancien JWT | Responsables du secret et des comptes; fenetre de test; protocole de rotation et revocation |
+| `P4` Exploitation | Ajouter des journaux Budget structures sans contenu financier, une correlation et les statuts/durees; alerter sur `5xx`, surveiller la tendance `409`, ajouter une sonde de sante de deploiement et repeter le retour arriere en preview | Metriques Railway pour infrastructure plus controle externe borne de l'API et compte rendu manuel de la premiere fenetre | Considerer un HTTP 200 ponctuel comme surveillance, alerter chaque `409` attendu ou activer sans retour arriere repete | Responsable d'astreinte, seuils, fenetre, critere d'arret, dernier deploiement sain et canal d'alerte |
+
+Verdict candidat recommande : retenir les options recommandees pour les quatre portes, mais conserver chaque porte a `NO-GO` jusqu'a execution et preuve. La confirmation de cette matrice ne transforme aucun `NO-GO` en `GO`.
+
+### P1 - cible, conservation et sauvegarde
+
+1. Introduire un parametre distinct `FINANCE_BUDGET_DATASET`, ferme s'il est absent, afin que Budget ne depende plus implicitement de `BIGQUERY_DATASET`.
+2. Preparer le dataset candidat `m3s_budget_prod` en `US`, sans le creer. Le nom final, la region et le projet doivent apparaitre dans le compte rendu avant toute commande.
+3. Ne pas laisser les tables Budget heriter de l'expiration de 60 jours. Tant que Finance et LEGAL n'ont pas fixe les durees, aucune suppression automatique n'est autorisee.
+4. Distinguer trois politiques : conservation des brouillons, conservation du journal d'evenements et sauvegardes/restauration. Une table qui expire est supprimee avec ses donnees; la recuperation courte duree ne remplace pas une sauvegarde gouvernee.
+5. Preparer une strategie de snapshots et un exercice de restauration sur donnees fictives. La duree et le cout restent a arbitrer; aucun snapshot de production n'est autorise par ce paquet.
+
+Preuve de passage future : cible exacte, DDL, absence d'expiration non voulue, politique versionnee, sauvegarde testee et restauration fictive reussie.
+
+### P2 - transition IAM sans rupture des autres fonctions
+
+1. Ajouter un mode de demarrage sans migration et une commande de migration explicite, separee du serveur HTTP. Y deplacer les schemas Administration/Management, les `ALTER TABLE` Finance et la creation paresseuse de `intelligence_dashboard_editions` utilisee dans les chemins de lecture/publication Intelligence. Aucun changement de schema ne doit etre necessaire au compte runtime apres stabilisation, y compris apres restauration dans un environnement vide.
+2. Inventorier en preview les permissions reellement utilisees par les lectures, DML, transactions et controles de sante de tous les modules branches sur BigQuery.
+3. Preparer deux identites : une identite runtime permanente au moindre privilege et une identite de migration temporaire, utilisee seulement pendant une fenetre autorisee.
+4. Valider d'abord les nouveaux droits en preview, puis en production avec le stockage Budget encore desactive. Tester sante, Finance, Administration, Management, Intelligence et les capacites Budget fermees.
+5. Retirer les droits administrateur seulement apres succes de ces controles. Au premier `403`, echec de migration ou regression metier, conserver/reposer l'ancien role et classer `RETOUR ARRIERE IAM`.
+
+Preuve de passage future : matrice des permissions, comptes nommes, politiques avant/apres, controles de non-regression et retrait effectif de `bigquery.admin` sans acces direct des utilisateurs M3S.
+
+### P3 - identite et secrets
+
+1. Verifier hors journal que `API_REQUIRE_AUTH=true`, que le secret est non standard, suffisamment long et rotatable, et que les comptes de production n'utilisent pas le fallback de mot de passe en clair.
+2. Preparer les trois comptes fictifs et revocables requis par la recette HTTP/JWT : un auteur Finance lecture/ecriture, un autre auteur du meme tenant pour l'isolation par proprietaire et un auteur d'un second tenant pour l'isolation inter-tenant. Ajouter un compte ou une variante lecture seule au protocole de retrait de droits si les trois comptes precedents conservent `finance:write`. Ne jamais inscrire leurs secrets dans le rapport.
+3. Avec le stockage Budget ferme, verifier login, `/capabilities`, refus sans token, identites distinctes et retrait de `finance:write` sans attendre l'expiration du JWT. La recette d'ecriture/isolation complete reste reservee a la preview non productive ou le stockage fictif est active.
+4. Repeter la rotation/revocation en preview avant toute production. Une rotation de secret de production reste une mutation separee et exige sa propre fenetre autorisee.
+
+Preuve de passage future : rapport sans secret des controles authentifies, retrait de droit immediat, compte desactive refuse et procedure de rotation/revocation repetee.
+
+### P4 - observabilite, seuils et retour arriere
+
+1. Produire pour les routes Budget un journal structure limite a : horodatage, identifiant de correlation aleatoire, methode, route normalisee, statut, duree, code fonctionnel et version de deploiement. Exclure corps, montants, titres, entites, courriels, tokens, identifiants de brouillon, utilisateur et tenant.
+2. Distinguer les signaux : `5xx` est une erreur d'exploitation; `409` est un conflit fonctionnel attendu. Suivre le taux de `409` et n'alerter que sur une hausse anormale, pas sur chaque conflit.
+3. Ajouter ou confirmer la sonde Railway `/api/health` pour bloquer un deploiement non sain. Une sonde de deploiement n'est pas une surveillance continue.
+4. Utiliser Railway pour CPU, RAM, disque et reseau. Ajouter un controle applicatif externe ou un outil de telemetrie pour disponibilite, latence et taux `5xx`, que Railway ne calcule pas nativement.
+5. Nommer avant activation : responsable principal, suppleant, canal d'alerte, fenetre d'observation, seuils, critere d'arret, commit frontend/backend sain et ordre de retour arriere.
+6. Repeter en preview : retrait du flag frontend, retrait du flag backend, redeploiement reussi, `enabled: false`, ecriture refusee fermee et export JSON encore disponible. Documenter ensuite la disponibilite effective du rollback Railway et du retour a un deploiement Netlify precedent.
+
+Preuve de passage future : exemple de journal nettoye, alertes testees, sonde verifiee, responsables et seuils nommes, exercice de retour arriere complet et compte rendu sans donnee sensible.
+
+### Sequence technique candidate apres un accord distinct
+
+1. Lot preparatoire sans production : parametre dataset Budget, extraction des migrations de demarrage, journal structure et tests locaux/preview.
+2. Revue unique du diff, des DDL, des permissions et du plan de restauration. Aucune mutation tant que cette revue n'est pas verte.
+3. Lot infrastructure explicitement autorise : creer la cible, appliquer les DDL, poser IAM minimal et configurer surveillance, avec stockage Budget toujours desactive.
+4. Recette fictive et retour arriere. Les quatre portes ne deviennent `GO` qu'avec leurs preuves.
+5. `P5` seulement ensuite : decision humaine distincte sur le perimetre et l'activation backend, puis frontend. L'activation reste interdite si une seule porte est `NO-GO`.
+
+Sources techniques de cadrage : [expiration des tables BigQuery](https://docs.cloud.google.com/bigquery/docs/managing-tables), [time travel et fail-safe](https://docs.cloud.google.com/bigquery/docs/time-travel), [snapshots BigQuery](https://docs.cloud.google.com/bigquery/docs/table-snapshots-intro), [roles IAM BigQuery](https://cloud.google.com/bigquery/docs/access-control?hl=fr), [observabilite Railway](https://docs.railway.com/observability), [metriques Railway](https://docs.railway.com/observability/metrics), [actions de deploiement Railway](https://docs.railway.com/deployments/deployment-actions) et [retour a un deploiement Netlify](https://docs.netlify.com/deploy/manage-deploys/manage-deploys-overview/).
+
 ### Ordre d'execution apres un GO explicite
 
 1. Figer la cible, la fenetre, les responsables et le rapport de controle. Relever les valeurs de configuration sans copier les secrets.
