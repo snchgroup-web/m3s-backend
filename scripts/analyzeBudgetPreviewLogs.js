@@ -24,12 +24,15 @@ function applicationEvent(line) {
 }
 
 function analyzeHttp(lines, expected409 = 0) {
-  const rows = lines.filter(row => Number.isInteger(Number(row.httpStatus))
-    && (String(row.path || '').startsWith('/api/finance/budget-drafts')
+  const allRows = lines.filter(row => Number.isInteger(Number(row.httpStatus)));
+  const rows = allRows.filter(row => (
+    String(row.path || '').startsWith('/api/finance/budget-drafts')
       || ['/api/health', '/health'].includes(String(row.path || ''))));
   const durations = rows.map(row => Number(row.totalDuration)).filter(Number.isFinite);
   const statuses = rows.map(row => Number(row.httpStatus));
-  const failures5xx = statuses.filter(status => status >= 500).length;
+  const failures5xx = allRows.filter(row => Number(row.httpStatus) >= 500).length;
+  const healthFailures = allRows.filter(row => ['/api/health', '/health'].includes(String(row.path || ''))
+    && Number(row.httpStatus) !== 200).length;
   const conflicts409 = statuses.filter(status => status === 409).length;
   const p95Ms = percentile95(durations);
   const maxMs = durations.length ? Math.max(...durations) : 0;
@@ -37,13 +40,15 @@ function analyzeHttp(lines, expected409 = 0) {
   if (!rows.length || durations.length !== rows.length) stopReasons.push('INCOMPLETE_HTTP_LOGS');
   if (rows.length < 20) stopReasons.push('INSUFFICIENT_HTTP_SAMPLES');
   if (failures5xx) stopReasons.push('HTTP_5XX');
+  if (healthFailures) stopReasons.push('HEALTH_UNAVAILABLE');
   if (conflicts409 !== expected409 || (rows.length && conflicts409 / rows.length > 0.05)) {
     stopReasons.push('HTTP_409_THRESHOLD');
   }
   if (p95Ms > 1500) stopReasons.push('HTTP_P95_THRESHOLD');
   if (maxMs > 3000) stopReasons.push('HTTP_MAX_THRESHOLD');
-  return { kind: 'http', status: stopReasons.length ? 'stop' : 'passed', samples: rows.length,
-    failures5xx, conflicts409, expected409, p95Ms, maxMs,
+  return { kind: 'http', status: stopReasons.length ? 'stop' : 'passed',
+    totalHttpRows: allRows.length, samples: rows.length, failures5xx, healthFailures,
+    conflicts409, expected409, p95Ms, maxMs,
     alert: stopReasons.length ? 'BUDGET_PREVIEW_STOP' : null, stopReasons };
 }
 

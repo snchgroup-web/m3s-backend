@@ -110,8 +110,20 @@ test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
   })), 0);
   assert.equal(stopped.status, 'stop');
   assert.deepEqual(stopped.stopReasons, [
-    'HTTP_5XX', 'HTTP_P95_THRESHOLD', 'HTTP_MAX_THRESHOLD'
+    'HTTP_5XX', 'HEALTH_UNAVAILABLE', 'HTTP_P95_THRESHOLD', 'HTTP_MAX_THRESHOLD'
   ]);
+  const unavailable = logs.analyzeHttp(Array.from({ length: 20 }, () => ({
+    httpStatus: 404, totalDuration: 20, path: '/api/health'
+  })), 0);
+  assert.deepEqual(unavailable.stopReasons, ['HEALTH_UNAVAILABLE']);
+  const crossRoute5xx = logs.analyzeHttp([
+    ...Array.from({ length: 20 }, () => ({
+      httpStatus: 200, totalDuration: 20, path: '/api/health'
+    })),
+    { httpStatus: 503, totalDuration: 5, path: '/api/auth/login' }
+  ], 0);
+  assert.equal(crossRoute5xx.failures5xx, 1);
+  assert.deepEqual(crossRoute5xx.stopReasons, ['HTTP_5XX']);
 });
 
 test('application log analyzer accepts only the sanitized Budget event contract', () => {
@@ -141,6 +153,6 @@ test('alert self-test emits a safe stop marker and exits with alert code', async
     input: Readable.from([]), log: value => output.push(value)
   });
   assert.equal(code, 2);
-  assert.deepEqual(output[0].stopReasons, ['HTTP_5XX']);
+  assert.deepEqual(output[0].stopReasons, ['HTTP_5XX', 'HEALTH_UNAVAILABLE']);
   assert.equal(output[0].alert, 'BUDGET_PREVIEW_STOP');
 });
