@@ -60,10 +60,12 @@ test('preview transition runner preserves tokens across all six operator gates',
     const bearer = authorization.replace(/^Bearer /, '');
     if (path.endsWith('/health')) return response(200, { status: 'ok' });
     if (path.endsWith('/auth/login')) {
-      if (['LEGACY_BASELINE', 'PRIMARY_SHARED'].includes(phase)) {
+      if (phase === 'LEGACY_BASELINE') {
         return response(200, { success: true, token: legacy });
       }
-      if (phase === 'SECONDARY_SHARED') return response(200, { success: true, token: old });
+      if (['PRIMARY_SHARED', 'SECONDARY_SHARED'].includes(phase)) {
+        return response(200, { success: true, token: old });
+      }
       return response(200, { success: true, token: current });
     }
     if (path.endsWith('/capabilities')) {
@@ -99,11 +101,12 @@ test('preview transition runner preserves tokens across all six operator gates',
 });
 
 test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
-  const passed = logs.analyzeHttp(Array.from({ length: 20 }, (_, index) => ({
-    httpStatus: index === 0 ? 409 : 200,
-    totalDuration: 100 + index,
-    path: '/api/finance/budget-drafts/capabilities'
-  })), 1);
+  const passed = logs.analyzeHttp([
+    ...Array.from({ length: 20 }, (_, index) => ({
+      httpStatus: 200, totalDuration: 100 + index, path: '/api/health'
+    })),
+    { httpStatus: 409, totalDuration: 120, path: '/api/finance/budget-drafts/:id' }
+  ], 1);
   assert.equal(passed.status, 'passed');
   const stopped = logs.analyzeHttp(Array.from({ length: 20 }, () => ({
     httpStatus: 500, totalDuration: 3100, path: '/api/health'
@@ -124,6 +127,10 @@ test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
   ], 0);
   assert.equal(crossRoute5xx.failures5xx, 1);
   assert.deepEqual(crossRoute5xx.stopReasons, ['HTTP_5XX']);
+  const noHealth = logs.analyzeHttp(Array.from({ length: 20 }, () => ({
+    httpStatus: 200, totalDuration: 20, path: '/api/finance/budget-drafts/capabilities'
+  })), 0);
+  assert.deepEqual(noHealth.stopReasons, ['INSUFFICIENT_HEALTH_SAMPLES']);
 });
 
 test('application log analyzer accepts only the sanitized Budget event contract', () => {

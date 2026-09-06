@@ -145,6 +145,7 @@ async function runPreviewTransitions(config, {
     await Promise.all([call(config.primaryUrl, '/health'), call(config.secondaryUrl, '/health')])
       .then(responses => responses.forEach(response => assert.equal(response.status, 200)));
     const legacyToken = await login(config.primaryUrl);
+    let oldProviderToken;
     assert.equal(tokenHeader(legacyToken)?.kid, undefined);
     await bothCapabilities(legacyToken);
     await observe('LEGACY_BASELINE');
@@ -152,13 +153,14 @@ async function runPreviewTransitions(config, {
 
     await gate(PHASES[0]);
     await bothCapabilities(legacyToken);
+    oldProviderToken = await login(config.primaryUrl);
+    assert.equal(tokenHeader(oldProviderToken)?.kid, 'preview-old');
+    await bothCapabilities(oldProviderToken);
     await observe(PHASES[0]);
     report.phases.push(PHASES[0]);
 
     await gate(PHASES[1]);
     await bothCapabilities(legacyToken);
-    const oldProviderToken = await login(config.primaryUrl);
-    assert.equal(tokenHeader(oldProviderToken)?.kid, 'preview-old');
     await bothCapabilities(oldProviderToken);
     await observe('SHARED_BOTH');
     report.phases.push(PHASES[1]);
