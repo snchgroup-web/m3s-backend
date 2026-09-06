@@ -112,8 +112,7 @@ function validApplicationEvent(event, expectedRevision) {
     && event.correlationId.length > 0
     && event.correlationId.length <= 128
     && ['completed', 'aborted'].includes(event.outcome)
-    && typeof event.method === 'string'
-    && /^[A-Z]{3,10}$/.test(event.method)
+    && ['GET', 'POST', 'PUT'].includes(event.method)
     && /^\/api\/finance\/budget-drafts(?:\/capabilities|\/:id|\/:invalid)?$/.test(event.route)
     && Number.isInteger(event.status)
     && event.status >= 100

@@ -197,6 +197,9 @@ test('application log analyzer accepts only the sanitized Budget event contract'
     [{ ...safe, revision: '0'.repeat(40) }], revision, { 200: 1 }
   ).stopReasons,
     ['UNAUTHORIZED_EVENT_REVISION', 'INVALID_EVENT_CONTRACT']);
+  assert.deepEqual(logs.analyzeApplication(
+    [{ ...safe, method: 'BANANA' }], revision, { 200: 1 }
+  ).stopReasons, ['INVALID_EVENT_CONTRACT']);
   assert.deepEqual(logs.analyzeApplication([safe], revision, { 200: 1, 401: 1 }).stopReasons,
     ['EVENT_STATUS_MISMATCH']);
   assert.deepEqual(logs.parseArgs(['--application', '--expected-revision', revision,
