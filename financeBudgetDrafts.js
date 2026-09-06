@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const {
   hasStrongSigningSecret,
-  isProductionSigningSecretProvision,
+  isSharedSigningKeyProvider,
   resolveAccountIdentity
 } = require('./authConfiguration');
 const express = require('express');
@@ -115,7 +115,7 @@ function resolveBudgetStorageConfig(env = {}, {
   projectId = env.BIGQUERY_PROJECT || 'mon-projet-data-2sg',
   applicationDatasetId = env.BIGQUERY_DATASET || 'm3s_2sg',
   defaultLocation = 'US',
-  signingSecretProvision = null
+  signingKeyProvider = null
 } = {}) {
   const datasetId = String(env.FINANCE_BUDGET_DATASET || '').trim();
   const location = String(env.FINANCE_BUDGET_LOCATION || defaultLocation).trim();
@@ -128,8 +128,8 @@ function resolveBudgetStorageConfig(env = {}, {
   const production = env.NODE_ENV === 'production';
   const configuredSigningSecret = typeof env.JWT_SECRET === 'string' && env.JWT_SECRET.length > 0;
   const signingSecretReady = production
-    ? !configuredSigningSecret && isProductionSigningSecretProvision(signingSecretProvision)
-    : hasStrongSigningSecret(env.JWT_SECRET);
+    ? !configuredSigningSecret && isSharedSigningKeyProvider(signingKeyProvider)
+    : isSharedSigningKeyProvider(signingKeyProvider) || hasStrongSigningSecret(env.JWT_SECRET);
   const authReady = env.API_REQUIRE_AUTH === 'true' && signingSecretReady;
   const requested = env.FINANCE_BUDGET_DRAFTS_ENABLED === 'true';
   const enabled = requested && authReady && dedicated && validLocation && productionApproved;

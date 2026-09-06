@@ -123,7 +123,7 @@ Variables requises :
 
 ```env
 # Test/developpement : sortie de npm run auth:secret.
-# En production, le secret existant reste compatible tant que Budget est desactive.
+# En production, JWT_SECRET reste compatible tant que Budget est desactive.
 JWT_SECRET=<sortie_de_npm_run_auth_secret>
 API_REQUIRE_AUTH=true
 GOOGLE_CREDENTIALS={"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}
@@ -141,6 +141,16 @@ Pour générer l'entrée `M3S_AUTH_USERS_JSON` sans stocker le mot de passe en c
 ```bash
 npm run auth:hash -- admin@example.com "mot_de_passe_fort" "Admin" "Administrateur"
 ```
+
+Une activation Budget en production interdit `JWT_SECRET` et exige un trousseau partagé par toutes les instances. Sa valeur reste une variable protégée Railway et ne doit jamais être committée :
+
+```env
+M3S_AUTH_SIGNING_KEYS_JSON={"activeKeyId":"budget-AAAA-MM","keys":[{"id":"budget-AAAA-MM","secret":"<43_caracteres_base64url>"}]}
+```
+
+Le trousseau accepte au maximum trois clés fortes et distinctes. Sa préparation n'invalide pas les sessions historiques : tant que `JWT_SECRET` reste défini et que `M3S_AUTH_SIGNING_MODE` vaut `legacy` ou reste absent, le serveur continue à signer avec l'ancien secret. Pendant cette coexistence, il vérifie les deux formats.
+
+La migration initiale suit trois déploiements : distribuer le trousseau avec le mode `legacy`; passer ensuite `M3S_AUTH_SIGNING_MODE=shared` tout en conservant `JWT_SECRET`, afin de signer avec le trousseau et de vérifier les deux formats; retirer enfin `JWT_SECRET` après expiration ou révocation des anciens jetons. Un mode `shared` sans trousseau valide bloque le démarrage. Une rotation ultérieure du trousseau suit aussi trois temps : distribuer les deux clés avec l'ancienne active, activer la nouvelle après propagation complète, puis retirer l'ancienne. Les JWT du trousseau portent un `kid`; une clé retirée ou inconnue est refusée. Aucun endpoint ni journal n'expose les clés.
 
 Copier uniquement le JSON généré dans Railway. Le mot de passe en clair ne doit pas être commité.
 

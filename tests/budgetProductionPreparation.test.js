@@ -12,8 +12,11 @@ const {
   inspectProductionAuthConfiguration,
   assertProductionAuthConfiguration,
   hasStrongSigningSecret,
-  createProductionSigningSecretProvision,
-  isProductionSigningSecretProvision,
+  createEnvironmentSigningKeyProvider,
+  isSharedSigningKeyProvider,
+  selectSigningKeyProvider,
+  signJwtToken,
+  verifyJwtToken,
   hasValidPasswordCredential,
   normalizeLoginIdentifier,
   findUniqueLoginAccount,
@@ -44,6 +47,10 @@ const {
 
 const JWT_SECRET_FIXTURE = crypto.createHash('sha256').update('m3s-unit-test-signing-key-fixture')
   .digest('base64url');
+const signingSecret = seed => crypto.createHash('sha256').update(seed).digest('base64url');
+const signingKeysEnv = (activeKeyId = 'budget-2026-09', keys = [
+  { id: activeKeyId, secret: JWT_SECRET_FIXTURE }
+]) => ({ M3S_AUTH_SIGNING_KEYS_JSON: JSON.stringify({ activeKeyId, keys }) });
 
 const validCredential = overrides => ({
   email: 'owner@example.test',
@@ -53,24 +60,37 @@ const validCredential = overrides => ({
   ...overrides
 });
 
-test('production authentication requires an internally generated signing provision only for Budget', () => {
-  const env = { NODE_ENV: 'production', API_REQUIRE_AUTH: 'true', FINANCE_BUDGET_DRAFTS_ENABLED: 'true' };
-  const provision = createProductionSigningSecretProvision();
+test('production authentication requires a persistent shared signing key provider only for Budget', () => {
+  const env = { NODE_ENV: 'production', API_REQUIRE_AUTH: 'true', FINANCE_BUDGET_DRAFTS_ENABLED: 'true',
+    ...signingKeysEnv() };
+  const provider = createEnvironmentSigningKeyProvider(env);
   const hashed = [validCredential({ id: 'owner' })];
   const plaintextFixture = ['test', 'only'].join('-');
   const invalidBase64Fixture = '*'.repeat(5);
-  assert.equal(isProductionSigningSecretProvision(provision), true);
+  assert.equal(isSharedSigningKeyProvider(provider), true);
   assert.deepEqual(inspectProductionAuthConfiguration({
     NODE_ENV: 'production', API_REQUIRE_AUTH: 'true', JWT_SECRET: JWT_SECRET_FIXTURE
   }, []), { ready: true, reason: 'production-budget-disabled' });
-  assert.deepEqual(inspectProductionAuthConfiguration(env, hashed, provision),
+  assert.equal(inspectProductionAuthConfiguration({ NODE_ENV: 'production',
+    M3S_AUTH_SIGNING_MODE: 'shared', JWT_SECRET: JWT_SECRET_FIXTURE }, []).reason,
+  'signing-key-provider-invalid');
+  assert.equal(inspectProductionAuthConfiguration({ NODE_ENV: 'production',
+    M3S_AUTH_SIGNING_MODE: 'invalid', JWT_SECRET: JWT_SECRET_FIXTURE }, []).reason,
+  'signing-mode-invalid');
+  assert.equal(inspectProductionAuthConfiguration({ NODE_ENV: 'production',
+    M3S_AUTH_SIGNING_MODE: 'legacy', ...signingKeysEnv() }, [], provider).reason,
+  'signing-secret-not-ready');
+  assert.deepEqual(inspectProductionAuthConfiguration({ NODE_ENV: 'production',
+    M3S_AUTH_SIGNING_MODE: 'shared', JWT_SECRET: JWT_SECRET_FIXTURE, ...signingKeysEnv() }, [], provider),
+  { ready: true, reason: 'production-budget-disabled' });
+  assert.deepEqual(inspectProductionAuthConfiguration(env, hashed, provider),
     { ready: true, reason: 'ready' });
   assert.equal(inspectProductionAuthConfiguration({ ...env, API_REQUIRE_AUTH: 'false' }, hashed,
-    provision).reason,
+    provider).reason,
     'authentication-disabled');
   assert.equal(inspectProductionAuthConfiguration(env, hashed).reason, 'signing-secret-not-ready');
   assert.equal(inspectProductionAuthConfiguration({ ...env, JWT_SECRET: JWT_SECRET_FIXTURE }, hashed,
-    provision).reason, 'operator-signing-secret-forbidden');
+    provider).reason, 'operator-signing-secret-forbidden');
   const periodicUnicodeSecret = Array.from({ length: 8 }, (_, index) => String.fromCodePoint(0x1f600 + index))
     .join('').repeat(4);
   const unicodeSecret = Array.from({ length: 8 }, (_, index) => String.fromCodePoint(0x1f600 + index))
@@ -97,40 +117,40 @@ test('production authentication requires an internally generated signing provisi
   }
   assert.equal(hasStrongSigningSecret(JWT_SECRET_FIXTURE), true);
   assert.equal(inspectProductionAuthConfiguration(env,
-    [{ email: 'owner@example.test', password: plaintextFixture }], provision).reason,
+    [{ email: 'owner@example.test', password: plaintextFixture }], provider).reason,
     'plaintext-password-present');
-  assert.equal(inspectProductionAuthConfiguration(env, [validCredential({ email: undefined })], provision).reason,
+  assert.equal(inspectProductionAuthConfiguration(env, [validCredential({ email: undefined })], provider).reason,
     'login-identifier-missing');
   assert.equal(inspectProductionAuthConfiguration(env,
-    [validCredential({ email: '   ' })], provision).reason,
+    [validCredential({ email: '   ' })], provider).reason,
     'login-identifier-missing');
   assert.equal(inspectProductionAuthConfiguration(env,
-    [validCredential({ passwordHash: 'AA==' })], provision).reason, 'password-credential-invalid');
+    [validCredential({ passwordHash: 'AA==' })], provider).reason, 'password-credential-invalid');
   assert.equal(inspectProductionAuthConfiguration(env,
-    [validCredential({ passwordSalt: invalidBase64Fixture })], provision).reason, 'password-credential-invalid');
+    [validCredential({ passwordSalt: invalidBase64Fixture })], provider).reason, 'password-credential-invalid');
   assert.equal(inspectProductionAuthConfiguration(env,
-    [validCredential({ passwordIterations: 119999 })], provision).reason, 'password-credential-invalid');
+    [validCredential({ passwordIterations: 119999 })], provider).reason, 'password-credential-invalid');
   assert.equal(inspectProductionAuthConfiguration(env,
-    [validCredential({ passwordIterations: 1000001 })], provision).reason, 'password-credential-invalid');
+    [validCredential({ passwordIterations: 1000001 })], provider).reason, 'password-credential-invalid');
   assert.equal(inspectProductionAuthConfiguration(env,
-    [validCredential(), validCredential({ email: ' OWNER@example.test ' })], provision).reason,
+    [validCredential(), validCredential({ email: ' OWNER@example.test ' })], provider).reason,
     'login-identifier-duplicate');
   assert.equal(inspectProductionAuthConfiguration(env,
     [validCredential({ id: 'shared', email: 'one@example.test', tenantId: 'org-a' }),
-      validCredential({ id: 'shared', email: 'two@example.test', tenantId: 'org-a' })], provision).reason,
+      validCredential({ id: 'shared', email: 'two@example.test', tenantId: 'org-a' })], provider).reason,
   'account-principal-duplicate');
   assert.equal(inspectProductionAuthConfiguration(env,
-    [validCredential({ id: 42 })], provision).reason, 'account-principal-invalid');
+    [validCredential({ id: 42 })], provider).reason, 'account-principal-invalid');
   assert.equal(inspectProductionAuthConfiguration(env,
-    [validCredential({ id: 'x'.repeat(201) })], provision).reason, 'account-principal-invalid');
+    [validCredential({ id: 'x'.repeat(201) })], provider).reason, 'account-principal-invalid');
   assert.equal(inspectProductionAuthConfiguration(env,
-    [validCredential({ tenantId: 'x'.repeat(201) })], provision).reason, 'account-principal-invalid');
+    [validCredential({ tenantId: 'x'.repeat(201) })], provider).reason, 'account-principal-invalid');
   assert.equal(inspectProductionAuthConfiguration(env,
-    [validCredential({ id: ' owner ' })], provision).reason, 'account-principal-invalid');
+    [validCredential({ id: ' owner ' })], provider).reason, 'account-principal-invalid');
   assert.equal(inspectProductionAuthConfiguration(env,
-    [validCredential({ tenantId: ' org ' })], provision).reason, 'account-principal-invalid');
+    [validCredential({ tenantId: ' org ' })], provider).reason, 'account-principal-invalid');
   assert.equal(inspectProductionAuthConfiguration({ ...env, M3S_DEFAULT_TENANT_ID: ' org ' },
-    [validCredential()], provision).reason, 'account-principal-invalid');
+    [validCredential()], provider).reason, 'account-principal-invalid');
   assert.equal(hasValidPasswordCredential(validCredential()), true);
   assert.equal(normalizeLoginIdentifier(' Owner@Example.Test '), 'owner@example.test');
   const uniqueAccount = validCredential({ email: 'owner@example.test' });
@@ -141,7 +161,7 @@ test('production authentication requires an internally generated signing provisi
   ], 'owner@example.test'), null);
   assert.equal(findUniqueLoginAccount([uniqueAccount], 'missing@example.test'), null);
   assert.equal(resolveAccountIdentity({ email: ' Owner@Example.Test ' }, {}), null);
-  assert.throws(() => assertProductionAuthConfiguration(env, [], provision), error => (
+  assert.throws(() => assertProductionAuthConfiguration(env, [], provider), error => (
     error.code === 'AUTH_CONFIGURATION_NOT_READY' && error.safeReason === 'no-active-account'
   ));
   assert.deepEqual(inspectProductionAuthConfiguration({ NODE_ENV: 'test' }, []),
@@ -166,6 +186,81 @@ test('production authentication requires an internally generated signing provisi
   'password-credential-missing');
   assert.deepEqual(inspectProductionAuthConfiguration({}, []),
     { ready: false, reason: 'runtime-environment-not-explicit' });
+});
+
+test('shared signing key provider supports bounded multi-instance rotation and retirement', () => {
+  const oldKey = { id: 'budget-2026-08', secret: signingSecret('old-shared-signing-key') };
+  const newKey = { id: 'budget-2026-09', secret: signingSecret('new-shared-signing-key') };
+  const now = () => Date.parse('2026-09-06T12:00:00Z');
+  const stagedProvider = createEnvironmentSigningKeyProvider(signingKeysEnv(oldKey.id, [oldKey, newKey]));
+  const oldToken = signJwtToken({ id: 'user-a', tenantId: 'org-a' }, { provider: stagedProvider, now });
+  const activatedEnv = signingKeysEnv(newKey.id, [newKey, oldKey]);
+  const firstInstance = createEnvironmentSigningKeyProvider(activatedEnv);
+  const secondInstance = createEnvironmentSigningKeyProvider(activatedEnv);
+  assert.equal(verifyJwtToken(oldToken, { provider: firstInstance, now }).id, 'user-a');
+  const newToken = signJwtToken({ id: 'user-a', tenantId: 'org-a' }, { provider: firstInstance, now });
+  assert.equal(verifyJwtToken(newToken, { provider: secondInstance, now }).tenantId, 'org-a');
+  const retiredProvider = createEnvironmentSigningKeyProvider(signingKeysEnv(newKey.id, [newKey]));
+  assert.equal(verifyJwtToken(oldToken, { provider: retiredProvider, now }), null);
+  assert.equal(verifyJwtToken(newToken, { provider: retiredProvider, now }).id, 'user-a');
+});
+
+test('legacy-to-shared cutover signs explicitly and verifies both formats', () => {
+  const provider = createEnvironmentSigningKeyProvider(signingKeysEnv());
+  const now = () => Date.parse('2026-09-06T12:00:00Z');
+  const legacyEnv = { JWT_SECRET: JWT_SECRET_FIXTURE };
+  assert.equal(selectSigningKeyProvider(legacyEnv, provider), null);
+  const legacyToken = signJwtToken({ id: 'legacy' }, {
+    provider: selectSigningKeyProvider(legacyEnv, provider), fallbackSecret: JWT_SECRET_FIXTURE, now
+  });
+  const sharedEnv = { ...legacyEnv, M3S_AUTH_SIGNING_MODE: 'shared' };
+  assert.equal(selectSigningKeyProvider(sharedEnv, provider), provider);
+  const sharedToken = signJwtToken({ id: 'shared' }, {
+    provider: selectSigningKeyProvider(sharedEnv, provider), fallbackSecret: JWT_SECRET_FIXTURE, now
+  });
+  const dualVerification = { provider, fallbackSecret: JWT_SECRET_FIXTURE,
+    allowLegacyFallback: true, now };
+  assert.equal(verifyJwtToken(legacyToken, dualVerification).id, 'legacy');
+  assert.equal(verifyJwtToken(sharedToken, dualVerification).id, 'shared');
+  assert.equal(verifyJwtToken(legacyToken, { provider, now }), null);
+  assert.equal(verifyJwtToken(sharedToken, { provider, now }).id, 'shared');
+  assert.equal(selectSigningKeyProvider({}, provider), provider);
+  assert.equal(selectSigningKeyProvider({ M3S_AUTH_SIGNING_MODE: 'legacy' }, provider), null);
+  assert.equal(selectSigningKeyProvider({ M3S_AUTH_SIGNING_MODE: 'invalid' }, provider), null);
+});
+
+test('shared signing key provider rejects malformed rings and unknown key ids', () => {
+  const key = { id: 'budget-2026-09', secret: JWT_SECRET_FIXTURE };
+  const malformed = [
+    {},
+    { M3S_AUTH_SIGNING_KEYS_JSON: '{' },
+    { M3S_AUTH_SIGNING_KEYS_JSON: JSON.stringify({ activeKeyId: key.id, keys: [], extra: true }) },
+    signingKeysEnv('missing-key', [key]),
+    signingKeysEnv(key.id, [key, { ...key, id: 'duplicate-secret' }]),
+    signingKeysEnv(key.id, [key, { ...key, secret: signingSecret('different') }]),
+    signingKeysEnv(key.id, [{ ...key, secret: 'x'.repeat(43) }]),
+    signingKeysEnv(key.id, Array.from({ length: 4 }, (_, index) => ({
+      id: `budget-key-${index}`,
+      secret: signingSecret(`key-${index}`)
+    })))
+  ];
+  for (const env of malformed) assert.equal(createEnvironmentSigningKeyProvider(env), null);
+  const provider = createEnvironmentSigningKeyProvider(signingKeysEnv());
+  const token = signJwtToken({ id: 'user-a' }, { provider, now: () => 1000000 });
+  const [encodedHeader, body, signature] = token.split('.');
+  const header = JSON.parse(Buffer.from(encodedHeader, 'base64url').toString('utf8'));
+  const unknownHeader = Buffer.from(JSON.stringify({ ...header, kid: 'unknown-key' })).toString('base64url');
+  assert.equal(verifyJwtToken(`${unknownHeader}.${body}.${signature}`, {
+    provider, now: () => 1000000
+  }), null);
+  assert.throws(() => signJwtToken({ id: 'user-a' }, { provider, lifetimeSeconds: 59 }));
+  const excessiveLifetimeBody = Buffer.from(JSON.stringify({ id: 'user-a', iat: 1000,
+    exp: 1000 + 24 * 60 * 60 + 1 })).toString('base64url');
+  const excessiveSignature = crypto.createHmac('sha256', JWT_SECRET_FIXTURE)
+    .update(`${encodedHeader}.${excessiveLifetimeBody}`).digest('base64url');
+  assert.equal(verifyJwtToken(`${encodedHeader}.${excessiveLifetimeBody}.${excessiveSignature}`, {
+    provider, now: () => 1000000
+  }), null);
 });
 
 test('JWT secret generator only emits a value accepted by production validation', () => {
@@ -511,7 +606,8 @@ test('Finance DDL is identifier-safe and absent from normal server startup', () 
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.doesNotMatch(server, /ensureAdministrationRegistrySchema|ensureManagementPortfolio|ALTER TABLE/);
   assert.match(server, /resolveBudgetStorageConfig/);
-  assert.match(server, /const AUTH_SECRET_PROVISION = null/);
+  assert.match(server, /selectSigningKeyProvider\(process\.env, CONFIGURED_AUTH_KEY_PROVIDER\)/);
+  assert.match(server, /revision: APP_REVISION/);
   assert.match(server, /findUniqueLoginAccount\(users, loginIdentifier\)/);
   assert.match(server, /isBudgetRoute\(req\.path\)/);
   assert.match(server, /normalizeBudgetRoute\(req\.path\)/);

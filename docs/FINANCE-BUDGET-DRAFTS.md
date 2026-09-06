@@ -55,7 +55,7 @@ References techniques: [transactions BigQuery](https://docs.cloud.google.com/big
 
 1. Choisir un environnement de test separe, son dataset, sa region, les comptes pilotes et la conservation des brouillons/audits. Verifier IAM au niveau du service; les utilisateurs ne doivent pas contourner les filtres API par un acces direct aux tables.
 2. `node scripts/printBudgetSchema.js PROJECT_ID DATASET_ID` imprime seulement les deux DDL. Aucun bootstrap de ces tables au demarrage du serveur. Relire et appliquer dans l'environnement explicitement autorise, jamais automatiquement.
-3. En test, activer avec `FINANCE_BUDGET_DRAFTS_ENABLED=true`, `API_REQUIRE_AUTH=true` et une `JWT_SECRET` generee par `npm run auth:secret`. En production, tant que Budget est desactive, la configuration JWT existante reste utilisee sans rotation implicite. Toute demande d'activation Budget reste refusee avant l'ecoute HTTP tant qu'un fournisseur de cles persistant et partage n'est pas integre ; le serveur ne genere aucune cle ephemere par processus et ne remplace jamais silencieusement le secret historique. Le gestionnaire de cles et sa recette multi-instance restent une preuve P3 obligatoire avant GO production. La region suit la configuration existante du backend (`US`); tout autre emplacement exige son adaptation explicite avant activation.
+3. En test, activer avec `FINANCE_BUDGET_DRAFTS_ENABLED=true`, `API_REQUIRE_AUTH=true` et soit une `JWT_SECRET` generee par `npm run auth:secret`, soit un trousseau fictif partage. En production, tant que Budget est desactive, la configuration JWT existante reste utilisee sans rotation implicite. Une demande d'activation Budget interdit `JWT_SECRET` et exige `M3S_AUTH_SIGNING_KEYS_JSON`, trousseau persistant fourni par l'environnement et partage par toutes les instances. Le serveur ne genere aucune cle par processus et ne remplace jamais silencieusement le secret historique. La recette multi-instance reste une preuve P3 obligatoire avant GO production. La region suit la configuration existante du backend (`US`); tout autre emplacement exige son adaptation explicite avant activation.
 4. Verifier sur BigQuery reel: create/read/update, atomicite de l'audit, deux PUT concurrents (un seul succes), version obsolete, isolation entre deux auteurs et deux tenants, droits retires, reponse perdue, table absente, absence de montants dans les logs.
 5. Brancher le frontend avec choix explicite du brouillon, statut de sauvegarde, gestion du conflit sans ecrasement et export de secours. Puis activation de production dans le meme lot verifie.
 
@@ -452,3 +452,33 @@ Statut du plan : `EN COURS`. La collecte ci-dessous est en lecture seule et ne c
 | **Global** | **`NO-GO`** | Cinq portes encore ouvertes |
 
 Prochaine action utile : faire revoir ce paquet unique, puis transformer les exceptions P1-P4 en un lot d'execution isole et explicitement cible. La preparation de ce lot reste autorisee; sa mutation cloud demeure soumise a une autorisation distincte nommant les ressources, commandes et fenetre exactes.
+
+## BUDGET-GATES-EXEC-001 V0.1 - micro-lot technique isole P3-P4
+
+Ce candidat traite uniquement les ecarts techniques encore reproductibles localement. Il n'ajoute aucune cle reelle, ne modifie aucune variable, ne contacte aucun gestionnaire de secrets et ne deploie rien.
+
+### P3 - trousseau de signature partage
+
+- Nouvelle variable candidate `M3S_AUTH_SIGNING_KEYS_JSON` : objet strict contenant `activeKeyId` et une liste de une a trois cles `{id, secret}`.
+- Les identifiants sont bornes et uniques; les secrets doivent etre des valeurs aleatoires canoniques de 32 octets en base64url, fortes et distinctes.
+- Les cles restent non enumerables dans l'objet fournisseur afin d'eviter leur serialisation accidentelle. Aucun secret n'est journalise ou renvoye par une API.
+- Les JWT emis avec le fournisseur portent `alg=HS256`, `typ=JWT` et un `kid`. Une signature inconnue, une cle retiree, un en-tete non canonique, une duree hors de 60 secondes a 24 heures ou un jeton expire est refuse.
+- Une rotation sans interruption separe la diffusion et l'activation : premier deploiement avec les deux cles et l'ancienne encore active; deuxieme deploiement avec la nouvelle active apres diffusion complete; retrait de l'ancienne seulement apres expiration ou revocation des jetons concernes.
+- En production avec Budget demande, `JWT_SECRET` reste interdit et le trousseau partage est obligatoire. En test, le trousseau ou le secret fort historique sont acceptes.
+- La migration depuis `JWT_SECRET` utilise un mode explicite : trousseau distribue avec mode `legacy`, puis `M3S_AUTH_SIGNING_MODE=shared` avec double verification, puis retrait de `JWT_SECRET` apres expiration ou revocation. Les anciennes et nouvelles instances restent ainsi compatibles pendant chaque deploiement progressif. Un mode `shared` sans fournisseur valide bloque le demarrage au lieu d'emettre silencieusement un JWT historique.
+- Le middleware Budget relit le compte courant apres validation du JWT : un jeton deja emis est refuse en `401` des que le compte est desactive ou ne correspond plus au tenant/principal.
+
+### P4 - revision de sante
+
+- `/api/health` expose maintenant `revision`, issue de `RAILWAY_GIT_COMMIT_SHA`, puis `APP_REVISION`, avec `local` uniquement comme repli non probatoire.
+- La revision figure dans les reponses de succes et d'erreur, ce qui permet de relier la sonde a l'artefact backend effectivement servi.
+- Cette exposition ne remplace ni la configuration des alertes, ni leur test, ni le double exercice de retour arriere.
+
+### Preuves locales candidates
+
+- Rotation simulee entre deux instances partageant le meme trousseau : ancien et nouveau jetons verifies pendant la transition, ancien jeton refuse apres retrait de l'ancienne cle.
+- Trousseaux malformes, cle active absente, doublons, plus de trois cles, secret faible et `kid` inconnu refuses.
+- Jeton deja emis puis compte desactive : acces Budget refuse en `401`.
+- Suite backend : 110/110 tests; CORS : 9/9; `git diff --check` propre.
+
+Verdicts inchanges : `P3 NO-GO` jusqu'a recette sur deux instances isolees avec responsables et fenetre; `P4 NO-GO` jusqu'aux alertes, seuils, canal et double retour arriere. `P1`, `P2`, `P5` et le verdict global restent egalement `NO-GO`.
