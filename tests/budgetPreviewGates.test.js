@@ -152,6 +152,14 @@ test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
     { timestamp: new Date(300000).toISOString(), path: '/api/health', totalDuration: 20 }
   ], 0);
   assert.deepEqual(incomplete.stopReasons, ['INVALID_HTTP_LOG_RECORDS']);
+  const coerced = logs.analyzeHttp([
+    ...Array.from({ length: 20 }, (_, index) => httpRecord({
+      httpStatus: 200, totalDuration: 20, path: '/api/health'
+    }, index)),
+    { timestamp: new Date(300000).toISOString(), path: '/api/auth/login',
+      httpStatus: null, totalDuration: '' }
+  ], 0);
+  assert.deepEqual(coerced.stopReasons, ['INVALID_HTTP_LOG_RECORDS']);
   const gap = Array.from({ length: 20 }, (_, index) => httpRecord({
     httpStatus: 200, totalDuration: 20, path: '/api/health'
   }, index < 10 ? index : index + 3));

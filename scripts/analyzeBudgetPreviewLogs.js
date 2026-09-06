@@ -31,8 +31,12 @@ function validUtc(value) {
 
 function validHttpRecord(row) {
   return row && typeof row === 'object'
-    && Number.isInteger(Number(row.httpStatus))
-    && Number.isFinite(Number(row.totalDuration))
+    && Number.isInteger(row.httpStatus)
+    && row.httpStatus >= 100
+    && row.httpStatus <= 599
+    && typeof row.totalDuration === 'number'
+    && Number.isFinite(row.totalDuration)
+    && row.totalDuration >= 0
     && typeof row.path === 'string'
     && row.path.startsWith('/')
     && validUtc(row.timestamp);
