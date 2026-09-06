@@ -12,6 +12,7 @@ const httpRecord = (value, index = 0) => ({
 });
 
 test('preview transition plan is offline and execution requires two exact non-production targets', async () => {
+  const revision = '5abd8df142065a11a631490c440328c752fe8cdd';
   let fetched = false;
   const output = [];
   assert.equal(await transitions.main([], {
@@ -28,13 +29,14 @@ test('preview transition plan is offline and execution requires two exact non-pr
     BUDGET_HTTP_OWNER_PASSWORD: 'synthetic-only' };
   assert.deepEqual(transitions.parseArgs(['--execute', '--non-production',
     '--primary-url', primary, '--secondary-url', secondary,
-    '--confirm', `${primary}|${secondary}`], env), {
+    '--confirm', `${primary}|${secondary}`, '--expected-revision', revision], env), {
     execute: true, primaryUrl: primary, secondaryUrl: secondary,
-    confirmation: `${primary}|${secondary}`
+    confirmation: `${primary}|${secondary}`, expectedRevision: revision
   });
   await assert.rejects(() => transitions.runPreviewTransitions({
     execute: true, primaryUrl: 'https://seneswiss-group.com/api',
-    secondaryUrl: secondary, confirmation: `https://seneswiss-group.com/api|${secondary}`
+    secondaryUrl: secondary, confirmation: `https://seneswiss-group.com/api|${secondary}`,
+    expectedRevision: revision
   }, { env, fetchImpl() { fetched = true; }, prompt: async () => '' }),
   /PRODUCTION_TARGET_FORBIDDEN/);
   assert.equal(fetched, false);
@@ -48,6 +50,7 @@ test('token headers and p95 are derived without exposing token contents', () => 
 });
 
 test('preview transition runner preserves tokens across all six operator gates', async () => {
+  const revision = '5abd8df142065a11a631490c440328c752fe8cdd';
   const token = kid => {
     const value = kid ? { alg: 'HS256', typ: 'JWT', kid } : { alg: 'HS256', typ: 'JWT' };
     return `${Buffer.from(JSON.stringify(value)).toString('base64url')}.payload.signature`;
@@ -66,7 +69,7 @@ test('preview transition runner preserves tokens across all six operator gates',
     const path = new URL(url).pathname;
     const authorization = options.headers?.Authorization || '';
     const bearer = authorization.replace(/^Bearer /, '');
-    if (path.endsWith('/health')) return response(200, { status: 'ok' });
+    if (path.endsWith('/health')) return response(200, { status: 'ok', revision });
     if (path.endsWith('/auth/login')) {
       loginOrigins.push({ phase, origin: new URL(url).origin });
       if (phase === 'LEGACY_BASELINE') {
@@ -87,7 +90,7 @@ test('preview transition runner preserves tokens across all six operator gates',
     throw new Error(`Unexpected request ${options.method || 'GET'} ${path}`);
   };
   const config = { execute: true, primaryUrl: primary, secondaryUrl: secondary,
-    confirmation: `${primary}|${secondary}` };
+    confirmation: `${primary}|${secondary}`, expectedRevision: revision };
   const report = await transitions.runPreviewTransitions(config, {
     env: { BUDGET_HTTP_OWNER_EMAIL: 'owner@example.test',
       BUDGET_HTTP_OWNER_PASSWORD: 'synthetic-only' },
@@ -116,6 +119,24 @@ test('preview transition runner preserves tokens across all six operator gates',
     { phase: 'SECONDARY_SHARED', origin: new URL(secondary).origin }
   ]);
   assert.equal(JSON.stringify(report).includes('signature'), false);
+});
+
+test('preview transition runner rejects a healthy response from another revision', async () => {
+  const revision = '5abd8df142065a11a631490c440328c752fe8cdd';
+  const report = await transitions.runPreviewTransitions({
+    execute: true, primaryUrl: primary, secondaryUrl: secondary,
+    confirmation: `${primary}|${secondary}`, expectedRevision: revision
+  }, {
+    env: { BUDGET_HTTP_OWNER_EMAIL: 'owner@example.test',
+      BUDGET_HTTP_OWNER_PASSWORD: 'synthetic-only' },
+    fetchImpl: async () => ({ status: 200,
+      async json() { return { status: 'ok', revision: '0'.repeat(40) }; } }),
+    prompt: async () => '', sleep: async () => {},
+    samples: transitions.OBSERVATION_SAMPLES,
+    intervalMs: transitions.OBSERVATION_INTERVAL_MS
+  });
+  assert.equal(report.status, 'failed');
+  assert.equal(report.reason, 'HEALTH_REVISION_MISMATCH');
 });
 
 test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {

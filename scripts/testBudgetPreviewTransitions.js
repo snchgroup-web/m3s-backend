@@ -20,7 +20,8 @@ function parseArgs(args, env = {}) {
   const flags = {};
   for (let index = 0; index < args.length; index++) {
     const key = args[index];
-    if (!['--plan', '--execute', '--non-production', '--primary-url', '--secondary-url', '--confirm']
+    if (!['--plan', '--execute', '--non-production', '--primary-url', '--secondary-url', '--confirm',
+      '--expected-revision']
       .includes(key) || Object.hasOwn(flags, key)) refusal('INVALID_ARGUMENTS');
     if (['--plan', '--execute', '--non-production'].includes(key)) flags[key] = true;
     else {
@@ -40,13 +41,18 @@ function parseArgs(args, env = {}) {
   if (execute && flags['--confirm'] !== `${primaryUrl}|${secondaryUrl}`) {
     refusal('EXACT_TARGET_CONFIRMATION_REQUIRED');
   }
-  if (!execute && (flags['--non-production'] || flags['--confirm'])) {
+  if (execute && !/^[0-9a-f]{40}$/i.test(flags['--expected-revision'] || '')) {
+    refusal('EXPECTED_REVISION_REQUIRED');
+  }
+  if (!execute && (flags['--non-production'] || flags['--confirm']
+    || flags['--expected-revision'])) {
     refusal('EXECUTION_FLAGS_REQUIRE_EXECUTE');
   }
   if (execute && REQUIRED_ENV.some(key => typeof env[key] !== 'string' || !env[key])) {
     refusal('TEST_OWNER_CREDENTIALS_REQUIRED');
   }
-  return { execute, primaryUrl, secondaryUrl, confirmation: flags['--confirm'] };
+  return { execute, primaryUrl, secondaryUrl, confirmation: flags['--confirm'],
+    expectedRevision: flags['--expected-revision']?.toLowerCase() };
 }
 
 function tokenHeader(token) {
@@ -73,7 +79,8 @@ async function runPreviewTransitions(config, {
 } = {}) {
   if (!config.execute) refusal('EXECUTION_REQUIRED');
   config = parseArgs(['--execute', '--non-production', '--primary-url', config.primaryUrl,
-    '--secondary-url', config.secondaryUrl, '--confirm', config.confirmation], env);
+    '--secondary-url', config.secondaryUrl, '--confirm', config.confirmation,
+    '--expected-revision', config.expectedRevision], env);
   if (typeof fetchImpl !== 'function' || typeof prompt !== 'function') refusal('RUNTIME_UNAVAILABLE');
   if (samples !== OBSERVATION_SAMPLES || intervalMs !== OBSERVATION_INTERVAL_MS) {
     refusal('OBSERVATION_WINDOW_FIXED');
@@ -119,6 +126,12 @@ async function runPreviewTransitions(config, {
       capabilities(config.secondaryUrl, token, status, canWrite)
     ]);
   };
+  const requireAuthorizedHealth = responses => responses.forEach(response => {
+    if (response.status !== 200) refusal('HEALTH_UNAVAILABLE');
+    if (response.payload?.revision !== config.expectedRevision) {
+      refusal('HEALTH_REVISION_MISMATCH');
+    }
+  });
   const gate = async phase => {
     const answer = await prompt(`Type CONFIRM ${phase} after the bounded Railway changes: `);
     if (answer !== `CONFIRM ${phase}`) refusal(`OPERATOR_GATE_${phase}_REFUSED`);
@@ -130,7 +143,7 @@ async function runPreviewTransitions(config, {
       const responses = await Promise.all([
         call(config.primaryUrl, '/health'), call(config.secondaryUrl, '/health')
       ]);
-      responses.forEach(response => assert.equal(response.status, 200));
+      requireAuthorizedHealth(responses);
       durations.push(now() - started);
       const nextSampleAt = phaseStartedAt + ((index + 1) * intervalMs);
       await sleep(Math.max(0, nextSampleAt - now()));
@@ -144,10 +157,11 @@ async function runPreviewTransitions(config, {
   };
 
   const report = { mode: 'preview-p3-p4', status: 'running', phases: [],
+    expectedRevision: config.expectedRevision,
     targets: [config.primaryUrl, config.secondaryUrl], secretsLogged: false };
   try {
     await Promise.all([call(config.primaryUrl, '/health'), call(config.secondaryUrl, '/health')])
-      .then(responses => responses.forEach(response => assert.equal(response.status, 200)));
+      .then(requireAuthorizedHealth);
     const legacyToken = await login(config.primaryUrl);
     let oldProviderToken;
     let secondaryOldProviderToken;
