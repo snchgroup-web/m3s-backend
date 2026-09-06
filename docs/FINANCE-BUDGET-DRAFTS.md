@@ -590,7 +590,7 @@ Prochaine etape Fast Track : preparer un seul paquet d'autorisation ciblee pour 
 - Disponibilite : 100 % des controles `/api/health`; un seul echec ou statut autre que `200` impose `STOP`.
 - Latence : sur au moins 20 requetes controlees par phase, p95 inferieur ou egal a 1 500 ms et maximum inferieur ou egal a 3 000 ms; tout depassement impose `STOP`.
 - Erreurs `5xx` : zero pendant toute la fenetre; le premier `5xx` non attendu impose `STOP` et retour arriere.
-- Conflits `409` : exactement un conflit provoque par phase de recette et aucun conflit spontane; plus d'un `409` ou plus de 5 % des requetes impose `STOP`.
+- Conflits `409` : exactement un conflit provoque par service pendant la seule fenetre commune `HTTP_ACCEPTANCE`, zero dans chacune des dix autres phases et aucun conflit spontane; plus d'un `409` par service pendant l'acceptation, tout `409` hors acceptation ou plus de 5 % des requetes impose `STOP`.
 - Refus `401`/`403` : admis seulement dans les cas negatifs nommes; tout refus nominal impose `STOP`.
 - Canal : alerte test envoyee dans la tache Codex courante avant la premiere mutation; absence d'accuse de Cheikh ou de la suppleante signifie `EXECUTION NO-GO`.
 
