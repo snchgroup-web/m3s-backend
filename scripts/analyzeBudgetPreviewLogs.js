@@ -54,7 +54,7 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindo
   const statuses = rows.map(row => Number(row.httpStatus));
   const failures5xx = allRows.filter(row => Number(row.httpStatus) >= 500).length;
   const healthFailures = healthRows.filter(row => Number(row.httpStatus) !== 200).length;
-  const conflicts409 = statuses.filter(status => status === 409).length;
+  const conflicts409 = allRows.filter(row => row.httpStatus === 409).length;
   const p95Ms = percentile95(durations);
   const maxMs = durations.length ? Math.max(...durations) : 0;
   const healthTimes = healthRows.map(row => Date.parse(row.timestamp)).sort((left, right) => left - right);
@@ -84,7 +84,7 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindo
   if (healthRows.length < 20) stopReasons.push('INSUFFICIENT_HEALTH_SAMPLES');
   if (failures5xx) stopReasons.push('HTTP_5XX');
   if (healthFailures) stopReasons.push('HEALTH_UNAVAILABLE');
-  if (conflicts409 !== expected409 || (rows.length && conflicts409 / rows.length > 0.05)) {
+  if (conflicts409 !== expected409 || (allRows.length && conflicts409 / allRows.length > 0.05)) {
     stopReasons.push('HTTP_409_THRESHOLD');
   }
   if (p95Ms > 1500) stopReasons.push('HTTP_P95_THRESHOLD');
@@ -121,6 +121,9 @@ function validApplicationEvent(event, expectedRevision) {
     && event.durationMs >= 0
     && (event.code === null || (typeof event.code === 'string'
       && /^[A-Z][A-Z0-9_]{0,63}$/.test(event.code)))
+    && (event.outcome === 'aborted'
+      ? event.status === 499 && event.code === 'CLIENT_CLOSED_REQUEST'
+      : event.status !== 499 && event.code !== 'CLIENT_CLOSED_REQUEST')
     && event.revision === expectedRevision;
 }
 

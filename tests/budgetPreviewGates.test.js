@@ -167,6 +167,14 @@ test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
   ], 0);
   assert.equal(crossRoute5xx.failures5xx, 1);
   assert.deepEqual(crossRoute5xx.stopReasons, ['HTTP_5XX']);
+  const crossRoute409 = logs.analyzeHttp([
+    ...Array.from({ length: 20 }, (_, index) => httpRecord({
+      httpStatus: 200, totalDuration: 20, path: '/api/health'
+    }, index)),
+    httpRecord({ httpStatus: 409, totalDuration: 5, path: '/api/auth/login' }, 19)
+  ], 0);
+  assert.equal(crossRoute409.conflicts409, 1);
+  assert.deepEqual(crossRoute409.stopReasons, ['HTTP_409_THRESHOLD']);
   const noHealth = logs.analyzeHttp(Array.from({ length: 20 }, (_, index) => httpRecord({
     httpStatus: 200, totalDuration: 20, path: '/api/finance/budget-drafts/capabilities'
   }, index)), 0);
@@ -234,6 +242,12 @@ test('application log analyzer accepts only the sanitized Budget event contract'
   assert.deepEqual(logs.analyzeApplication(
     [{ ...safe, method: 'BANANA' }], revision, { 200: 1 }
   ).stopReasons, ['INVALID_EVENT_CONTRACT']);
+  assert.deepEqual(logs.analyzeApplication(
+    [{ ...safe, outcome: 'aborted' }], revision, { 200: 1 }
+  ).stopReasons, ['INVALID_EVENT_CONTRACT']);
+  const aborted = { ...safe, correlationId: '123e4567-e89b-42d3-a456-426614174001',
+    outcome: 'aborted', status: 499, code: 'CLIENT_CLOSED_REQUEST' };
+  assert.equal(logs.analyzeApplication([aborted], revision, { 499: 1 }).status, 'passed');
   assert.deepEqual(logs.analyzeApplication([
     safe, { ...safe, timestamp: '2026-09-06T00:00:01.000Z' }
   ], revision, { 200: 2 }).stopReasons, ['DUPLICATE_CORRELATION_IDS']);
