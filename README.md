@@ -122,7 +122,9 @@ Le backend expose `POST /api/auth/login`. Les comptes ne doivent pas être écri
 Variables requises :
 
 ```env
-JWT_SECRET=une_valeur_longue_et_aleatoire
+# Test/developpement : sortie de npm run auth:secret.
+# En production, le secret existant reste compatible tant que Budget est desactive.
+JWT_SECRET=<sortie_de_npm_run_auth_secret>
 API_REQUIRE_AUTH=true
 GOOGLE_CREDENTIALS={"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}
 M3S_AUTH_USERS_JSON=[{"email":"admin@example.com","name":"Admin","role":"Administrateur","passwordHash":"base64_hash","passwordSalt":"base64_salt","passwordIterations":120000}]
@@ -159,7 +161,7 @@ Cela ne remplace pas la recette JWT/HTTP de l'environnement deploye ni une revue
 Preparer uniquement dans un environnement de test explicitement autorise :
 
 - Dataset neuf et vide, nom `m3s_budget_test_...`, label `purpose=m3s_budget_test`.
-- Expiration par defaut des tables entre une heure et sept jours.
+- Expiration par defaut des tables entre deux heures et sept jours, sans expiration de partition.
 - Projet et localisation explicites ; pas de choix automatique depuis la production.
 - Identite Google ADC limitee au test, configuree hors du code et hors du chat.
   Elle doit pouvoir consulter les metadonnees du dataset, lister/creer les tables,

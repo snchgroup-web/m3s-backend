@@ -1,9 +1,17 @@
 const crypto = require('crypto');
+const {
+  hasStrongSigningSecret,
+  isProductionSigningSecretProvision,
+  resolveAccountIdentity
+} = require('./authConfiguration');
 const express = require('express');
 const { PERMISSIONS, permissionsForUser, permissionsForAccount } = require('./financeAccess');
 
 const MAX_BYTES = 512 * 1024;
 const MAX_VERSION = 1000000;
+const MIN_TEST_EXPIRATION_MS = 60 * 60 * 1000;
+const MIN_NEW_TEST_TABLE_EXPIRATION_MS = 2 * MIN_TEST_EXPIRATION_MS;
+const MAX_TEST_EXPIRATION_MS = 7 * 24 * 60 * 60 * 1000;
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const fail = () => { throw new Error('Invalid budget draft'); };
 const text = (value, max, required = false) => typeof value === 'string'
@@ -66,10 +74,154 @@ function buildBudgetSchemaStatements({ projectId, datasetId }) {
   ];
 }
 
-function budgetDraftsEnabled(env) {
-  return env.FINANCE_BUDGET_DRAFTS_ENABLED === 'true' && env.API_REQUIRE_AUTH === 'true'
-    && typeof env.JWT_SECRET === 'string' && env.JWT_SECRET.length >= 32
-    && env.JWT_SECRET !== 'm3s-development-secret-change-me';
+const BUDGET_TABLE_REQUIREMENTS = {
+  finance_budget_drafts_v1: {
+    fields: [
+      ['id', 'STRING'], ['tenant_id', 'STRING'], ['owner_user_id', 'STRING'], ['version', 'INTEGER'],
+      ['title', 'STRING'], ['entity', 'STRING'], ['year', 'STRING'], ['budget_json', 'STRING'],
+      ['created_at', 'TIMESTAMP'], ['updated_at', 'TIMESTAMP']
+    ],
+    partitionField: 'created_at',
+    clusteringFields: ['tenant_id', 'owner_user_id', 'id']
+  },
+  finance_budget_draft_events_v1: {
+    fields: [
+      ['id', 'STRING'], ['draft_id', 'STRING'], ['tenant_id', 'STRING'], ['actor_user_id', 'STRING'],
+      ['version', 'INTEGER'], ['action', 'STRING'], ['occurred_at', 'TIMESTAMP']
+    ],
+    partitionField: 'occurred_at',
+    clusteringFields: ['tenant_id', 'actor_user_id', 'draft_id']
+  }
+};
+
+function hasExpectedBudgetTableSchema(metadata, requirement) {
+  const actualFields = metadata?.schema?.fields;
+  if (!Array.isArray(actualFields) || actualFields.length !== requirement.fields.length) return false;
+  const byName = new Map(actualFields.map(field => [field.name, field]));
+  const canonicalType = value => value === 'INT64' ? 'INTEGER' : value;
+  const fieldsMatch = requirement.fields.every(([name, type]) => {
+    const field = byName.get(name);
+    return field && canonicalType(field.type) === type && field.mode === 'REQUIRED';
+  });
+  const partitioningMatches = metadata?.timePartitioning?.type === 'DAY'
+    && metadata.timePartitioning.field === requirement.partitionField;
+  const clusteringMatches = Array.isArray(metadata?.clustering?.fields)
+    && metadata.clustering.fields.length === requirement.clusteringFields.length
+    && metadata.clustering.fields.every((field, index) => field === requirement.clusteringFields[index]);
+  return fieldsMatch && partitioningMatches && clusteringMatches;
+}
+
+function resolveBudgetStorageConfig(env = {}, {
+  projectId = env.BIGQUERY_PROJECT || 'mon-projet-data-2sg',
+  applicationDatasetId = env.BIGQUERY_DATASET || 'm3s_2sg',
+  defaultLocation = 'US',
+  signingSecretProvision = null
+} = {}) {
+  const datasetId = String(env.FINANCE_BUDGET_DATASET || '').trim();
+  const location = String(env.FINANCE_BUDGET_LOCATION || defaultLocation).trim();
+  const validDataset = /^[A-Za-z_][A-Za-z0-9_]*$/.test(datasetId);
+  const validLocation = /^(US|EU|[a-z]+(?:-[a-z0-9]+)+)$/i.test(location);
+  const dedicated = validDataset && datasetId !== applicationDatasetId;
+  const productionApproved = env.NODE_ENV !== 'production'
+    || (String(env.FINANCE_BUDGET_APPROVED_DATASET || '').trim() === datasetId
+      && !/^m3s_migration_test_/i.test(datasetId));
+  const production = env.NODE_ENV === 'production';
+  const configuredSigningSecret = typeof env.JWT_SECRET === 'string' && env.JWT_SECRET.length > 0;
+  const signingSecretReady = production
+    ? !configuredSigningSecret && isProductionSigningSecretProvision(signingSecretProvision)
+    : hasStrongSigningSecret(env.JWT_SECRET);
+  const authReady = env.API_REQUIRE_AUTH === 'true' && signingSecretReady;
+  const requested = env.FINANCE_BUDGET_DRAFTS_ENABLED === 'true';
+  const enabled = requested && authReady && dedicated && validLocation && productionApproved;
+  let reason = 'ready';
+  if (!requested) reason = 'feature-disabled';
+  else if (!authReady) reason = 'authentication-not-ready';
+  else if (!validDataset) reason = 'budget-dataset-missing-or-invalid';
+  else if (!dedicated) reason = 'budget-dataset-not-isolated';
+  else if (!validLocation) reason = 'budget-location-invalid';
+  else if (!productionApproved) reason = 'budget-dataset-not-approved';
+  return {
+    projectId,
+    datasetId: validDataset ? datasetId : null,
+    location: validLocation ? location : defaultLocation,
+    requested,
+    enabled,
+    reason
+  };
+}
+
+async function assertBudgetDatasetPolicy({ bigquery, storage, env = {}, now = () => Date.now() }) {
+  const reject = safeReason => {
+    const error = new Error('Budget dataset policy is not ready');
+    error.code = 'BUDGET_DATASET_POLICY_NOT_READY';
+    error.safeReason = safeReason;
+    throw error;
+  };
+  if (!storage?.enabled || !storage.datasetId || !bigquery?.dataset) {
+    return reject(storage?.reason || 'budget-dataset-metadata-unavailable');
+  }
+  let dataset;
+  let metadata;
+  try {
+    dataset = bigquery.dataset(storage.datasetId);
+    [metadata] = await dataset.getMetadata();
+  } catch (_error) {
+    return reject('budget-dataset-metadata-unavailable');
+  }
+  const production = env.NODE_ENV === 'production';
+  const purpose = String(metadata?.labels?.purpose || '').toLowerCase();
+  const expectedPurpose = production ? 'm3s_budget_production' : 'm3s_budget_test';
+  const metadataLocation = String(metadata?.location || '').toUpperCase();
+  const expectedLocation = String(storage.location || '').toUpperCase();
+  const tableExpiration = Number(metadata?.defaultTableExpirationMs);
+  const partitionExpiration = Number(metadata?.defaultPartitionExpirationMs);
+  const validExpiration = production
+    ? (!Number.isFinite(tableExpiration) || tableExpiration <= 0)
+      && (!Number.isFinite(partitionExpiration) || partitionExpiration <= 0)
+    : Number.isFinite(tableExpiration)
+      && tableExpiration >= MIN_NEW_TEST_TABLE_EXPIRATION_MS
+      && tableExpiration <= MAX_TEST_EXPIRATION_MS
+      && (!Number.isFinite(partitionExpiration) || partitionExpiration <= 0);
+  if (metadataLocation !== expectedLocation) return reject('budget-dataset-location-mismatch');
+  if (purpose !== expectedPurpose) return reject('budget-dataset-purpose-mismatch');
+  if (!validExpiration) return reject('budget-dataset-retention-invalid');
+  try {
+    for (const [tableName, requirement] of Object.entries(BUDGET_TABLE_REQUIREMENTS)) {
+      const table = dataset.table(tableName);
+      const [exists] = await table.exists();
+      if (!exists) return reject('budget-table-missing');
+      const [tableMetadata] = await table.getMetadata();
+      const expiresAt = Number(tableMetadata?.expirationTime);
+      const partitionsExpireAfter = Number(tableMetadata?.timePartitioning?.expirationMs);
+      if (production) {
+        if ((Number.isFinite(expiresAt) && expiresAt > 0)
+          || (Number.isFinite(partitionsExpireAfter) && partitionsExpireAfter > 0)) {
+          return reject('budget-table-retention-invalid');
+        }
+      } else {
+        const remainingTableLifetime = expiresAt - now();
+        const hasTableExpiration = Number.isFinite(expiresAt) && expiresAt > 0;
+        const boundedTableExpiration = Number.isFinite(remainingTableLifetime)
+          && remainingTableLifetime >= MIN_TEST_EXPIRATION_MS
+          && remainingTableLifetime <= MAX_TEST_EXPIRATION_MS;
+        if (!hasTableExpiration || !boundedTableExpiration
+          || (Number.isFinite(partitionsExpireAfter) && partitionsExpireAfter > 0)) {
+          return reject('budget-table-retention-invalid');
+        }
+      }
+      if (!hasExpectedBudgetTableSchema(tableMetadata, requirement)) {
+        return reject('budget-table-schema-invalid');
+      }
+    }
+  } catch (error) {
+    if (error?.code === 'BUDGET_DATASET_POLICY_NOT_READY') throw error;
+    return reject('budget-table-metadata-unavailable');
+  }
+  return { ready: true, purpose: expectedPurpose };
+}
+
+function budgetDraftsEnabled(env, options) {
+  return resolveBudgetStorageConfig(env, options).enabled;
 }
 
 function createBudgetBodyMiddleware() {
@@ -83,6 +235,9 @@ function createBudgetBodyMiddleware() {
     },
     express.json({ limit: '512kb' }),
     (error, req, res, next) => {
+      if (!['entity.parse.failed', 'entity.too.large'].includes(error?.type)) {
+        return next(error);
+      }
       // Parser errors can contain the submitted body. Do not pass them to global logging.
       return res.status(error.status === 413 ? 413 : 400).json({ success: false, code: 'BUDGET_INVALID_BODY' });
     }
@@ -92,9 +247,11 @@ function createBudgetBodyMiddleware() {
 function createBudgetAccountMiddleware({ getAccounts, defaultTenantId = '2sg' }) {
   return (req, res, next) => {
     res.set('Cache-Control', 'no-store');
-    const account = getAccounts().find(candidate => candidate && candidate.active !== false
-      && (candidate.id || candidate.userId || candidate.email) === req.user?.id
-      && (candidate.tenantId || candidate.organizationId || defaultTenantId) === req.user?.tenantId);
+    const account = getAccounts().find(candidate => {
+      if (!candidate || candidate.active === false) return false;
+      const identity = resolveAccountIdentity(candidate, { M3S_DEFAULT_TENANT_ID: defaultTenantId });
+      return identity?.id === req.user?.id && identity.tenantId === req.user?.tenantId;
+    });
     if (!account) return res.status(401).json({ success: false, code: 'BUDGET_UNAUTHENTICATED' });
     // Re-read Finance rights from the current account, not just the possibly older signed token.
     req.user = { ...req.user, permissions: permissionsForAccount(account), financePermissionsExplicit: true };
@@ -103,7 +260,11 @@ function createBudgetAccountMiddleware({ getAccounts, defaultTenantId = '2sg' })
 }
 
 function createBudgetDraftHandlers({ bigquery, projectId, datasetId, location = 'US', enabled = false,
-  idGenerator = () => crypto.randomUUID(), logger = console }) {
+  disabledReason = 'feature-disabled', idGenerator = () => crypto.randomUUID(), logger = console }) {
+  const safeReasons = new Set(['feature-disabled', 'authentication-not-ready',
+    'budget-dataset-missing-or-invalid', 'budget-dataset-not-isolated', 'budget-location-invalid',
+    'budget-dataset-not-approved']);
+  const safeDisabledReason = safeReasons.has(disabledReason) ? disabledReason : 'configuration-invalid';
   const { drafts, events } = tableReferences(projectId, datasetId);
   const scope = 'tenant_id = @tenantId AND owner_user_id = @ownerId';
   const event = action => `INSERT INTO ${events}
@@ -124,7 +285,7 @@ function createBudgetDraftHandlers({ bigquery, projectId, datasetId, location = 
   };
   const active = res => {
     if (enabled === true) return true;
-    respond(res, 503, 'BUDGET_STORAGE_DISABLED'); return false;
+    respond(res, 503, 'BUDGET_STORAGE_DISABLED', { reason: safeDisabledReason }); return false;
   };
   const query = async (sql, params) => {
     const [rows] = await bigquery.query({ query: sql, params, location, useLegacySql: false });
@@ -166,7 +327,8 @@ function createBudgetDraftHandlers({ bigquery, projectId, datasetId, location = 
     capabilities(req, res) {
       if (!identity(req, res)) return;
       return res.json({ success: true, enabled: enabled === true, scope: 'organization', access: 'owner-only',
-        personalEnabled: false, canWrite: enabled === true && permissionsForUser(req.user).includes(PERMISSIONS.WRITE) });
+        personalEnabled: false, canWrite: enabled === true && permissionsForUser(req.user).includes(PERMISSIONS.WRITE),
+        reason: enabled === true ? 'ready' : safeDisabledReason });
     },
     async list(req, res) {
       const actor = identity(req, res);
@@ -253,4 +415,6 @@ function createBudgetDraftHandlers({ bigquery, projectId, datasetId, location = 
   };
 }
 
-module.exports = { validateBudget, buildBudgetSchemaStatements, budgetDraftsEnabled, createBudgetBodyMiddleware, createBudgetAccountMiddleware, createBudgetDraftHandlers };
+module.exports = { validateBudget, buildBudgetSchemaStatements, resolveBudgetStorageConfig, budgetDraftsEnabled,
+  assertBudgetDatasetPolicy,
+  createBudgetBodyMiddleware, createBudgetAccountMiddleware, createBudgetDraftHandlers };

@@ -1,15 +1,20 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const { createProductionSigningSecretProvision } = require('../authConfiguration');
 const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
-const { validateBudget, buildBudgetSchemaStatements, budgetDraftsEnabled, createBudgetDraftHandlers,
+const { validateBudget, buildBudgetSchemaStatements, resolveBudgetStorageConfig, budgetDraftsEnabled,
+  assertBudgetDatasetPolicy, createBudgetDraftHandlers,
   createBudgetAccountMiddleware, createBudgetBodyMiddleware } = require('../financeBudgetDrafts');
 
 const ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const EVENT = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const writer = { id: 'user-a', tenantId: 'org-a', financePermissionsExplicit: true, permissions: ['finance:read', 'finance:write'] };
 const reader = { ...writer, permissions: ['finance:read'] };
+const JWT_SECRET_FIXTURE = crypto.createHash('sha256').update('m3s-unit-test-signing-key-fixture')
+  .digest('base64url');
 const draft = () => ({ title: 'Previsions 2026', entity: 'Organisation test', year: '2026', revision: 0,
   rate: '', rateSource: '', rateDate: '', rows: [{ id: 'line-1', label: 'Charges', kind: 'operating',
     direction: 'out', currency: 'CHF', months: ['0', '12,50', ...Array(10).fill('')] }] });
@@ -73,11 +78,166 @@ test('schema generation is isolated, identifier-safe and never executes a query'
   }
 });
 test('activation fails closed, including legacy auth bypass or missing signing key', () => {
-  const valid = { FINANCE_BUDGET_DRAFTS_ENABLED: 'true', API_REQUIRE_AUTH: 'true', JWT_SECRET: 'x'.repeat(32) };
+  const valid = { FINANCE_BUDGET_DRAFTS_ENABLED: 'true', API_REQUIRE_AUTH: 'true', JWT_SECRET: JWT_SECRET_FIXTURE,
+    BIGQUERY_DATASET: 'application_data', FINANCE_BUDGET_DATASET: 'budget_data', FINANCE_BUDGET_LOCATION: 'US' };
   assert.equal(budgetDraftsEnabled(valid), true);
-  for (const key of Object.keys(valid)) assert.equal(budgetDraftsEnabled({ ...valid, [key]: undefined }), false);
+  for (const key of ['FINANCE_BUDGET_DRAFTS_ENABLED', 'API_REQUIRE_AUTH', 'JWT_SECRET', 'FINANCE_BUDGET_DATASET']) {
+    assert.equal(budgetDraftsEnabled({ ...valid, [key]: undefined }), false);
+  }
   assert.equal(budgetDraftsEnabled({ ...valid, FINANCE_BUDGET_DRAFTS_ENABLED: '1' }), false);
   assert.equal(budgetDraftsEnabled({ ...valid, JWT_SECRET: 'm3s-development-secret-change-me' }), false);
+  assert.equal(budgetDraftsEnabled({ ...valid, JWT_SECRET: 'x'.repeat(32) }), false);
+  assert.equal(budgetDraftsEnabled({ ...valid, JWT_SECRET: ' '.repeat(32) }), false);
+  assert.equal(budgetDraftsEnabled({ ...valid, FINANCE_BUDGET_DATASET: valid.BIGQUERY_DATASET }), false);
+  assert.equal(resolveBudgetStorageConfig({ ...valid, FINANCE_BUDGET_DATASET: '' }).reason,
+    'budget-dataset-missing-or-invalid');
+  const production = { ...valid, NODE_ENV: 'production' };
+  const signingSecretProvision = createProductionSigningSecretProvision();
+  delete production.JWT_SECRET;
+  assert.equal(resolveBudgetStorageConfig(production, { signingSecretProvision }).reason,
+    'budget-dataset-not-approved');
+  assert.equal(budgetDraftsEnabled({ ...production, FINANCE_BUDGET_APPROVED_DATASET: 'budget_data' },
+    { signingSecretProvision }), true);
+  assert.equal(budgetDraftsEnabled({ ...production, FINANCE_BUDGET_DATASET: 'm3s_migration_test_short',
+    FINANCE_BUDGET_APPROVED_DATASET: 'm3s_migration_test_short' }, { signingSecretProvision }), false);
+  assert.equal(budgetDraftsEnabled({ ...production, JWT_SECRET: JWT_SECRET_FIXTURE,
+    FINANCE_BUDGET_APPROVED_DATASET: 'budget_data' }, { signingSecretProvision }), false);
+});
+
+test('dataset policy verifies purpose, location and environment-specific retention', async () => {
+  const storage = { enabled: true, datasetId: 'budget_data', location: 'US', reason: 'ready' };
+  const schema = fields => ({ fields: fields.map(([name, type]) => ({ name, type, mode: 'REQUIRED' })) });
+  const validTable = (name, extra = {}) => name === 'finance_budget_drafts_v1' ? {
+    schema: schema([
+      ['id', 'STRING'], ['tenant_id', 'STRING'], ['owner_user_id', 'STRING'], ['version', 'INTEGER'],
+      ['title', 'STRING'], ['entity', 'STRING'], ['year', 'STRING'], ['budget_json', 'STRING'],
+      ['created_at', 'TIMESTAMP'], ['updated_at', 'TIMESTAMP']
+    ]),
+    timePartitioning: { type: 'DAY', field: 'created_at' },
+    clustering: { fields: ['tenant_id', 'owner_user_id', 'id'] },
+    ...extra
+  } : {
+    schema: schema([
+      ['id', 'STRING'], ['draft_id', 'STRING'], ['tenant_id', 'STRING'], ['actor_user_id', 'STRING'],
+      ['version', 'INTEGER'], ['action', 'STRING'], ['occurred_at', 'TIMESTAMP']
+    ]),
+    timePartitioning: { type: 'DAY', field: 'occurred_at' },
+    clustering: { fields: ['tenant_id', 'actor_user_id', 'draft_id'] },
+    ...extra
+  };
+  const productionTables = {
+    finance_budget_drafts_v1: validTable('finance_budget_drafts_v1'),
+    finance_budget_draft_events_v1: validTable('finance_budget_draft_events_v1')
+  };
+  const previewTables = {
+    finance_budget_drafts_v1: validTable('finance_budget_drafts_v1', { expirationTime: '86401000' }),
+    finance_budget_draft_events_v1: validTable('finance_budget_draft_events_v1', {
+      expirationTime: '86401000'
+    })
+  };
+  const client = (metadata, tableMetadata = {}) => ({ dataset() { return {
+    async getMetadata() { return [metadata]; },
+    table(name) { return {
+      async exists() { return [Object.hasOwn(tableMetadata, name)]; },
+      async getMetadata() { return [tableMetadata[name]]; }
+    }; }
+  }; } });
+  await assert.doesNotReject(() => assertBudgetDatasetPolicy({
+    bigquery: client({ location: 'US', labels: { purpose: 'm3s_budget_production' } }, productionTables),
+    storage,
+    env: { NODE_ENV: 'production' }
+  }));
+  await assert.rejects(() => assertBudgetDatasetPolicy({
+    bigquery: client({ location: 'US', labels: { purpose: 'm3s_budget_production' } }, {
+      finance_budget_drafts_v1: productionTables.finance_budget_drafts_v1
+    }),
+    storage,
+    env: { NODE_ENV: 'production' }
+  }), error => error.safeReason === 'budget-table-missing');
+  await assert.rejects(() => assertBudgetDatasetPolicy({
+    bigquery: client({ location: 'US', labels: { purpose: 'm3s_budget_production' } }, {
+      ...productionTables,
+      finance_budget_drafts_v1: {
+        ...productionTables.finance_budget_drafts_v1,
+        schema: { fields: productionTables.finance_budget_drafts_v1.schema.fields.slice(1) }
+      }
+    }),
+    storage,
+    env: { NODE_ENV: 'production' }
+  }), error => error.safeReason === 'budget-table-schema-invalid');
+  await assert.rejects(() => assertBudgetDatasetPolicy({
+    bigquery: client({ location: 'US', labels: { purpose: 'm3s_budget_production' },
+      defaultTableExpirationMs: '3600000' }),
+    storage,
+    env: { NODE_ENV: 'production' }
+  }), error => error.safeReason === 'budget-dataset-retention-invalid');
+  await assert.rejects(() => assertBudgetDatasetPolicy({
+    bigquery: client({ location: 'US', labels: { purpose: 'm3s_budget_production' },
+      defaultPartitionExpirationMs: '3600000' }),
+    storage,
+    env: { NODE_ENV: 'production' }
+  }), error => error.safeReason === 'budget-dataset-retention-invalid');
+  await assert.rejects(() => assertBudgetDatasetPolicy({
+    bigquery: client({ location: 'US', labels: { purpose: 'm3s_budget_production' } }, {
+      finance_budget_drafts_v1: { timePartitioning: { expirationMs: '3600000' } }
+    }),
+    storage,
+    env: { NODE_ENV: 'production' }
+  }), error => error.safeReason === 'budget-table-retention-invalid');
+  await assert.doesNotReject(() => assertBudgetDatasetPolicy({
+    bigquery: client({ location: 'US', labels: { purpose: 'm3s_budget_test' },
+      defaultTableExpirationMs: '86400000' }, previewTables),
+    storage,
+    env: { NODE_ENV: 'test' },
+    now: () => 1000
+  }));
+  await assert.rejects(() => assertBudgetDatasetPolicy({
+    bigquery: client({ location: 'US', labels: { purpose: 'm3s_budget_test' },
+      defaultTableExpirationMs: '86400000', defaultPartitionExpirationMs: '60000' }),
+    storage,
+    env: { NODE_ENV: 'test' }
+  }), error => error.safeReason === 'budget-dataset-retention-invalid');
+  await assert.rejects(() => assertBudgetDatasetPolicy({
+    bigquery: client({ location: 'US', labels: { purpose: 'm3s_budget_test' },
+      defaultTableExpirationMs: '3600000' }, previewTables),
+    storage,
+    env: { NODE_ENV: 'test' },
+    now: () => 1000
+  }), error => error.safeReason === 'budget-dataset-retention-invalid');
+  const previewMetadata = { location: 'US', labels: { purpose: 'm3s_budget_test' },
+    defaultTableExpirationMs: '86400000' };
+  await assert.rejects(() => assertBudgetDatasetPolicy({
+    bigquery: client(previewMetadata, { finance_budget_drafts_v1: {} }),
+    storage,
+    env: { NODE_ENV: 'test' },
+    now: () => 1000
+  }), error => error.safeReason === 'budget-table-retention-invalid');
+  await assert.rejects(() => assertBudgetDatasetPolicy({
+    bigquery: client(previewMetadata, { finance_budget_drafts_v1: { expirationTime: '61000' } }),
+    storage,
+    env: { NODE_ENV: 'test' },
+    now: () => 1000
+  }), error => error.safeReason === 'budget-table-retention-invalid');
+  await assert.rejects(() => assertBudgetDatasetPolicy({
+    bigquery: client(previewMetadata, { finance_budget_drafts_v1: {
+      expirationTime: '86401000', timePartitioning: { expirationMs: '3600000' }
+    } }),
+    storage,
+    env: { NODE_ENV: 'test' },
+    now: () => 1000
+  }), error => error.safeReason === 'budget-table-retention-invalid');
+  await assert.doesNotReject(() => assertBudgetDatasetPolicy({
+    bigquery: client(previewMetadata, previewTables),
+    storage,
+    env: { NODE_ENV: 'test' },
+    now: () => 1000
+  }));
+  await assert.rejects(() => assertBudgetDatasetPolicy({
+    bigquery: client({ location: 'EU', labels: { purpose: 'm3s_budget_test' },
+      defaultTableExpirationMs: '86400000' }),
+    storage,
+    env: { NODE_ENV: 'test' }
+  }), error => error.safeReason === 'budget-dataset-location-mismatch');
 });
 test('current account controls rights even when a token carries older write grants', () => {
   let accounts = [{ id: writer.id, tenantId: writer.tenantId, financePermissions: ['finance:read'] }];
@@ -103,12 +263,18 @@ test('all handlers deny missing identity and never query BigQuery', async () => 
   assert.equal(calls.length, 0);
 });
 test('permission and disabled-state guards execute before any storage access', async () => {
-  const { handlers, calls } = fixture([], { enabled: false });
+  const { handlers, calls } = fixture([], { enabled: false, disabledReason: 'budget-dataset-not-isolated' });
   const res = response(); await handlers.capabilities(request(), res);
   assert.equal(res.body.enabled, false); assert.equal(res.body.personalEnabled, false);
+  assert.equal(res.body.reason, 'budget-dataset-not-isolated');
   for (const name of ['list', 'get', 'create', 'update']) {
     const disabled = response(); await handlers[name](request(), disabled); assert.equal(disabled.statusCode, 503);
+    assert.equal(disabled.body.reason, 'budget-dataset-not-isolated');
   }
+  const invalidReason = fixture([], { enabled: false, disabledReason: 'private-detail' });
+  const invalidReasonResponse = response();
+  await invalidReason.handlers.capabilities(request(), invalidReasonResponse);
+  assert.equal(invalidReasonResponse.body.reason, 'configuration-invalid');
   const enabled = fixture();
   for (const name of ['create', 'update']) {
     const denied = response(); await enabled.handlers[name](request({ user: reader }), denied); assert.equal(denied.statusCode, 403);

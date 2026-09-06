@@ -1,4 +1,46 @@
 const crypto = require('crypto');
+const { assertBigQueryTableContract } = require('./bigQueryTableContract');
+
+const field = (name, type = 'STRING', mode = 'REQUIRED') => ({ name, type, mode });
+const ADMINISTRATION_TABLE_CONTRACTS = Object.freeze({
+  administration_resources: {
+    fields: [
+      field('id'), field('tenant_id'), field('title'), field('family'), field('authority'),
+      field('location'), field('source_status'), field('review_status'), field('confidentiality'),
+      field('note', 'STRING', 'NULLABLE'), field('created_by_user_id'),
+      field('created_by_name', 'STRING', 'NULLABLE'), field('created_at', 'TIMESTAMP'),
+      field('updated_by_user_id'), field('updated_at', 'TIMESTAMP'),
+      field('deleted_at', 'TIMESTAMP', 'NULLABLE')
+    ],
+    partitionField: 'created_at',
+    clustering: ['tenant_id', 'confidentiality', 'family']
+  },
+  administration_correspondence: {
+    fields: [
+      field('id'), field('tenant_id'), field('receipt_date', 'DATE'), field('direction'),
+      field('channel'), field('sender'), field('recipient'), field('subject'), field('category'),
+      field('confidentiality'), field('linked_person_or_case', 'STRING', 'NULLABLE'),
+      field('ged_reference', 'STRING', 'NULLABLE'),
+      field('receipt_evidence_reference', 'STRING', 'NULLABLE'), field('owner'),
+      field('next_action', 'STRING', 'NULLABLE'), field('status'),
+      field('deadline', 'DATE', 'NULLABLE'), field('created_by_user_id'),
+      field('created_by_name', 'STRING', 'NULLABLE'), field('created_at', 'TIMESTAMP'),
+      field('updated_by_user_id'), field('updated_at', 'TIMESTAMP'),
+      field('deleted_at', 'TIMESTAMP', 'NULLABLE')
+    ],
+    partitionField: 'receipt_date',
+    clustering: ['tenant_id', 'confidentiality', 'status']
+  },
+  administration_audit_log: {
+    fields: [
+      field('id'), field('tenant_id'), field('actor_user_id'),
+      field('actor_name', 'STRING', 'NULLABLE'), field('entity_type'), field('entity_id'),
+      field('action'), field('event_at', 'TIMESTAMP'), field('metadata_json', 'STRING', 'NULLABLE')
+    ],
+    partitionField: 'event_at',
+    clustering: ['tenant_id', 'entity_type', 'action']
+  }
+});
 
 const PERMISSIONS = Object.freeze({
   RESOURCES_READ: 'administration:resources:read',
@@ -124,6 +166,10 @@ const ensureAdministrationRegistrySchema = async ({
   const statements = buildAdministrationRegistrySchemaStatements({ projectId, datasetId });
   for (const query of statements) {
     await bigquery.query({ query, location });
+  }
+  const dataset = bigquery.dataset(datasetId);
+  for (const [tableId, contract] of Object.entries(ADMINISTRATION_TABLE_CONTRACTS)) {
+    await assertBigQueryTableContract(dataset.table(tableId), contract, 'ADMINISTRATION_SCHEMA_INVALID');
   }
   return {
     tables: [
@@ -686,6 +732,7 @@ const createAdministrationRegistryHandlers = ({
 
 module.exports = {
   PERMISSIONS,
+  ADMINISTRATION_TABLE_CONTRACTS,
   RegistryValidationError,
   buildAdministrationRegistrySchemaStatements,
   ensureAdministrationRegistrySchema,

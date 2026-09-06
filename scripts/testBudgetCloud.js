@@ -4,6 +4,8 @@ const { buildBudgetSchemaStatements, createBudgetDraftHandlers } = require('../f
 
 const MAX_QUERIES = 40;
 const MAX_BYTES = '67108864';
+const MIN_NEW_TEST_TABLE_EXPIRATION_MS = 2 * 60 * 60 * 1000;
+const MAX_TEST_TABLE_EXPIRATION_MS = 7 * 24 * 60 * 60 * 1000;
 const checks = ['schema', 'round-trip', 'read-only', 'owner-isolation', 'tenant-isolation',
   'stale-version', 'competing-writers', 'atomic-rollback', 'uncertain-response', 'audit'];
 const refusal = code => { const error = new Error(code); error.safeCode = code; throw error; };
@@ -46,8 +48,13 @@ function assertTestDataset(metadata, config) {
     || metadata?.location?.toLowerCase() !== config.location.toLowerCase()
     || metadata?.labels?.purpose !== 'm3s_budget_test') refusal('DATASET_NOT_APPROVED_FOR_TEST');
   const expiration = Number(metadata.defaultTableExpirationMs);
-  if (!Number.isFinite(expiration) || expiration < 3600000 || expiration > 604800000) {
+  if (!Number.isFinite(expiration) || expiration < MIN_NEW_TEST_TABLE_EXPIRATION_MS
+    || expiration > MAX_TEST_TABLE_EXPIRATION_MS) {
     refusal('TEST_TABLE_EXPIRATION_REQUIRED');
+  }
+  const partitionExpiration = Number(metadata.defaultPartitionExpirationMs || 0);
+  if (!Number.isFinite(partitionExpiration) || partitionExpiration !== 0) {
+    refusal('TEST_PARTITION_EXPIRATION_FORBIDDEN');
   }
 }
 
@@ -193,7 +200,7 @@ async function main(args = process.argv.slice(2), { env = process.env, log = val
       log({ mode: 'plan', cloudAccess: false, executionAuthorized: false, checks,
         target: config.projectId ? `${config.projectId}.${config.datasetId}` : null,
         requires: ['Explicit project, m3s_budget_test_* dataset and location.',
-          'Existing empty dataset labelled purpose=m3s_budget_test; table expiry 1 hour to 7 days.',
+          'Existing empty dataset labelled purpose=m3s_budget_test; whole-table expiry 2 hours to 7 days and no partition expiry.',
           'Test-scoped Google ADC identity; exact target confirmation with --execute --confirm.',
           'No dotenv, production startup, IAM mutation, dataset creation or data deletion.'],
         maxQueries: MAX_QUERIES, maximumBytesBilledPerJob: MAX_BYTES });

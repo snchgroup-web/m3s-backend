@@ -122,7 +122,8 @@ const invalidMetadata = {
   location: m => { m.location = 'US'; }, label: m => { m.labels.purpose = 'production'; },
   noLabel: m => { delete m.labels; }, noExpiry: m => { delete m.defaultTableExpirationMs; },
   infiniteExpiry: m => { m.defaultTableExpirationMs = 'Infinity'; }, tooLong: m => { m.defaultTableExpirationMs = '604800001'; },
-  tooShort: m => { m.defaultTableExpirationMs = '1'; }
+  tooShort: m => { m.defaultTableExpirationMs = '1'; }, oneHour: m => { m.defaultTableExpirationMs = '3600000'; },
+  partitionExpiry: m => { m.defaultPartitionExpirationMs = '7200000'; }
 };
 for (const [name, mutate] of Object.entries(invalidMetadata)) test(`dataset guard refuses ${name} before SQL`, async () => {
   const m = metadata(); mutate(m); const fake = fixture({ metadata: m });
