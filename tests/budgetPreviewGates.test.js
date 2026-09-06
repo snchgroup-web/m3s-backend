@@ -349,6 +349,13 @@ test('deployment health guard accepts only the original and pinned revisions', a
   assert.throws(() => health.parseArgs(['--execute', '--non-production', '--url', primary,
     '--confirm', primary, '--phase', 'DEPLOYMENT_GUARD', '--allowed-revisions', original]),
   /TWO_ALLOWED_REVISIONS_REQUIRED/);
+  const secondary = health.parseArgs(['--execute', '--non-production', '--url', primary,
+    '--confirm', primary, '--phase', 'SECONDARY_DEPLOYMENT_GUARD',
+    '--expected-revision', pinned]);
+  assert.equal(secondary.expectedRevision, pinned);
+  assert.throws(() => health.parseArgs(['--execute', '--non-production', '--url', primary,
+    '--confirm', primary, '--phase', 'SECONDARY_DEPLOYMENT_GUARD',
+    '--allowed-revisions', `${original},${pinned}`]), /EXPECTED_REVISION_REQUIRED/);
 });
 
 test('alert self-test emits a safe stop marker and exits with alert code', async () => {
