@@ -71,6 +71,9 @@ const {
 } = require('./budgetObservability');
 const {
   assertProductionAuthConfiguration,
+  createEnvironmentSigningKeyProvider,
+  signJwtToken,
+  verifyJwtToken,
   normalizeLoginIdentifier,
   findUniqueLoginAccount,
   resolveAccountIdentity
@@ -90,10 +93,8 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://l
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
-// Production Budget remains closed until a persistent shared key provider is integrated.
-const AUTH_SECRET_PROVISION = null;
-const AUTH_SECRET = AUTH_SECRET_PROVISION?.value
-  || process.env.JWT_SECRET
+const AUTH_KEY_PROVIDER = createEnvironmentSigningKeyProvider(process.env);
+const AUTH_SECRET = process.env.JWT_SECRET
   || 'm3s-development-secret-change-me';
 const API_REQUIRE_AUTH = process.env.API_REQUIRE_AUTH === 'true';
 const APP_REVISION = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.APP_REVISION || 'local';
@@ -195,7 +196,7 @@ const budgetStorage = resolveBudgetStorageConfig(process.env, {
   projectId: PROJECT_ID,
   applicationDatasetId: DATASET_ID,
   defaultLocation: DATASET_LOCATION,
-  signingSecretProvision: AUTH_SECRET_PROVISION
+  signingKeyProvider: AUTH_KEY_PROVIDER
 });
 const budgetDraftHandlers = createBudgetDraftHandlers({
   bigquery,
@@ -271,50 +272,15 @@ app.use((req, res, next) => {
 // AUTH HELPERS
 // ============================================================================
 
-const base64Url = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+const signToken = payload => signJwtToken(payload, {
+  provider: AUTH_KEY_PROVIDER,
+  fallbackSecret: AUTH_SECRET
+});
 
-const signToken = (payload) => {
-  const header = base64Url({ alg: 'HS256', typ: 'JWT' });
-  const body = base64Url({
-    ...payload,
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 12
-  });
-  const signature = crypto
-    .createHmac('sha256', AUTH_SECRET)
-    .update(`${header}.${body}`)
-    .digest('base64url');
-
-  return `${header}.${body}.${signature}`;
-};
-
-const parseToken = (token) => {
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
-
-  const [header, body, signature] = parts;
-  const expectedSignature = crypto
-    .createHmac('sha256', AUTH_SECRET)
-    .update(`${header}.${body}`)
-    .digest('base64url');
-  const signatureBuffer = Buffer.from(signature);
-  const expectedSignatureBuffer = Buffer.from(expectedSignature);
-
-  if (
-    signatureBuffer.length !== expectedSignatureBuffer.length ||
-    !crypto.timingSafeEqual(signatureBuffer, expectedSignatureBuffer)
-  ) {
-    return null;
-  }
-
-  try {
-    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
-    return payload;
-  } catch {
-    return null;
-  }
-};
+const parseToken = token => verifyJwtToken(token, {
+  provider: AUTH_KEY_PROVIDER,
+  fallbackSecret: AUTH_SECRET
+});
 
 const authenticateRequest = (req, res, next) => {
   if (req.user) return next();
@@ -546,7 +512,8 @@ app.get('/api/health', async (req, res) => {
       timestamp: new Date().toISOString(),
       bigquery: 'connected',
       project: PROJECT_ID,
-      dataset: DATASET_ID
+      dataset: DATASET_ID,
+      revision: APP_REVISION
     });
   } catch (error) {
     console.error('Health check BigQuery error:', {
@@ -562,6 +529,7 @@ app.get('/api/health', async (req, res) => {
       project: PROJECT_ID,
       dataset: DATASET_ID,
       datasetLocation: DATASET_LOCATION,
+      revision: APP_REVISION,
       error: error.message,
       code: error.code,
       reason: error.errors?.[0]?.reason || null,
@@ -2154,7 +2122,7 @@ app.use(createCorsErrorHandler());
 // ============================================================================
 
 const startServer = async () => {
-  assertProductionAuthConfiguration(process.env, getConfiguredUsers(), AUTH_SECRET_PROVISION);
+  assertProductionAuthConfiguration(process.env, getConfiguredUsers(), AUTH_KEY_PROVIDER);
   if (budgetStorage.enabled) {
     await assertBudgetDatasetPolicy({ bigquery, storage: budgetStorage, env: process.env });
   }

@@ -1,7 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { createProductionSigningSecretProvision } = require('../authConfiguration');
+const { createEnvironmentSigningKeyProvider, signJwtToken,
+  verifyJwtToken } = require('../authConfiguration');
 const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
@@ -15,6 +16,12 @@ const writer = { id: 'user-a', tenantId: 'org-a', financePermissionsExplicit: tr
 const reader = { ...writer, permissions: ['finance:read'] };
 const JWT_SECRET_FIXTURE = crypto.createHash('sha256').update('m3s-unit-test-signing-key-fixture')
   .digest('base64url');
+const signingKeysEnv = () => ({
+  M3S_AUTH_SIGNING_KEYS_JSON: JSON.stringify({
+    activeKeyId: 'budget-2026-09',
+    keys: [{ id: 'budget-2026-09', secret: JWT_SECRET_FIXTURE }]
+  })
+});
 const draft = () => ({ title: 'Previsions 2026', entity: 'Organisation test', year: '2026', revision: 0,
   rate: '', rateSource: '', rateDate: '', rows: [{ id: 'line-1', label: 'Charges', kind: 'operating',
     direction: 'out', currency: 'CHF', months: ['0', '12,50', ...Array(10).fill('')] }] });
@@ -91,17 +98,20 @@ test('activation fails closed, including legacy auth bypass or missing signing k
   assert.equal(budgetDraftsEnabled({ ...valid, FINANCE_BUDGET_DATASET: valid.BIGQUERY_DATASET }), false);
   assert.equal(resolveBudgetStorageConfig({ ...valid, FINANCE_BUDGET_DATASET: '' }).reason,
     'budget-dataset-missing-or-invalid');
-  const production = { ...valid, NODE_ENV: 'production' };
-  const signingSecretProvision = createProductionSigningSecretProvision();
+  const production = { ...valid, ...signingKeysEnv(), NODE_ENV: 'production' };
   delete production.JWT_SECRET;
-  assert.equal(resolveBudgetStorageConfig(production, { signingSecretProvision }).reason,
+  const signingKeyProvider = createEnvironmentSigningKeyProvider(production);
+  assert.equal(resolveBudgetStorageConfig(production, { signingKeyProvider }).reason,
     'budget-dataset-not-approved');
   assert.equal(budgetDraftsEnabled({ ...production, FINANCE_BUDGET_APPROVED_DATASET: 'budget_data' },
-    { signingSecretProvision }), true);
+    { signingKeyProvider }), true);
   assert.equal(budgetDraftsEnabled({ ...production, FINANCE_BUDGET_DATASET: 'm3s_migration_test_short',
-    FINANCE_BUDGET_APPROVED_DATASET: 'm3s_migration_test_short' }, { signingSecretProvision }), false);
+    FINANCE_BUDGET_APPROVED_DATASET: 'm3s_migration_test_short' }, { signingKeyProvider }), false);
   assert.equal(budgetDraftsEnabled({ ...production, JWT_SECRET: JWT_SECRET_FIXTURE,
-    FINANCE_BUDGET_APPROVED_DATASET: 'budget_data' }, { signingSecretProvision }), false);
+    FINANCE_BUDGET_APPROVED_DATASET: 'budget_data' }, { signingKeyProvider }), false);
+  const previewWithProvider = { ...valid, ...signingKeysEnv() };
+  delete previewWithProvider.JWT_SECRET;
+  assert.equal(budgetDraftsEnabled(previewWithProvider, { signingKeyProvider }), true);
 });
 
 test('dataset policy verifies purpose, location and environment-specific retention', async () => {
@@ -251,6 +261,25 @@ test('current account controls rights even when a token carries older write gran
     assert.equal(denied.statusCode, 401);
     accounts = [{ id: writer.id, tenantId: writer.tenantId }];
   }
+});
+
+test('an already-issued shared-key token is rejected after account deactivation', () => {
+  const provider = createEnvironmentSigningKeyProvider(signingKeysEnv());
+  const now = () => Date.parse('2026-09-06T12:00:00Z');
+  const token = signJwtToken({ id: writer.id, tenantId: writer.tenantId,
+    permissions: ['finance:read', 'finance:write'] }, { provider, now });
+  const payload = verifyJwtToken(token, { provider, now });
+  let accounts = [{ id: writer.id, tenantId: writer.tenantId, active: true,
+    financePermissions: ['finance:read', 'finance:write'] }];
+  const guard = createBudgetAccountMiddleware({ getAccounts: () => accounts });
+  let advanced = false;
+  guard(request({ user: payload }), response(), () => { advanced = true; });
+  assert.equal(advanced, true);
+  accounts = [{ ...accounts[0], active: false }];
+  const denied = response();
+  guard(request({ user: payload }), denied, () => assert.fail('Disabled account passed'));
+  assert.equal(denied.statusCode, 401);
+  assert.equal(denied.body.code, 'BUDGET_UNAUTHENTICATED');
 });
 test('all handlers deny missing identity and never query BigQuery', async () => {
   const { handlers, calls } = fixture();

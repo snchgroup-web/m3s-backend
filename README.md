@@ -123,7 +123,7 @@ Variables requises :
 
 ```env
 # Test/developpement : sortie de npm run auth:secret.
-# En production, le secret existant reste compatible tant que Budget est desactive.
+# En production, JWT_SECRET reste compatible tant que Budget est desactive.
 JWT_SECRET=<sortie_de_npm_run_auth_secret>
 API_REQUIRE_AUTH=true
 GOOGLE_CREDENTIALS={"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}
@@ -141,6 +141,14 @@ Pour générer l'entrée `M3S_AUTH_USERS_JSON` sans stocker le mot de passe en c
 ```bash
 npm run auth:hash -- admin@example.com "mot_de_passe_fort" "Admin" "Administrateur"
 ```
+
+Une activation Budget en production interdit `JWT_SECRET` et exige un trousseau partagé par toutes les instances. Sa valeur reste une variable protégée Railway et ne doit jamais être committée :
+
+```env
+M3S_AUTH_SIGNING_KEYS_JSON={"activeKeyId":"budget-AAAA-MM","keys":[{"id":"budget-AAAA-MM","secret":"<43_caracteres_base64url>"}]}
+```
+
+Le trousseau accepte au maximum trois clés fortes et distinctes. Pour une rotation sans interruption, ajouter la nouvelle clé, la désigner par `activeKeyId`, redéployer toutes les instances, puis retirer l'ancienne après expiration ou révocation des jetons concernés. Les JWT portent un `kid`; une clé retirée ou inconnue est refusée. Aucun endpoint ni journal n'expose les clés.
 
 Copier uniquement le JSON généré dans Railway. Le mot de passe en clair ne doit pas être commité.
 
