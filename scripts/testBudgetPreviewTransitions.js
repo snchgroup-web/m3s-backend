@@ -99,9 +99,9 @@ async function runPreviewTransitions(config, {
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal
       });
-      const durationMs = now() - started;
       let payload = null;
       try { payload = await response.json(); } catch { /* Status is still measured. */ }
+      const durationMs = now() - started;
       metrics.push({ status: response.status, durationMs, path });
       return { status: response.status, payload };
     } finally { clearTimeout(timer); }
@@ -176,6 +176,8 @@ async function runPreviewTransitions(config, {
     await bothCapabilities(legacyToken);
     oldProviderToken = await login(config.primaryUrl);
     assert.equal(tokenHeader(oldProviderToken)?.kid, 'preview-old');
+    const secondaryLegacyToken = await login(config.secondaryUrl);
+    assert.equal(tokenHeader(secondaryLegacyToken)?.kid, undefined);
     await bothCapabilities(oldProviderToken);
     await observe(PHASES[0], phaseStartedAt);
     report.phases.push(PHASES[0]);

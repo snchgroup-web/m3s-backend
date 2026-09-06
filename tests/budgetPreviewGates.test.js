@@ -75,6 +75,9 @@ test('preview transition runner preserves tokens across all six operator gates',
       if (phase === 'LEGACY_BASELINE') {
         return response(200, { success: true, token: legacy });
       }
+      if (phase === 'PRIMARY_SHARED' && new URL(url).origin === new URL(secondary).origin) {
+        return response(200, { success: true, token: legacy });
+      }
       if (['PRIMARY_SHARED', 'SECONDARY_SHARED'].includes(phase)) {
         return response(200, { success: true, token: old });
       }
@@ -117,6 +120,10 @@ test('preview transition runner preserves tokens across all six operator gates',
   });
   assert.deepEqual(loginOrigins.filter(item => item.phase === 'SECONDARY_SHARED'), [
     { phase: 'SECONDARY_SHARED', origin: new URL(secondary).origin }
+  ]);
+  assert.deepEqual(loginOrigins.filter(item => item.phase === 'PRIMARY_SHARED'), [
+    { phase: 'PRIMARY_SHARED', origin: new URL(primary).origin },
+    { phase: 'PRIMARY_SHARED', origin: new URL(secondary).origin }
   ]);
   assert.equal(JSON.stringify(report).includes('signature'), false);
 });
@@ -205,8 +212,21 @@ test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
     '--end-utc', '1970-01-01T00:05:00.000Z']), {
     mode: 'http', expected409: 0,
     expectedWindow: { startUtc: '1970-01-01T00:00:00.000Z',
-      endUtc: '1970-01-01T00:05:00.000Z', startMs: 0, endMs: 300000 }
+      endUtc: '1970-01-01T00:05:00.000Z', startMs: 0, endMs: 300000,
+      healthStartUtc: '1970-01-01T00:00:00.000Z',
+      healthEndUtc: '1970-01-01T00:05:00.000Z',
+      healthStartMs: 0, healthEndMs: 300000 }
   });
+  const guardedRows = [httpRecord({ httpStatus: 200, totalDuration: 10,
+    path: '/api/auth/login' }, 0), ...Array.from({ length: 20 }, (_, index) => httpRecord({
+    httpStatus: 200, totalDuration: 20, path: '/api/health'
+  }, index + 8))];
+  const guarded = logs.analyzeHttp(guardedRows, 0, 0, logs.parseExpectedWindow(
+    '1970-01-01T00:00:00.000Z', '1970-01-01T00:07:00.000Z',
+    '1970-01-01T00:02:00.000Z', '1970-01-01T00:07:00.000Z'
+  ));
+  assert.equal(guarded.status, 'passed');
+  assert.equal(guarded.cadenceHealthSamples, 20);
   assert.throws(() => logs.parseArgs(['--http', '--expected-409', '0']),
     /HTTP_EXPECTATIONS_REQUIRED/);
 });

@@ -69,8 +69,13 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindo
   const maxMs = durations.length ? Math.max(...durations) : 0;
   const healthTimes = healthRows.map(row => Date.parse(row.timestamp)).sort((left, right) => left - right);
   const allTimes = allRows.map(row => Date.parse(row.timestamp)).sort((left, right) => left - right);
-  const maxHealthGapMs = healthTimes.slice(1).reduce((maximum, timestamp, index) => (
-    Math.max(maximum, timestamp - healthTimes[index])
+  const cadenceHealthTimes = expectedWindow
+    ? healthTimes.filter(timestamp => (
+      timestamp >= expectedWindow.healthStartMs && timestamp <= expectedWindow.healthEndMs
+    ))
+    : healthTimes;
+  const maxHealthGapMs = cadenceHealthTimes.slice(1).reduce((maximum, timestamp, index) => (
+    Math.max(maximum, timestamp - cadenceHealthTimes[index])
   ), 0);
   let temporalCoverageComplete = null;
   if (expectedWindow) {
@@ -79,8 +84,9 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindo
       && allTimes.every(timestamp => (
         timestamp >= expectedWindow.startMs && timestamp <= expectedWindow.endMs
       ))
-      && healthTimes[0] <= expectedWindow.startMs + toleranceMs
-      && healthTimes.at(-1) >= expectedWindow.endMs - toleranceMs
+      && cadenceHealthTimes.length > 0
+      && cadenceHealthTimes[0] <= expectedWindow.healthStartMs + toleranceMs
+      && cadenceHealthTimes.at(-1) >= expectedWindow.healthEndMs - toleranceMs
       && maxHealthGapMs <= toleranceMs;
   }
   const stopReasons = [];
@@ -91,7 +97,7 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindo
   }
   if (!rows.length || durations.length !== rows.length) stopReasons.push('INCOMPLETE_HTTP_LOGS');
   if (rows.length < 20) stopReasons.push('INSUFFICIENT_HTTP_SAMPLES');
-  if (healthRows.length < 20) stopReasons.push('INSUFFICIENT_HEALTH_SAMPLES');
+  if (cadenceHealthTimes.length < 20) stopReasons.push('INSUFFICIENT_HEALTH_SAMPLES');
   if (failures5xx) stopReasons.push('HTTP_5XX');
   if (healthFailures) stopReasons.push('HEALTH_UNAVAILABLE');
   if (conflicts409 !== expected409 || (allRows.length && conflicts409 / allRows.length > 0.05)) {
@@ -104,6 +110,9 @@ function analyzeHttp(lines, expected409 = 0, malformedRecords = 0, expectedWindo
     failures5xx, healthFailures, malformedRecords, invalidHttpRecords,
     expectedStartUtc: expectedWindow?.startUtc || null,
     expectedEndUtc: expectedWindow?.endUtc || null,
+    expectedHealthStartUtc: expectedWindow?.healthStartUtc || null,
+    expectedHealthEndUtc: expectedWindow?.healthEndUtc || null,
+    cadenceHealthSamples: cadenceHealthTimes.length,
     temporalCoverageComplete, maxHealthGapMs,
     conflicts409, expected409, p95Ms, maxMs,
     alert: stopReasons.length ? 'BUDGET_PREVIEW_STOP' : null, stopReasons };
@@ -154,12 +163,18 @@ function parseExpectedStatuses(value) {
   return result;
 }
 
-function parseExpectedWindow(startUtc, endUtc) {
-  if (!validUtc(startUtc) || !validUtc(endUtc)) throw new Error('HTTP_WINDOW_INVALID');
+function parseExpectedWindow(startUtc, endUtc, healthStartUtc = startUtc, healthEndUtc = endUtc) {
+  if (![startUtc, endUtc, healthStartUtc, healthEndUtc].every(validUtc)) {
+    throw new Error('HTTP_WINDOW_INVALID');
+  }
   const startMs = Date.parse(startUtc);
   const endMs = Date.parse(endUtc);
-  if (endMs <= startMs) throw new Error('HTTP_WINDOW_INVALID');
-  return { startUtc, endUtc, startMs, endMs };
+  const healthStartMs = Date.parse(healthStartUtc);
+  const healthEndMs = Date.parse(healthEndUtc);
+  if (endMs <= startMs || healthEndMs <= healthStartMs
+    || healthStartMs < startMs || healthEndMs > endMs) throw new Error('HTTP_WINDOW_INVALID');
+  return { startUtc, endUtc, startMs, endMs,
+    healthStartUtc, healthEndUtc, healthStartMs, healthEndMs };
 }
 
 function analyzeApplication(lines, expectedRevision, expectedStatuses = {}, malformedRecords = 0) {
@@ -215,12 +230,16 @@ function parseArgs(args) {
       expectedStatuses: parseExpectedStatuses(args[4]) };
   }
   if (args[0] === '--http') {
-    if (args.length !== 7 || args[1] !== '--expected-409' || !/^\d+$/.test(args[2])
-      || args[3] !== '--start-utc' || args[5] !== '--end-utc') {
+    const hasHealthWindow = args.length === 11;
+    if (![7, 11].includes(args.length) || args[1] !== '--expected-409' || !/^\d+$/.test(args[2])
+      || args[3] !== '--start-utc' || args[5] !== '--end-utc'
+      || (hasHealthWindow && (args[7] !== '--health-start-utc'
+        || args[9] !== '--health-end-utc'))) {
       throw new Error('HTTP_EXPECTATIONS_REQUIRED');
     }
     return { mode: 'http', expected409: Number(args[2]),
-      expectedWindow: parseExpectedWindow(args[4], args[6]) };
+      expectedWindow: parseExpectedWindow(args[4], args[6],
+        hasHealthWindow ? args[8] : args[4], hasHealthWindow ? args[10] : args[6]) };
   }
   throw new Error('INVALID_ARGUMENTS');
 }
