@@ -47,34 +47,67 @@ function analyzeHttp(lines, expected409 = 0) {
     alert: stopReasons.length ? 'BUDGET_PREVIEW_STOP' : null, stopReasons };
 }
 
-function analyzeApplication(lines) {
+function validApplicationEvent(event, expectedRevision) {
+  const fields = Object.keys(event).sort();
+  const expectedFields = [...SAFE_EVENT_FIELDS].sort();
+  return fields.length === expectedFields.length
+    && fields.every((field, index) => field === expectedFields[index])
+    && event.event === 'budget_request'
+    && typeof event.timestamp === 'string'
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(event.timestamp)
+    && Number.isFinite(Date.parse(event.timestamp))
+    && typeof event.correlationId === 'string'
+    && event.correlationId.length > 0
+    && event.correlationId.length <= 128
+    && ['completed', 'aborted'].includes(event.outcome)
+    && typeof event.method === 'string'
+    && /^[A-Z]{3,10}$/.test(event.method)
+    && /^\/api\/finance\/budget-drafts(?:\/capabilities|\/:id|\/:invalid)?$/.test(event.route)
+    && Number.isInteger(event.status)
+    && event.status >= 100
+    && event.status <= 599
+    && Number.isInteger(event.durationMs)
+    && event.durationMs >= 0
+    && (event.code === null || (typeof event.code === 'string'
+      && /^[A-Z][A-Z0-9_]{0,63}$/.test(event.code)))
+    && event.revision === expectedRevision;
+}
+
+function analyzeApplication(lines, expectedRevision) {
   const events = lines.map(applicationEvent).filter(Boolean);
   const unsafeFields = [...new Set(events.flatMap(event => Object.keys(event)
     .filter(key => !SAFE_EVENT_FIELDS.has(key))))].sort();
-  const invalidRoutes = events.filter(event => !String(event.route || '')
-    .startsWith('/api/finance/budget-drafts')).length;
-  const invalidRevisions = events.filter(event => typeof event.revision !== 'string' || !event.revision).length;
+  const missingFields = [...new Set(events.flatMap(event => [...SAFE_EVENT_FIELDS]
+    .filter(key => !Object.hasOwn(event, key))))].sort();
+  const invalidEvents = events.filter(event => !validApplicationEvent(event, expectedRevision)).length;
+  const invalidRevisions = events.filter(event => event.revision !== expectedRevision).length;
   const stopReasons = [];
   if (!events.length) stopReasons.push('NO_BUDGET_EVENTS');
   if (unsafeFields.length) stopReasons.push('UNSAFE_EVENT_FIELDS');
-  if (invalidRoutes) stopReasons.push('INVALID_EVENT_ROUTE');
-  if (invalidRevisions) stopReasons.push('MISSING_EVENT_REVISION');
+  if (missingFields.length) stopReasons.push('MISSING_EVENT_FIELDS');
+  if (invalidRevisions) stopReasons.push('UNAUTHORIZED_EVENT_REVISION');
+  if (invalidEvents) stopReasons.push('INVALID_EVENT_CONTRACT');
   return { kind: 'application', status: stopReasons.length ? 'stop' : 'passed',
-    events: events.length, unsafeFields, invalidRoutes, invalidRevisions,
+    events: events.length, expectedRevision, unsafeFields, missingFields,
+    invalidEvents, invalidRevisions,
     alert: stopReasons.length ? 'BUDGET_PREVIEW_STOP' : null, stopReasons };
 }
 
 function parseArgs(args) {
   if (args.length === 1 && args[0] === '--self-test-alert') return { selfTest: true };
   if (!['--http', '--application'].includes(args[0])) throw new Error('MODE_REQUIRED');
-  if (args[0] === '--application' && args.length !== 1) throw new Error('INVALID_ARGUMENTS');
+  if (args[0] === '--application') {
+    if (args.length !== 3 || args[1] !== '--expected-revision'
+      || !/^[0-9a-f]{40}$/i.test(args[2])) throw new Error('EXPECTED_REVISION_REQUIRED');
+    return { mode: 'application', expectedRevision: args[2].toLowerCase() };
+  }
   if (args[0] === '--http') {
     if (args.length !== 3 || args[1] !== '--expected-409' || !/^\d+$/.test(args[2])) {
       throw new Error('EXPECTED_409_REQUIRED');
     }
     return { mode: 'http', expected409: Number(args[2]) };
   }
-  return { mode: 'application' };
+  throw new Error('INVALID_ARGUMENTS');
 }
 
 async function main(args = process.argv.slice(2), {
@@ -97,7 +130,7 @@ async function main(args = process.argv.slice(2), {
       if (parsed) lines.push(parsed);
     }
     const report = config.mode === 'http'
-      ? analyzeHttp(lines, config.expected409) : analyzeApplication(lines);
+      ? analyzeHttp(lines, config.expected409) : analyzeApplication(lines, config.expectedRevision);
     log(report);
     return report.status === 'passed' ? 0 : 2;
   } catch (error) {
@@ -107,4 +140,4 @@ async function main(args = process.argv.slice(2), {
 }
 
 if (require.main === module) main().then(code => { process.exitCode = code; });
-module.exports = { analyzeHttp, analyzeApplication, parseArgs, main };
+module.exports = { analyzeHttp, analyzeApplication, validApplicationEvent, parseArgs, main };

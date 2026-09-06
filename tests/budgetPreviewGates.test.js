@@ -115,14 +115,24 @@ test('HTTP log analyzer enforces 5xx, 409 and latency thresholds', () => {
 });
 
 test('application log analyzer accepts only the sanitized Budget event contract', () => {
+  const revision = '5abd8df142065a11a631490c440328c752fe8cdd';
   const safe = { event: 'budget_request', timestamp: '2026-09-06T00:00:00.000Z',
     correlationId: 'test', outcome: 'completed', method: 'GET',
     route: '/api/finance/budget-drafts', status: 200, durationMs: 12,
-    code: null, revision: 'candidate' };
-  assert.equal(logs.analyzeApplication([{ message: JSON.stringify(safe) }]).status, 'passed');
-  const unsafe = logs.analyzeApplication([{ ...safe, amount: 42 }]);
+    code: null, revision };
+  assert.equal(logs.analyzeApplication([{ message: JSON.stringify(safe) }], revision).status, 'passed');
+  const unsafe = logs.analyzeApplication([{ ...safe, amount: 42 }], revision);
   assert.equal(unsafe.status, 'stop');
   assert.deepEqual(unsafe.unsafeFields, ['amount']);
+  const missing = { ...safe };
+  delete missing.durationMs;
+  assert.deepEqual(logs.analyzeApplication([missing], revision).stopReasons,
+    ['MISSING_EVENT_FIELDS', 'INVALID_EVENT_CONTRACT']);
+  assert.deepEqual(logs.analyzeApplication([{ ...safe, revision: '0'.repeat(40) }], revision).stopReasons,
+    ['UNAUTHORIZED_EVENT_REVISION', 'INVALID_EVENT_CONTRACT']);
+  assert.deepEqual(logs.parseArgs(['--application', '--expected-revision', revision]), {
+    mode: 'application', expectedRevision: revision
+  });
 });
 
 test('alert self-test emits a safe stop marker and exits with alert code', async () => {
