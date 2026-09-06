@@ -59,6 +59,7 @@ test('preview transition runner preserves tokens across all six operator gates',
   let clock = 0;
   const prompts = [];
   const observations = [];
+  const loginOrigins = [];
   const response = (status, payload = {}) => ({ status, async json() { return payload; } });
   const fetchImpl = async (url, options = {}) => {
     clock += 10;
@@ -67,6 +68,7 @@ test('preview transition runner preserves tokens across all six operator gates',
     const bearer = authorization.replace(/^Bearer /, '');
     if (path.endsWith('/health')) return response(200, { status: 'ok' });
     if (path.endsWith('/auth/login')) {
+      loginOrigins.push({ phase, origin: new URL(url).origin });
       if (phase === 'LEGACY_BASELINE') {
         return response(200, { success: true, token: legacy });
       }
@@ -110,6 +112,9 @@ test('preview transition runner preserves tokens across all six operator gates',
   observations.forEach(item => {
     assert.equal(Date.parse(item.endUtc) - Date.parse(item.startUtc), 300000);
   });
+  assert.deepEqual(loginOrigins.filter(item => item.phase === 'SECONDARY_SHARED'), [
+    { phase: 'SECONDARY_SHARED', origin: new URL(secondary).origin }
+  ]);
   assert.equal(JSON.stringify(report).includes('signature'), false);
 });
 

@@ -150,6 +150,7 @@ async function runPreviewTransitions(config, {
       .then(responses => responses.forEach(response => assert.equal(response.status, 200)));
     const legacyToken = await login(config.primaryUrl);
     let oldProviderToken;
+    let secondaryOldProviderToken;
     assert.equal(tokenHeader(legacyToken)?.kid, undefined);
     let phaseStartedAt = now();
     await bothCapabilities(legacyToken);
@@ -167,8 +168,11 @@ async function runPreviewTransitions(config, {
 
     await gate(PHASES[1]);
     phaseStartedAt = now();
+    secondaryOldProviderToken = await login(config.secondaryUrl);
+    assert.equal(tokenHeader(secondaryOldProviderToken)?.kid, 'preview-old');
     await bothCapabilities(legacyToken);
     await bothCapabilities(oldProviderToken);
+    await bothCapabilities(secondaryOldProviderToken);
     await observe(PHASES[1], phaseStartedAt);
     report.phases.push(PHASES[1]);
 
@@ -189,6 +193,7 @@ async function runPreviewTransitions(config, {
     phaseStartedAt = now();
     await bothCapabilities(legacyToken, 401);
     await bothCapabilities(oldProviderToken, 401);
+    await bothCapabilities(secondaryOldProviderToken, 401);
     await bothCapabilities(newProviderToken);
     await observe(PHASES[3], phaseStartedAt);
     report.phases.push(PHASES[3]);
