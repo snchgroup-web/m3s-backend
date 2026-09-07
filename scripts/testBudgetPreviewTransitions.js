@@ -1,0 +1,272 @@
+const assert = require('node:assert/strict');
+const readline = require('node:readline/promises');
+const { normalizeUrl, syntheticBudget } = require('./testBudgetHttp');
+
+const REQUIRED_ENV = ['BUDGET_HTTP_OWNER_EMAIL', 'BUDGET_HTTP_OWNER_PASSWORD'];
+const PHASES = [
+  'PRIMARY_SHARED',
+  'SECONDARY_SHARED',
+  'NEW_ACTIVE_BOTH',
+  'OLD_REMOVED_BOTH',
+  'WRITE_REMOVED_BOTH',
+  'OWNER_DISABLED_BOTH'
+];
+const OBSERVATION_SAMPLES = 20;
+const OBSERVATION_INTERVAL_MS = 15000;
+
+const refusal = code => { const error = new Error(code); error.safeCode = code; throw error; };
+
+function parseArgs(args, env = {}) {
+  const flags = {};
+  for (let index = 0; index < args.length; index++) {
+    const key = args[index];
+    if (!['--plan', '--execute', '--non-production', '--primary-url', '--secondary-url', '--confirm',
+      '--expected-revision']
+      .includes(key) || Object.hasOwn(flags, key)) refusal('INVALID_ARGUMENTS');
+    if (['--plan', '--execute', '--non-production'].includes(key)) flags[key] = true;
+    else {
+      const value = args[++index];
+      if (!value || value.startsWith('--')) refusal('MISSING_ARGUMENT_VALUE');
+      flags[key] = value;
+    }
+  }
+  if (flags['--plan'] && flags['--execute']) refusal('CONFLICTING_MODES');
+  const execute = flags['--execute'] === true;
+  const primaryUrl = flags['--primary-url'] ? normalizeUrl(flags['--primary-url']) : null;
+  const secondaryUrl = flags['--secondary-url'] ? normalizeUrl(flags['--secondary-url']) : null;
+  if (execute && (!primaryUrl || !secondaryUrl || primaryUrl === secondaryUrl)) {
+    refusal('TWO_DISTINCT_PREVIEW_URLS_REQUIRED');
+  }
+  if (execute && flags['--non-production'] !== true) refusal('NON_PRODUCTION_ATTESTATION_REQUIRED');
+  if (execute && flags['--confirm'] !== `${primaryUrl}|${secondaryUrl}`) {
+    refusal('EXACT_TARGET_CONFIRMATION_REQUIRED');
+  }
+  if (execute && !/^[0-9a-f]{40}$/i.test(flags['--expected-revision'] || '')) {
+    refusal('EXPECTED_REVISION_REQUIRED');
+  }
+  if (!execute && (flags['--non-production'] || flags['--confirm']
+    || flags['--expected-revision'])) {
+    refusal('EXECUTION_FLAGS_REQUIRE_EXECUTE');
+  }
+  if (execute && REQUIRED_ENV.some(key => typeof env[key] !== 'string' || !env[key])) {
+    refusal('TEST_OWNER_CREDENTIALS_REQUIRED');
+  }
+  return { execute, primaryUrl, secondaryUrl, confirmation: flags['--confirm'],
+    expectedRevision: flags['--expected-revision']?.toLowerCase() };
+}
+
+function tokenHeader(token) {
+  try {
+    const encoded = String(token || '').split('.')[0];
+    return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+  } catch { return null; }
+}
+
+function percentile95(values) {
+  const ordered = [...values].sort((left, right) => left - right);
+  return ordered[Math.max(0, Math.ceil(ordered.length * 0.95) - 1)] || 0;
+}
+
+async function runPreviewTransitions(config, {
+  env = process.env,
+  fetchImpl = global.fetch,
+  prompt = null,
+  sleep = delay => new Promise(resolve => setTimeout(resolve, delay)),
+  now = Date.now,
+  samples = OBSERVATION_SAMPLES,
+  intervalMs = OBSERVATION_INTERVAL_MS,
+  log = () => {}
+} = {}) {
+  if (!config.execute) refusal('EXECUTION_REQUIRED');
+  config = parseArgs(['--execute', '--non-production', '--primary-url', config.primaryUrl,
+    '--secondary-url', config.secondaryUrl, '--confirm', config.confirmation,
+    '--expected-revision', config.expectedRevision], env);
+  if (typeof fetchImpl !== 'function' || typeof prompt !== 'function') refusal('RUNTIME_UNAVAILABLE');
+  if (samples !== OBSERVATION_SAMPLES || intervalMs !== OBSERVATION_INTERVAL_MS) {
+    refusal('OBSERVATION_WINDOW_FIXED');
+  }
+
+  const metrics = [];
+  const call = async (baseUrl, path, { method = 'GET', token, body } = {}) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    const started = now();
+    try {
+      const response = await fetchImpl(`${baseUrl}${path}`, {
+        method,
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal
+      });
+      let payload = null;
+      try { payload = await response.json(); } catch { /* Status is still measured. */ }
+      const durationMs = now() - started;
+      metrics.push({ status: response.status, durationMs, path });
+      return { status: response.status, payload };
+    } finally { clearTimeout(timer); }
+  };
+  const login = async baseUrl => {
+    const response = await call(baseUrl, '/auth/login', { method: 'POST', body: {
+      email: env.BUDGET_HTTP_OWNER_EMAIL,
+      password: env.BUDGET_HTTP_OWNER_PASSWORD
+    } });
+    assert.equal(response.status, 200);
+    assert.equal(typeof response.payload?.token, 'string');
+    return response.payload.token;
+  };
+  const capabilities = async (baseUrl, token, status = 200, canWrite = undefined) => {
+    const response = await call(baseUrl, '/finance/budget-drafts/capabilities', { token });
+    assert.equal(response.status, status);
+    if (canWrite !== undefined) assert.equal(response.payload?.canWrite, canWrite);
+  };
+  const bothCapabilities = async (token, status = 200, canWrite = undefined) => {
+    await Promise.all([
+      capabilities(config.primaryUrl, token, status, canWrite),
+      capabilities(config.secondaryUrl, token, status, canWrite)
+    ]);
+  };
+  const requireAuthorizedHealth = responses => responses.forEach(response => {
+    if (response.status !== 200) refusal('HEALTH_UNAVAILABLE');
+    if (response.payload?.revision !== config.expectedRevision) {
+      refusal('HEALTH_REVISION_MISMATCH');
+    }
+  });
+  const gate = async phase => {
+    const answer = await prompt(`Type CONFIRM ${phase} after the bounded Railway changes: `);
+    if (answer !== `CONFIRM ${phase}`) refusal(`OPERATOR_GATE_${phase}_REFUSED`);
+  };
+  const observe = async (phase, phaseStartedAt) => {
+    const durations = [];
+    for (let index = 0; index < samples; index++) {
+      const started = now();
+      const responses = await Promise.all([
+        call(config.primaryUrl, '/health'), call(config.secondaryUrl, '/health')
+      ]);
+      requireAuthorizedHealth(responses);
+      durations.push(now() - started);
+      const nextSampleAt = phaseStartedAt + ((index + 1) * intervalMs);
+      await sleep(Math.max(0, nextSampleAt - now()));
+    }
+    const p95Ms = percentile95(durations);
+    const maxMs = Math.max(...durations);
+    if (p95Ms > 1500 || maxMs > 3000) refusal('OBSERVATION_LATENCY_THRESHOLD');
+    log({ phase, startUtc: new Date(phaseStartedAt).toISOString(),
+      endUtc: new Date(now()).toISOString(), healthSamples: samples * 2,
+      p95Ms, maxMs, status: 'passed' });
+  };
+
+  const report = { mode: 'preview-p3-p4', status: 'running', phases: [],
+    expectedRevision: config.expectedRevision,
+    targets: [config.primaryUrl, config.secondaryUrl], secretsLogged: false };
+  try {
+    await Promise.all([call(config.primaryUrl, '/health'), call(config.secondaryUrl, '/health')])
+      .then(requireAuthorizedHealth);
+    const legacyToken = await login(config.primaryUrl);
+    let oldProviderToken;
+    let secondaryOldProviderToken;
+    assert.equal(tokenHeader(legacyToken)?.kid, undefined);
+    let phaseStartedAt = now();
+    await bothCapabilities(legacyToken);
+    await observe('LEGACY_BASELINE', phaseStartedAt);
+    report.phases.push('LEGACY_BASELINE');
+
+    await gate(PHASES[0]);
+    phaseStartedAt = now();
+    await bothCapabilities(legacyToken);
+    oldProviderToken = await login(config.primaryUrl);
+    assert.equal(tokenHeader(oldProviderToken)?.kid, 'preview-old');
+    const secondaryLegacyToken = await login(config.secondaryUrl);
+    assert.equal(tokenHeader(secondaryLegacyToken)?.kid, undefined);
+    await bothCapabilities(oldProviderToken);
+    await observe(PHASES[0], phaseStartedAt);
+    report.phases.push(PHASES[0]);
+
+    await gate(PHASES[1]);
+    phaseStartedAt = now();
+    secondaryOldProviderToken = await login(config.secondaryUrl);
+    assert.equal(tokenHeader(secondaryOldProviderToken)?.kid, 'preview-old');
+    await bothCapabilities(legacyToken);
+    await bothCapabilities(oldProviderToken);
+    await bothCapabilities(secondaryOldProviderToken);
+    await observe(PHASES[1], phaseStartedAt);
+    report.phases.push(PHASES[1]);
+
+    await gate(PHASES[2]);
+    phaseStartedAt = now();
+    const [newProviderToken, secondaryNewProviderToken] = await Promise.all([
+      login(config.primaryUrl), login(config.secondaryUrl)
+    ]);
+    assert.equal(tokenHeader(newProviderToken)?.kid, 'preview-new');
+    assert.equal(tokenHeader(secondaryNewProviderToken)?.kid, 'preview-new');
+    await bothCapabilities(oldProviderToken);
+    await bothCapabilities(newProviderToken);
+    await bothCapabilities(secondaryNewProviderToken);
+    await observe(PHASES[2], phaseStartedAt);
+    report.phases.push(PHASES[2]);
+
+    await gate(PHASES[3]);
+    phaseStartedAt = now();
+    await bothCapabilities(legacyToken, 401);
+    await bothCapabilities(oldProviderToken, 401);
+    await bothCapabilities(secondaryOldProviderToken, 401);
+    await bothCapabilities(newProviderToken);
+    await observe(PHASES[3], phaseStartedAt);
+    report.phases.push(PHASES[3]);
+
+    await gate(PHASES[4]);
+    phaseStartedAt = now();
+    await bothCapabilities(newProviderToken, 200, false);
+    const deniedBudget = syntheticBudget('permission-revocation');
+    const denied = await Promise.all([config.primaryUrl, config.secondaryUrl].map(baseUrl => call(
+      baseUrl, '/finance/budget-drafts', { method: 'POST', token: newProviderToken,
+        body: { budget: deniedBudget } }
+    )));
+    denied.forEach(response => assert.equal(response.status, 403));
+    await observe(PHASES[4], phaseStartedAt);
+    report.phases.push(PHASES[4]);
+
+    await gate(PHASES[5]);
+    phaseStartedAt = now();
+    await bothCapabilities(newProviderToken, 401);
+    await observe(PHASES[5], phaseStartedAt);
+    report.phases.push(PHASES[5]);
+    report.status = 'passed';
+  } catch (error) {
+    report.status = 'failed';
+    report.reason = error.safeCode || 'CHECK_FAILED';
+    report.alert = 'BUDGET_PREVIEW_STOP';
+  }
+  report.measurements = metrics.length;
+  return report;
+}
+
+async function main(args = process.argv.slice(2), {
+  env = process.env, fetchImpl = global.fetch, log = value => console.log(JSON.stringify(value))
+} = {}) {
+  let rl;
+  try {
+    const config = parseArgs(args, env);
+    if (!config.execute) {
+      log({ mode: 'plan', networkAccess: false, executionAuthorized: false, phases: PHASES,
+        observation: { samplesPerService: OBSERVATION_SAMPLES,
+          intervalMs: OBSERVATION_INTERVAL_MS,
+          windowMs: OBSERVATION_SAMPLES * OBSERVATION_INTERVAL_MS },
+        requires: ['Two distinct non-production preview URLs.', 'One pre-provisioned fictional owner.',
+          'Exact target confirmation.', 'Operator confirmation after every Railway mutation.'] });
+      return 0;
+    }
+    rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const report = await runPreviewTransitions(config, { env, fetchImpl,
+      prompt: question => rl.question(question), log });
+    log(report);
+    return report.status === 'passed' ? 0 : 1;
+  } catch (error) {
+    log({ status: 'refused', reason: error.safeCode || 'SETUP_FAILED' });
+    return 1;
+  } finally { rl?.close(); }
+}
+
+if (require.main === module) main().then(code => { process.exitCode = code; });
+module.exports = { parseArgs, tokenHeader, percentile95, runPreviewTransitions, main,
+  PHASES, OBSERVATION_SAMPLES, OBSERVATION_INTERVAL_MS };
