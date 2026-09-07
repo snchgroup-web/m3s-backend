@@ -12,6 +12,12 @@ Le code de sauvegarde est present sur les branches principales, mais reste desac
 
 La fusion du code ne vaut ni autorisation de migration ni autorisation d'activation.
 
+## Architecture fonctionnelle cible confirmee au 07-09-2026
+
+`BUDGET-BMK-001 V1.0` confirme `Budget & Previsions 2SG` comme domaine organisationnel cible et reconnait separement une future offre privee `TFX + Budgets`. Le contrat implemente dans ce depot reste volontairement limite au brouillon annuel d'organisation decrit ci-dessous.
+
+La correspondance normative entre l'existant et la cible est documentee dans [FINANCE-BUDGET-CURRENT-TARGET-MAPPING.md](./FINANCE-BUDGET-CURRENT-TARGET-MAPPING.md), reference `BUDGET-MAP-001 V0.1`. Elle distingue ce qui est couvert, partiel, derive, absent ou ferme. Cette cible n'etend pas implicitement l'API actuelle et n'autorise ni rapprochement avec les operations reelles, ni approbation, ni Budget personnel, ni recette preview, ni activation.
+
 ## Perimetre
 
 - Un brouillon appartient a une organisation ET a son auteur authentifie. Aucun partage implicite avec les autres membres, y compris les responsables Finance.
