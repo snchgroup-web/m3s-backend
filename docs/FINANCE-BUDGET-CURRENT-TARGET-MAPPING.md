@@ -21,7 +21,7 @@ Cette matrice rapproche le contrat Budget effectivement implemente du modele fon
 - Enveloppe : `title`, `entity`, `year`, `revision`, hypothese de taux et lignes budgetaires.
 - Ligne : libelle, nature, sens du flux, devise et douze montants mensuels.
 - Devises : `CHF` ou `CFA`; conversion uniquement avec un taux saisi, source et date.
-- Etats des montants : vide, zero reel et valeur invalide restent distincts.
+- Etats des montants : le client distingue vide, zero reel et valeur invalide; le serveur conserve vide et zero reel, mais refuse tout brouillon contenant une valeur invalide.
 - Statut serveur fixe : `draft`; acces fixe : `owner-only`; portee fixe : `organization`.
 - Stockage prepare : JSON du brouillon et journal technique `created`/`updated`, sans montant dans les evenements.
 - Frontieres : aucune suppression, approbation, collaboration, allocation d'operation reelle, preuve GED, tresorerie, scenario ou donnee personnelle.
@@ -60,7 +60,7 @@ Cette matrice rapproche le contrat Budget effectivement implemente du modele fon
 | Categorie | Aucune categorie distincte | `ABSENT` | Valider la taxonomie avant ajout. |
 | Nature | `rows[].kind` | `COUVERT` | Correspondances : fonctionnement, investissement, financement. |
 | Sens | `rows[].direction` | `COUVERT` | Correspondances : entrant et sortant. |
-| Montant original | `rows[].months[]` | `COUVERT` | Conserver les chaines decimales et la distinction vide/zero/invalide. |
+| Montant original | `rows[].months[]` | `PARTIEL` | Conserver les chaines decimales et la distinction vide/zero; l'invalide reste un etat client refuse par l'API, jamais une valeur persistee. |
 | Devise originale | `rows[].currency` | `COUVERT` | Valeurs actuelles : CHF ou CFA. |
 | Montants CHF et CFA | Montant original plus hypothese de taux | `DERIVE` | Ne pas stocker un equivalent comme montant saisi ni utiliser un taux live implicite. |
 | Taux, date, source | `rate`, `rateDate`, `rateSource` | `COUVERT` | Source et date obligatoires des qu'un taux est saisi. |
@@ -117,7 +117,7 @@ Les six branches sont des vues reliees d'un meme budget. Elles ne doivent pas de
 
 | Etape | Contenu | Condition de sortie |
 | --- | --- | --- |
-| `T0` | Conserver le brouillon annuel actuel et ses garde-fous | Recette P3-P4 puis decision P5 separee |
+| `T0` | Conserver le brouillon annuel actuel et ses garde-fous | Preuves et verdicts `GO` distincts pour P1-P4, puis decision P5 separee |
 | `T1` | Ajouter identite budgetaire, exercice fiscal et rattachements analytiques valides | Taxonomie, responsables et referentiels confirmes |
 | `T2` | Introduire versions metier et workflow d'approbation | Roles, transitions et audit confirmes |
 | `T3` | Ajouter scenarios et tresorerie | Hypotheses, solde d'ouverture et methode confirmes |
