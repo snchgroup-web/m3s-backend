@@ -51,7 +51,7 @@ Les devises de restitution de l'organisation et la devise de reference de l'exer
 
 | Responsabilite | Effet candidat | Source ou limite actuelle |
 | --- | --- | --- |
-| Auteur technique | Cree et met a jour son brouillon selon les droits Finance | `ACTIF`; authentification et `finance:write` |
+| Auteur technique | Cree et met a jour son brouillon selon les droits Finance | `ACTIF`; authentification, `finance:read` et `finance:write` |
 | Responsable budgetaire | Porte le perimetre, les hypotheses et la preparation du budget | `CADRAGE`; identite a choisir dans un referentiel d'agents recevable |
 | Controleur | Controle coherence, sources et ecarts sans approuver | `CADRAGE`; peut etre une fonction ou une personne mandatee |
 | Approbateur | Prononce une decision budgetaire tracee | `FERME` jusqu'a T2, avec workflow, separation des responsabilites et audit confirmes |
@@ -121,7 +121,5 @@ Apres confirmation, le prochain micro-lot pourra produire le contrat technique c
 - `managementPortfolio.js` et `referentiels/managementPortfolioSeed.json`
 - `teamAgentContract.js` et `referentiels/rh001MembersDirectory.json`
 - `financeAccess.js`
-- `DATA_MODEL_STANDARD_M3S.md`
-- `docs/M3S_CONTEXTE_MAITRE_2SG_V1.md`
-- `docs/M3S_DAS_MAPPING_2026-06-25.md`
-- `M3S_CADRAGE_BUDGETS_BENCHMARK_ZAPIER_SUISSE_2026-09-07.md`
+- [Modele transversal M3S au commit frontend `e2141df`](https://github.com/snchgroup-web/m3s-frontend-v2/blob/e2141df74a38739fb72ae0902f9cce62894f0a0a/DATA_MODEL_STANDARD_M3S.md)
+- [Mapping DAS executable au commit frontend `e2141df`](https://github.com/snchgroup-web/m3s-frontend-v2/blob/e2141df74a38739fb72ae0902f9cce62894f0a0a/src/strategicMapping.js)
