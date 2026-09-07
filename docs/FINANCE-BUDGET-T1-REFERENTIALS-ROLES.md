@@ -114,6 +114,10 @@ Confirmer ou amender `BUDGET-T1-001 V0.1` en une seule decision groupee :
 
 Apres confirmation, le prochain micro-lot pourra produire le contrat technique candidat de T1 et sa strategie de compatibilite, toujours sans DDL, migration, activation ni donnees reelles.
 
+## Suite technique preparee
+
+Apres confirmation et fusion de ce cadrage, `BUDGET-T1-TECH-001 V0.1` est documente dans `FINANCE-BUDGET-T1-TECHNICAL-CONTRACT.md`. Il propose un contrat V2 separe, la compatibilite V1, des resoluteurs tenant-scoped et cinq micro-lots d'implementation futurs. Il reste candidat et n'ouvre aucun code, DDL, referentiel, stockage ou environnement.
+
 ## Sources internes consultees
 
 - `docs/FINANCE-BUDGET-CURRENT-TARGET-MAPPING.md`
