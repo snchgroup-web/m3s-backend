@@ -97,6 +97,8 @@ Le resultat du resolveur d'exercice fournit en plus son `entityId` parent. Il n'
 
 Le resultat du resolveur de portefeuille fournit aussi son `functionId` canonique. Lorsqu'une ligne porte un `portfolioId`, son `functionId` devient obligatoire et doit etre strictement egal a celui du portefeuille resolu. Le serveur refuse toute contradiction ; il ne conserve pas deux classifications divergentes et ne remplace pas silencieusement la fonction fournie.
 
+Le resolveur de dossier fournit son `portfolioId` canonique ; un futur resolveur de projet fournit son `dossierId` et celui de phase son `projectId`. Chaque identifiant enfant est compare au parent soumis et resolu. L'absence du champ parent canonique dans une source rend cette relation indisponible et bloque la reference ; deux identifiants individuellement valides ne suffisent jamais.
+
 Le serveur persiste ensuite dans l'enveloppe V2 courante un `referenceSnapshots` pour chaque chemin resolu. Chaque instantane conserve `id`, `labelSnapshot`, `sourceRevision` et `resolvedAt` produits par le serveur. Il couvre l'organisation, l'exercice, les responsabilites et chaque dimension de ligne, indexee par son `row.id` unique.
 
 Avec les tables V1 inchangees, une mise a jour remplace `budget_json` et ne conserve donc pas les instantanes des versions precedentes. T1 ne revendique aucun historique probatoire des revisions. Un historique immuable exige un stockage versionne distinct, relevant d'un futur lot DDL et d'audit explicitement autorise. Le journal d'evenements courant conserve uniquement l'action et le numero de version.
@@ -110,7 +112,7 @@ Le resultat est recevable seulement si :
 5. la revision source est disponible pour l'audit ;
 6. les relations parent-enfant sont coherentes.
 
-Une permission Finance et l'appartenance au tenant ne suffisent pas a ouvrir un objet `restricted`. Le resolveur applique aussi la confidentialite de chaque portefeuille, dossier ou future reference ; il renvoie le meme refus generique pour un objet absent et un objet non visible afin de ne pas reveler son existence.
+Une permission Finance et l'appartenance au tenant ne suffisent pas a ouvrir un objet `restricted`. Le resolveur applique aussi la confidentialite de chaque portefeuille, dossier ou future reference ; il renvoie le meme refus generique pour un objet absent et un objet non visible afin de ne pas reveler son existence. Dans T1, toute reference Management marquee `restricted` reste bloquee par `BUDGET_REFERENCE_NOT_FOUND` tant qu'un contrat d'autorisation Management actif ne relie pas explicitement l'identite courante a cet objet. `responsible_agent_id` seul, surtout nul, n'accorde aucun acces et aucune permission Finance ne lui est substituee.
 
 Une indisponibilite de source, une ambiguite ou une reference inconnue produit un refus ferme. Aucun libelle, alias, devise, texte `Autre` ou valeur historique ne remplace un identifiant.
 
@@ -122,7 +124,7 @@ Une indisponibilite de source, une ambiguite ou une reference inconnue produit u
 | Exercice | registre a creer ou confirmer | `BLOQUANT` | Refus tant que bornes, periodicite et fuseau ne sont pas resolus |
 | Fonction | menus canoniques / portefeuille | `TRANSITION` | Lecture candidate seulement apres contrat unique |
 | Equipe et agent | RH-001 / `teamAgentContract` | `TRANSITION` | Controle candidat, jamais source d'un droit |
-| Portefeuille et dossier | registres Management | `ACTIF` | Resolution tenant-scoped et chaine parentale obligatoire |
+| Portefeuille et dossier | registres Management | `ACTIF BORNE` | Resolution tenant-scoped et chaine parentale obligatoire ; references `restricted` bloquees sans contrat d'autorisation Management |
 | Projet et phase | modele documente, registre backend absent | `BLOQUANT SI FOURNI` | Valeur nulle admise ; valeur fournie refusee |
 | Pays | registre actif non confirme | `BLOQUANT SI FOURNI` | Valeur nulle admise ; valeur fournie refusee |
 | DAS | mapping derive | `DERIVE` | Jamais accepte comme saisie cliente faisant autorite |
@@ -180,7 +182,7 @@ Cette strategie n'est acceptable que si les limites de taille, le cout des filtr
 - La promotion exige les references organisation et exercice resolues et produit un rapport `apparie`, `ambigu`, `introuvable` ou `incompatible`.
 - En cas d'echec, le brouillon V1 reste intact et demeure l'unique version faisant autorite.
 
-La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraftId` exige un en-tete `Idempotency-Key` borne et une charge limitee aux references cibles :
+La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraftId` exige un en-tete `Idempotency-Key` et une charge limitee aux references cibles. La cle est sensible a la casse, contient de 16 a 128 caracteres ASCII parmi `[A-Za-z0-9._:-]`, n'est ni trimmee ni normalisee et est refusee si elle ne respecte pas exactement cette grammaire. Son empreinte est l'hexadecimal minuscule de `SHA-256(UTF8("m3s:budget:promotion:v1\\0" + tenantId + "\\0" + authorUserId + "\\0" + Idempotency-Key))`. La chaine de domaine, les separateurs NUL et les octets UTF-8 sont normatifs afin que toutes les instances calculent la meme valeur sans conserver la cle brute.
 
 ```json
 {
@@ -259,7 +261,7 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 3. Tenant, auteur et droits fournis par le client sont ignores ou refuses.
 4. Une organisation ou un exercice non resolu bloque la creation V2 ; un exercice rattache a une autre organisation est refuse.
 5. Les relations fonction, portefeuille, dossier, projet et phase incoherentes sont refusees, notamment une fonction differente de celle du portefeuille resolu.
-6. Une reference restreinte non visible est refusee sans reveler son existence.
+6. Une reference `restricted` est refusee sans reveler son existence tant qu'aucune politique Management active ne prouve l'acces de l'identite courante.
 7. Une equipe et l'agent de la meme ligne incompatibles sont refuses ; le collectif reste limite a son equipe. Le responsable budgetaire de toute creation ou promotion V2 est un agent resolu explicite, jamais l'auteur deduit.
 8. Deux lignes ne peuvent jamais partager le meme `row.id`.
 9. Chaque ligne contient exactement les `periodId` de l'exercice resolu ; l'ordre du tableau ne change pas leur sens.
@@ -272,9 +274,10 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 16. Le taux est soit entierement absent, soit positif, borne et accompagne d'une source et d'une date ISO valides ; toute combinaison partielle est refusee.
 17. Un conflit de version reste `409` sans ecrasement ; `expectedVersion` s'arrete a `999999` et la version stockee `1000000` est terminale.
 18. Un calendrier accepte est mensuel et contient exactement douze periodes valides couvrant l'exercice ; toute autre periodicite est refusee comme incompatible.
-19. Deux reprises de la meme version V1 vers les memes references cibles, responsable budgetaire compris, et sous la meme cle retournent le meme UUID V2 au format accepte par le validateur partage ; toute reutilisation de cle avec une autre demande et toute autre cle pour la meme demande deja creee sont refusees atomiquement, y compris sous concurrence.
-20. Les metadonnees de promotion restent serveur, immuables et preservees apres toute mise a jour V2.
-21. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
+19. La grammaire de `Idempotency-Key` et sa derivation SHA-256 normative produisent la meme empreinte sur toutes les instances ; aucune cle brute n'est persistee ou journalisee.
+20. Deux reprises de la meme version V1 vers les memes references cibles, responsable budgetaire compris, et sous la meme cle retournent le meme UUID V2 au format accepte par le validateur partage ; toute reutilisation de cle avec une autre demande et toute autre cle pour la meme demande deja creee sont refusees atomiquement, y compris sous concurrence.
+21. Les metadonnees de promotion restent serveur, immuables et preservees apres toute mise a jour V2.
+22. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
 
 ## Arbitrage groupe candidat
 
