@@ -37,7 +37,6 @@ Le serveur continue de deriver `tenantId`, `authorUserId`, la portee et les perm
   "contractVersion": 2,
   "budget": {
     "title": "Budget de fonctionnement 2SG",
-    "legacyYear": "2027",
     "identity": {
       "entityId": "ORG-2SG",
       "fiscalYearId": "FY-2SG-2027"
@@ -84,6 +83,8 @@ Chaque reference soumise est resolue par un composant serveur injecte. Un result
 ```text
 id, tenantId, status, labelSnapshot, sourceRevision
 ```
+
+Le serveur persiste ensuite dans l'enveloppe V2 un `referenceSnapshots` immuable pour chaque chemin resolu. Chaque instantane conserve `id`, `labelSnapshot`, `sourceRevision` et `resolvedAt` produits par le serveur. Il couvre l'organisation, l'exercice, les responsabilites et chaque dimension de ligne, indexee par son `row.id`. Une mise a jour re-resout les references et enregistre les instantanes de la nouvelle version sans modifier ceux d'une version precedente.
 
 Le resultat est recevable seulement si :
 
@@ -141,8 +142,10 @@ Le premier lot executable T1 devrait conserver les tables V1 et stocker l'envelo
 
 - `title` depuis `budget.title` ;
 - `entity` depuis le `labelSnapshot` canonique retourne par le resolveur d'organisation, jamais depuis la charge cliente ;
-- `year` depuis `budget.legacyYear` ;
+- `year` depuis le `summaryYear` canonique retourne par le resolveur d'exercice, jamais depuis la charge cliente ;
 - `tenant_id` et `owner_user_id` derives du serveur.
+
+Le referentiel d'exercice fournit un `summaryYear` de quatre chiffres distinct de son libelle. Pour un exercice decale, ce champ est une convention explicite du referentiel, pas une deduction du client ou des dates. Une divergence entre le `year` V1 promu et le `summaryYear` resolu est signalee dans le rapport et bloque la promotion jusqu'a arbitrage.
 
 Le discriminateur reste interne a `budget_json` : un document V1 ne possede pas `contractVersion`; un document V2 porte exactement `contractVersion: 2`. Les requetes V1 devront filtrer `JSON_VALUE(budget_json, '$.contractVersion') IS NULL`, et les requetes V2 `JSON_VALUE(budget_json, '$.contractVersion') = '2'`, pour les listes, lectures et mises a jour. Un identifiant de l'autre contrat est traite comme introuvable dans la portee demandee et n'est jamais parse par le mauvais validateur.
 
@@ -153,6 +156,8 @@ Cette strategie n'est acceptable que si les limites de taille, le cout des filtr
 - Les routes V1 continuent de lire et ecrire les brouillons V1 sans modification.
 - Les routes V2 lisent seulement les brouillons marques `contractVersion: 2`.
 - Les listes V1 et V2 restent distinctes ; une vue commune eventuelle appartient a un lot ulterieur.
+- Chaque liste, lecture, export et mise a jour V2 re-resout la visibilite courante de toutes les references avant de restituer un identifiant ou un instantane. Un brouillon contenant une reference devenue invisible est exclu d'une liste et renvoie le meme `BUDGET_REFERENCE_NOT_FOUND` generique en lecture directe ; aucune reponse partielle ne revele la reference retiree.
+- Les `referenceSnapshots` restent conserves pour l'audit de la version mais ne sont jamais restitues par les routes metier lorsque la visibilite courante est perdue. Un futur acces d'audit restreint appartient a un lot separe.
 - Une promotion V1 vers V2 est une commande distincte et idempotente, jamais un effet d'une simple lecture.
 - La promotion exige les references organisation et exercice resolues et produit un rapport `apparie`, `ambigu`, `introuvable` ou `incompatible`.
 - En cas d'echec, le brouillon V1 reste intact et demeure l'unique version faisant autorite.
@@ -164,6 +169,7 @@ La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraf
   "promotion": {
     "sourceContractVersion": 1,
     "sourceDraftId": "uuid-v4-source",
+    "sourceLegacyYear": "2027",
     "idempotencyKeyHash": "empreinte-bornee",
     "promotedAt": "horodatage-serveur"
   }
@@ -192,8 +198,8 @@ Les messages publics restent generiques et sans identifiant sensible. Les journa
 | Lot | Contenu | Preuve de sortie |
 | --- | --- | --- |
 | `T1-A` | Contrats purs des objets V2 et validateurs sans route | Tests unitaires de forme, absence/zero et refus des champs inconnus |
-| `T1-B` | Interfaces de resolution et doubles fictifs | Tests tenant, statut, confidentialite, indisponibilite et relations |
-| `T1-C` | Lecture V2 et liste versionnee | V1 inchange, V2 sans conversion implicite |
+| `T1-B` | Interfaces de resolution et doubles fictifs | Tests tenant, statut, confidentialite, revisions, indisponibilite et relations |
+| `T1-C` | Lecture V2 et liste versionnee | V1 inchange, V2 sans conversion implicite, visibilite courante recontrolee |
 | `T1-D` | Creation/mise a jour V2 derriere capacite fermee | Concurrence, droits relus et refus des references invalides |
 | `T1-E` | Promotion explicite V1 vers V2 | UUID V2 deterministe, origine persistante, idempotence, reconciliation et rollback |
 
@@ -208,11 +214,14 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 5. Les relations portefeuille, dossier, projet et phase incoherentes sont refusees.
 6. Une reference restreinte non visible est refusee sans reveler son existence.
 7. Une equipe et l'agent de la meme ligne incompatibles sont refuses ; le collectif reste limite a son equipe.
-8. Une source indisponible produit un refus ferme, sans secours par libelle.
-9. Vide, zero reel et invalide restent trois etats distincts.
-10. Un conflit de version reste `409` sans ecrasement.
-11. Deux reprises de promotion retournent le meme UUID V2 ; une autre cle pour la meme origine est refusee.
-12. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
+8. Chaque reference resolue persiste sa revision et son libelle canonique dans l'instantane de la version.
+9. Une revocation apres sauvegarde exclut le brouillon des listes et bloque lecture, export et mise a jour sans fuite.
+10. L'annee de synthese vient du referentiel d'exercice ; une annee V1 divergente bloque la promotion.
+11. Une source indisponible produit un refus ferme, sans secours par libelle.
+12. Vide, zero reel et invalide restent trois etats distincts.
+13. Un conflit de version reste `409` sans ecrasement.
+14. Deux reprises de promotion retournent le meme UUID V2 ; une autre cle pour la meme origine est refusee.
+15. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
 
 ## Arbitrage groupe candidat
 
@@ -221,13 +230,14 @@ Confirmer ou amender `BUDGET-T1-TECH-001 V0.1` en une seule decision :
 1. retenir des routes V1 et V2 distinctes, sans conversion implicite ;
 2. maintenir le contrat V1 executable inchange ;
 3. imposer organisation et exercice resolus avant toute creation V2 ;
-4. utiliser des resoluteurs serveur tenant-scoped appliquant aussi la confidentialite propre a chaque reference ;
+4. utiliser des resoluteurs serveur tenant-scoped appliquant la confidentialite et persister leurs revisions dans chaque version ;
 5. stocker d'abord l'enveloppe V2 dans le JSON existant, sans DDL implicite ;
 6. maintenir responsabilites metier et permissions applicatives strictement separees ;
-7. promouvoir V1 vers V2 uniquement par commande explicite, identifiant V2 deterministe, origine persistante, cle idempotente hachee et reconciliation ;
-8. executer T1 par cinq micro-lots `A` a `E`, chacun revu et autorise separement ;
-9. garder approbation, partage, allocations multiples, centre de cout, financeur et Budget personnel fermes ;
-10. maintenir toute recette preview et activation de production sous decisions distinctes.
+7. deriver l'entite et l'annee de synthese des referentiels resolus et recontroler leur visibilite a chaque restitution ;
+8. promouvoir V1 vers V2 uniquement par commande explicite, identifiant V2 deterministe, origine persistante, cle idempotente hachee et reconciliation ;
+9. executer T1 par cinq micro-lots `A` a `E`, chacun revu et autorise separement ;
+10. garder approbation, partage, allocations multiples, centre de cout, financeur et Budget personnel fermes ;
+11. maintenir toute recette preview et activation de production sous decisions distinctes.
 
 ## Sources
 
