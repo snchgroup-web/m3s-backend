@@ -294,6 +294,23 @@ test('application log analyzer accepts only the sanitized Budget event contract'
   assert.equal(logs.validApplicationStatusCode(401, null), true);
   assert.equal(logs.validApplicationStatusCode(401, 'BUDGET_UNAUTHENTICATED'), true);
   assert.equal(logs.validApplicationStatusCode(401, 'BUDGET_CONFLICT'), false);
+  const technical401 = { ...safe, correlationId: '123e4567-e89b-42d3-a456-426614174002',
+    status: 401, code: null };
+  const disabled401 = { ...technical401,
+    correlationId: '123e4567-e89b-42d3-a456-426614174003',
+    code: 'BUDGET_UNAUTHENTICATED' };
+  assert.equal(logs.analyzeApplication(
+    [technical401], revision, { 401: 1 }, null
+  ).status, 'passed');
+  assert.equal(logs.analyzeApplication(
+    [disabled401], revision, { 401: 1 }, 'BUDGET_UNAUTHENTICATED'
+  ).status, 'passed');
+  assert.deepEqual(logs.analyzeApplication(
+    [technical401], revision, { 401: 1 }, 'BUDGET_UNAUTHENTICATED'
+  ).stopReasons, ['EVENT_401_CODE_MISMATCH']);
+  assert.deepEqual(logs.analyzeApplication(
+    [disabled401], revision, { 401: 1 }, null
+  ).stopReasons, ['EVENT_401_CODE_MISMATCH']);
   assert.equal(logs.validApplicationMethodRoute('PUT', '/api/finance/budget-drafts/:id'), true);
   assert.deepEqual(logs.analyzeApplication(
     [{ ...safe, outcome: 'aborted' }], revision, { 200: 1 }
@@ -305,12 +322,23 @@ test('application log analyzer accepts only the sanitized Budget event contract'
     safe, { ...safe, timestamp: '2026-09-06T00:00:01.000Z' }
   ], revision, { 200: 2 }).stopReasons, ['DUPLICATE_CORRELATION_IDS']);
   assert.deepEqual(logs.analyzeApplication([safe], revision, { 200: 1, 401: 1 }).stopReasons,
-    ['EVENT_STATUS_MISMATCH']);
+    ['EVENT_STATUS_MISMATCH', 'EXPECTED_401_CODE_REQUIRED']);
   assert.deepEqual(logs.parseArgs(['--application', '--expected-revision', revision,
-    '--expected-statuses', '200:3,201:1,401:1,404:2,409:1']), {
+    '--expected-statuses', '200:3,201:1,401:1,404:2,409:1',
+    '--expected-401-code', 'null']), {
     mode: 'application', expectedRevision: revision,
-    expectedStatuses: { 200: 3, 201: 1, 401: 1, 404: 2, 409: 1 }
+    expectedStatuses: { 200: 3, 201: 1, 401: 1, 404: 2, 409: 1 },
+    expected401Code: null
   });
+  assert.equal(logs.parseArgs(['--application', '--expected-revision', revision,
+    '--expected-statuses', '200:1', '--expected-401-code', 'none']).expected401Code,
+  undefined);
+  assert.throws(() => logs.parseArgs(['--application', '--expected-revision', revision,
+    '--expected-statuses', '401:1', '--expected-401-code', 'none']),
+  /EXPECTED_401_CODE_INVALID/);
+  assert.throws(() => logs.parseArgs(['--application', '--expected-revision', revision,
+    '--expected-statuses', '200:1', '--expected-401-code', 'null']),
+  /EXPECTED_401_CODE_INVALID/);
   assert.throws(() => logs.parseExpectedStatuses('200:1,200:2'),
     /EXPECTED_STATUSES_INVALID/);
   assert.equal(logs.validHttpRecord({ httpStatus: 200, totalDuration: 10,

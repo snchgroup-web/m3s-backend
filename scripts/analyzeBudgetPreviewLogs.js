@@ -186,6 +186,17 @@ function parseExpectedStatuses(value) {
   return result;
 }
 
+function parseExpected401Code(value, expectedStatuses) {
+  const expected401 = expectedStatuses[401] || 0;
+  if (!expected401) {
+    if (value !== 'none') throw new Error('EXPECTED_401_CODE_INVALID');
+    return undefined;
+  }
+  if (value === 'null') return null;
+  if (value === 'BUDGET_UNAUTHENTICATED') return value;
+  throw new Error('EXPECTED_401_CODE_INVALID');
+}
+
 function parseExpectedWindow(startUtc, endUtc, healthStartUtc = startUtc, healthEndUtc = endUtc) {
   if (![startUtc, endUtc, healthStartUtc, healthEndUtc].every(validUtc)) {
     throw new Error('HTTP_WINDOW_INVALID');
@@ -200,7 +211,8 @@ function parseExpectedWindow(startUtc, endUtc, healthStartUtc = startUtc, health
     healthStartUtc, healthEndUtc, healthStartMs, healthEndMs };
 }
 
-function analyzeApplication(lines, expectedRevision, expectedStatuses = {}, malformedRecords = 0) {
+function analyzeApplication(lines, expectedRevision, expectedStatuses = {},
+  expected401Code = undefined, malformedRecords = 0) {
   const parsedEvents = lines.map(applicationEvent);
   const unreadableApplicationRecords = parsedEvents.filter(event => !event).length;
   const totalMalformedRecords = malformedRecords + unreadableApplicationRecords;
@@ -224,6 +236,10 @@ function analyzeApplication(lines, expectedRevision, expectedStatuses = {}, malf
   const statusMismatches = [...statusKeys].filter(status => (
     (expectedStatuses[status] || 0) !== (actualStatuses[status] || 0)
   )).sort();
+  const expected401Missing = (expectedStatuses[401] || 0) > 0 && expected401Code === undefined;
+  const invalid401Codes = expected401Missing ? 0 : events.filter(event => (
+    event.status === 401 && event.code !== expected401Code
+  )).length;
   const stopReasons = [];
   if (totalMalformedRecords) stopReasons.push('MALFORMED_LOG_RECORDS');
   if (!events.length) stopReasons.push('NO_BUDGET_EVENTS');
@@ -233,11 +249,15 @@ function analyzeApplication(lines, expectedRevision, expectedStatuses = {}, malf
   if (invalidEvents) stopReasons.push('INVALID_EVENT_CONTRACT');
   if (duplicateCorrelationIds.length) stopReasons.push('DUPLICATE_CORRELATION_IDS');
   if (statusMismatches.length) stopReasons.push('EVENT_STATUS_MISMATCH');
+  if (expected401Missing) stopReasons.push('EXPECTED_401_CODE_REQUIRED');
+  if (invalid401Codes) stopReasons.push('EVENT_401_CODE_MISMATCH');
   return { kind: 'application', status: stopReasons.length ? 'stop' : 'passed',
     events: events.length, expectedRevision, unsafeFields, missingFields,
     invalidEvents, invalidRevisions, malformedRecords: totalMalformedRecords,
     unreadableApplicationRecords, duplicateCorrelationIds,
     expectedStatuses, actualStatuses, statusMismatches,
+    expected401Code: expected401Code === undefined ? 'none' : expected401Code,
+    invalid401Codes,
     alert: stopReasons.length ? 'BUDGET_PREVIEW_STOP' : null, stopReasons };
 }
 
@@ -245,12 +265,14 @@ function parseArgs(args) {
   if (args.length === 1 && args[0] === '--self-test-alert') return { selfTest: true };
   if (!['--http', '--application'].includes(args[0])) throw new Error('MODE_REQUIRED');
   if (args[0] === '--application') {
-    if (args.length !== 5 || args[1] !== '--expected-revision'
-      || !/^[0-9a-f]{40}$/i.test(args[2]) || args[3] !== '--expected-statuses') {
+    if (args.length !== 7 || args[1] !== '--expected-revision'
+      || !/^[0-9a-f]{40}$/i.test(args[2]) || args[3] !== '--expected-statuses'
+      || args[5] !== '--expected-401-code') {
       throw new Error('APPLICATION_EXPECTATIONS_REQUIRED');
     }
-    return { mode: 'application', expectedRevision: args[2].toLowerCase(),
-      expectedStatuses: parseExpectedStatuses(args[4]) };
+    const expectedStatuses = parseExpectedStatuses(args[4]);
+    return { mode: 'application', expectedRevision: args[2].toLowerCase(), expectedStatuses,
+      expected401Code: parseExpected401Code(args[6], expectedStatuses) };
   }
   if (args[0] === '--http') {
     const hasHealthWindow = args.length === 11;
@@ -291,7 +313,8 @@ async function main(args = process.argv.slice(2), {
     }
     const report = config.mode === 'http'
       ? analyzeHttp(lines, config.expected409, malformedRecords, config.expectedWindow)
-      : analyzeApplication(lines, config.expectedRevision, config.expectedStatuses, malformedRecords);
+      : analyzeApplication(lines, config.expectedRevision, config.expectedStatuses,
+        config.expected401Code, malformedRecords);
     log(report);
     return report.status === 'passed' ? 0 : 2;
   } catch (error) {
@@ -303,4 +326,5 @@ async function main(args = process.argv.slice(2), {
 if (require.main === module) main().then(code => { process.exitCode = code; });
 module.exports = { analyzeHttp, analyzeApplication, validApplicationEvent,
   validApplicationMethodRoute, validApplicationStatusCode,
-  validHttpRecord, parseExpectedStatuses, parseExpectedWindow, parseArgs, main };
+  validHttpRecord, parseExpectedStatuses, parseExpected401Code,
+  parseExpectedWindow, parseArgs, main };
