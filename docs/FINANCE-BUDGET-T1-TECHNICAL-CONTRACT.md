@@ -77,6 +77,8 @@ Le serveur continue de deriver `tenantId`, `authorUserId`, la portee et les perm
 
 Cet exemple abrege illustre la forme et seulement les deux premieres periodes ; il n'est pas une charge valide tant que tous les `periodId` de l'exercice ne sont pas fournis. `ORG-2SG`, `FY-2SG-2027` et les autres identifiants ne deviennent recevables qu'apres resolution dans leurs referentiels actifs du tenant courant. Le client ne fournit pas `entityLabelSnapshot` : le serveur le copie exclusivement depuis le `labelSnapshot` de l'organisation resolue.
 
+Le schema V2 est ferme : tout champ inconnu est refuse a chaque niveau. `budget.title` est une chaine non vide apres trim, bornee a 120 caracteres ; `budget.rows` est un tableau de 100 lignes maximum ; `row.id` et `row.label` sont des chaines non vides bornees respectivement a 64 et 120 caracteres. Les enumerations V1 sont conservees dans T1 : `kind` vaut uniquement `operating`, `investment` ou `financing` ; `direction` vaut uniquement `in` ou `out` ; `currency` vaut uniquement `CHF` ou `CFA`. L'enveloppe JSON serialisee reste bornee a 512 Kio. Une creation porte seulement `contractVersion` et `budget` ; une mise a jour ajoute `expectedVersion`, entier de 1 a `1000000`, pour la comparaison atomique, sans placer ce compteur dans le contenu metier.
+
 Chaque `periodValues[].value` est une chaine. Elle vaut soit `""` pour une absence explicite, soit un decimal positif ou nul en notation simple, sans signe, separateur de milliers ni exposant, avec au plus deux decimales et une valeur maximale de `1000000000`. Les nombres JSON, valeurs negatives, espaces, `NaN`, infinis et precisions superieures sont refuses. Cette grammaire reprend les bornes V1 tant qu'un contrat monetaire ulterieur n'est pas confirme.
 
 Le triplet `rate`, `rateSource`, `rateDate` conserve aussi le contrat V1. Les trois champs sont des chaines ; ils sont soit tous vides, soit tous renseignes. Un taux renseigne utilise une notation decimale simple positive, avec point ou virgule, au plus six decimales et une valeur maximale de `1000000` ; sa source non vide est bornee a 200 caracteres et sa date est une date civile ISO `YYYY-MM-DD` valide. Aucun taux nul, negatif, en notation exponentielle, sans source ou sans date n'est accepte.
@@ -182,12 +184,13 @@ La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraf
 {
   "target": {
     "entityId": "ORG-2SG",
-    "fiscalYearId": "FY-2SG-2027"
+    "fiscalYearId": "FY-2SG-2027",
+    "budgetOwnerAgentId": "agent-id"
   }
 }
 ```
 
-Le serveur re-resout ces deux identifiants dans le tenant courant, refuse tout champ supplementaire et ne deduit jamais l'organisation du tenant ou du libelle V1. Il derive ensuite un identifiant UUID stable du tenant, de l'auteur, du brouillon V1 source, de sa version, de son empreinte et des deux identifiants cibles canoniques. Cet identifiant utilise une derivation cryptographique canonique dont les bits de version et de variante sont forces au format UUID V4 afin de rester accepte par le `ID_PATTERN` du routeur V1 partage ; il ne pretend pas etre un UUID V4 aleatoire. Le serveur persiste ensuite dans l'enveloppe V2 :
+Le serveur re-resout ces trois identifiants dans le tenant courant, verifie le responsable metier avec le contrat RH-001, refuse tout champ supplementaire et ne deduit jamais l'organisation du tenant, du libelle V1 ou de l'auteur technique. Le `controllerAgentId` du brouillon promu est initialise a `null` et peut etre renseigne seulement par une mise a jour V2 ulterieure valide. Le serveur derive ensuite un identifiant UUID stable du tenant, de l'auteur, du brouillon V1 source, de sa version, de son empreinte et des trois identifiants cibles canoniques. Cet identifiant utilise une derivation cryptographique canonique dont les bits de version et de variante sont forces au format UUID V4 afin de rester accepte par le `ID_PATTERN` du routeur V1 partage ; il ne pretend pas etre un UUID V4 aleatoire. Le serveur persiste ensuite dans l'enveloppe V2 :
 
 ```json
 {
@@ -199,13 +202,14 @@ Le serveur re-resout ces deux identifiants dans le tenant courant, refuse tout c
     "sourceLegacyYear": "2027",
     "targetEntityId": "ORG-2SG",
     "targetFiscalYearId": "FY-2SG-2027",
+    "targetBudgetOwnerAgentId": "agent-id",
     "idempotencyKeyHash": "empreinte-bornee",
     "promotedAt": "horodatage-serveur"
   }
 }
 ```
 
-Le brouillon V1 source, son `version`, le tenant et l'auteur sont relus par le serveur. Le serveur calcule aussi une empreinte SHA-256 du JSON V1 canonique et persiste `sourceVersion`, `sourceContentDigest`, `targetEntityId` et `targetFiscalYearId` dans `promotion`. L'empreinte canonique de la requete et l'identifiant V2 deterministe couvrent le tenant, l'auteur, le brouillon source, sa version, son empreinte et les deux identifiants cibles resolus, puis l'identifiant est encode dans la forme UUID V4 acceptee par le validateur partage. La specification de derivation, son vecteur de test et le controle de collision appartiennent au micro-lot `T1-E` avant toute implementation.
+Le brouillon V1 source, son `version`, le tenant et l'auteur sont relus par le serveur. Le serveur calcule aussi une empreinte SHA-256 du JSON V1 canonique et persiste `sourceVersion`, `sourceContentDigest`, `targetEntityId`, `targetFiscalYearId` et `targetBudgetOwnerAgentId` dans `promotion`. L'empreinte canonique de la requete et l'identifiant V2 deterministe couvrent le tenant, l'auteur, le brouillon source, sa version, son empreinte et les trois identifiants cibles resolus, puis l'identifiant est encode dans la forme UUID V4 acceptee par le validateur partage. La specification de derivation, son vecteur de test et le controle de collision appartiennent au micro-lot `T1-E` avant toute implementation.
 
 La creation V2 utilise un `MERGE` transactionnel sur cet identifiant. Une reprise avec la meme origine exacte et la meme empreinte de cle renvoie le resultat existant ; une autre cle pour la meme origine produit un conflit ; une reponse incertaine se reconcilie par lecture de cet identifiant. Une version V1 ulterieure constitue une nouvelle origine et peut produire un autre brouillon V2, toujours au statut `draft` et sans autorite implicite. La cle brute et le contenu source ne sont jamais journalises.
 
@@ -248,20 +252,21 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 4. Une organisation ou un exercice non resolu bloque la creation V2 ; un exercice rattache a une autre organisation est refuse.
 5. Les relations portefeuille, dossier, projet et phase incoherentes sont refusees.
 6. Une reference restreinte non visible est refusee sans reveler son existence.
-7. Une equipe et l'agent de la meme ligne incompatibles sont refuses ; le collectif reste limite a son equipe.
+7. Une equipe et l'agent de la meme ligne incompatibles sont refuses ; le collectif reste limite a son equipe. Le responsable budgetaire de toute creation ou promotion V2 est un agent resolu explicite, jamais l'auteur deduit.
 8. Deux lignes ne peuvent jamais partager le meme `row.id`.
 9. Chaque ligne contient exactement les `periodId` de l'exercice resolu ; l'ordre du tableau ne change pas leur sens.
 10. Chaque reference resolue persiste sa revision et son libelle canonique dans l'instantane de la version courante, sans pretendre conserver l'historique anterieur.
 11. Une revocation apres sauvegarde exclut le brouillon des listes et bloque lecture, export et mise a jour sans fuite.
 12. L'annee de synthese vient du referentiel d'exercice ; une annee V1 divergente bloque la promotion.
 13. Une source indisponible produit un refus ferme, sans secours par libelle.
-14. Vide, zero reel et invalide restent trois etats distincts ; les montants V2 suivent la grammaire decimale bornee du contrat.
-15. Le taux est soit entierement absent, soit positif, borne et accompagne d'une source et d'une date ISO valides ; toute combinaison partielle est refusee.
-16. Un conflit de version reste `409` sans ecrasement.
-17. Un calendrier accepte est mensuel et contient exactement douze periodes valides couvrant l'exercice ; toute autre periodicite est refusee comme incompatible.
-18. Deux reprises de la meme version V1 vers les memes references cibles retournent le meme UUID V2 au format accepte par le validateur partage ; une autre cible ou une version V1 ulterieure produit un autre brouillon V2 non autoritaire.
-19. Les metadonnees de promotion restent serveur, immuables et preservees apres toute mise a jour V2.
-20. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
+14. Le schema ferme refuse les champs inconnus, les enumerations hors contrat, les tailles excessives et toute mise a jour sans `expectedVersion` valide.
+15. Vide, zero reel et invalide restent trois etats distincts ; les montants V2 suivent la grammaire decimale bornee du contrat.
+16. Le taux est soit entierement absent, soit positif, borne et accompagne d'une source et d'une date ISO valides ; toute combinaison partielle est refusee.
+17. Un conflit de version reste `409` sans ecrasement.
+18. Un calendrier accepte est mensuel et contient exactement douze periodes valides couvrant l'exercice ; toute autre periodicite est refusee comme incompatible.
+19. Deux reprises de la meme version V1 vers les memes references cibles, responsable budgetaire compris, retournent le meme UUID V2 au format accepte par le validateur partage ; une autre cible ou une version V1 ulterieure produit un autre brouillon V2 non autoritaire.
+20. Les metadonnees de promotion restent serveur, immuables et preservees apres toute mise a jour V2.
+21. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
 
 ## Arbitrage groupe candidat
 
