@@ -136,3 +136,7 @@ Confirmer ou amender `BUDGET-MAP-001 V0.1` comme correspondance de reference ent
 4. traiter les six branches organisationnelles comme des vues reliees d'un meme budget;
 5. maintenir rapprochement reel, approbation et Budget personnel fermes;
 6. preparer ensuite un seul cadrage `T1` des referentiels, roles et rattachements analytiques, sans implementation implicite.
+
+## Suite T1 preparee
+
+Le cadrage groupe `BUDGET-T1-001 V0.1` est documente dans `FINANCE-BUDGET-T1-REFERENTIALS-ROLES.md`. Il distingue l'identite metier du budget, l'exercice fiscal, les responsabilites, la maturite reelle des referentiels et les cardinalites analytiques. Ce document reste candidat : il n'ajoute aucun champ, droit, schema, registre ou rattachement aux brouillons actuels.
