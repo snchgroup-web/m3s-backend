@@ -178,8 +178,7 @@ Le brouillon V1 source, le tenant et l'auteur sont relus par le serveur. La crea
 | --- | --- |
 | `BUDGET_V2_DISABLED` | Contrat T1 non ouvert dans l'environnement |
 | `BUDGET_REFERENCE_UNAVAILABLE` | Source de referentiel indisponible |
-| `BUDGET_REFERENCE_NOT_FOUND` | Identifiant absent, non recevable ou non visible ; aucun detail public |
-| `BUDGET_REFERENCE_TENANT_MISMATCH` | Reference hors tenant |
+| `BUDGET_REFERENCE_NOT_FOUND` | Identifiant absent, non recevable, non visible ou hors tenant ; aucun detail public |
 | `BUDGET_REFERENCE_RELATION_INVALID` | Chaine parentale incoherente |
 | `BUDGET_FISCAL_YEAR_INVALID` | Exercice absent, ferme, chevauchant ou incompatible |
 | `BUDGET_RESPONSIBILITY_INVALID` | Agent ou equipe non coherent |
