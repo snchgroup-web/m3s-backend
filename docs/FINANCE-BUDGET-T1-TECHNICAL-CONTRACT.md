@@ -77,6 +77,8 @@ Le serveur continue de deriver `tenantId`, `authorUserId`, la portee et les perm
 
 Cet exemple abrege illustre la forme et seulement les deux premieres periodes ; il n'est pas une charge valide tant que tous les `periodId` de l'exercice ne sont pas fournis. `ORG-2SG`, `FY-2SG-2027` et les autres identifiants ne deviennent recevables qu'apres resolution dans leurs referentiels actifs du tenant courant. Le client ne fournit pas `entityLabelSnapshot` : le serveur le copie exclusivement depuis le `labelSnapshot` de l'organisation resolue.
 
+Chaque `periodValues[].value` est une chaine. Elle vaut soit `""` pour une absence explicite, soit un decimal positif ou nul en notation simple, sans signe, separateur de milliers ni exposant, avec au plus deux decimales et une valeur maximale de `1000000000`. Les nombres JSON, valeurs negatives, espaces, `NaN`, infinis et precisions superieures sont refuses. Cette grammaire reprend les bornes V1 tant qu'un contrat monetaire ulterieur n'est pas confirme.
+
 Le futur `budgetCode` reste absent de la charge cliente tant que son format, son autorite d'emission et son unicite ne sont pas confirmes. Il devra etre produit par le serveur, jamais derive du titre.
 
 ## Contrat des references
@@ -170,7 +172,18 @@ Cette strategie n'est acceptable que si les limites de taille, le cout des filtr
 - La promotion exige les references organisation et exercice resolues et produit un rapport `apparie`, `ambigu`, `introuvable` ou `incompatible`.
 - En cas d'echec, le brouillon V1 reste intact et demeure l'unique version faisant autorite.
 
-La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraftId` exige un en-tete `Idempotency-Key` borne. Le serveur derive un identifiant UUID stable du tenant, de l'auteur, du brouillon V1 source, de sa version et de son empreinte. Cet identifiant utilise une derivation cryptographique canonique dont les bits de version et de variante sont forces au format UUID V4 afin de rester accepte par le `ID_PATTERN` du routeur V1 partage ; il ne pretend pas etre un UUID V4 aleatoire. Le serveur persiste ensuite dans l'enveloppe V2 :
+La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraftId` exige un en-tete `Idempotency-Key` borne et une charge limitee aux references cibles :
+
+```json
+{
+  "target": {
+    "entityId": "ORG-2SG",
+    "fiscalYearId": "FY-2SG-2027"
+  }
+}
+```
+
+Le serveur re-resout ces deux identifiants dans le tenant courant, refuse tout champ supplementaire et ne deduit jamais l'organisation du tenant ou du libelle V1. Il derive ensuite un identifiant UUID stable du tenant, de l'auteur, du brouillon V1 source, de sa version, de son empreinte et des deux identifiants cibles canoniques. Cet identifiant utilise une derivation cryptographique canonique dont les bits de version et de variante sont forces au format UUID V4 afin de rester accepte par le `ID_PATTERN` du routeur V1 partage ; il ne pretend pas etre un UUID V4 aleatoire. Le serveur persiste ensuite dans l'enveloppe V2 :
 
 ```json
 {
@@ -180,15 +193,19 @@ La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraf
     "sourceVersion": 3,
     "sourceContentDigest": "sha256-canonique",
     "sourceLegacyYear": "2027",
+    "targetEntityId": "ORG-2SG",
+    "targetFiscalYearId": "FY-2SG-2027",
     "idempotencyKeyHash": "empreinte-bornee",
     "promotedAt": "horodatage-serveur"
   }
 }
 ```
 
-Le brouillon V1 source, son `version`, le tenant et l'auteur sont relus par le serveur. Le serveur calcule aussi une empreinte SHA-256 du JSON V1 canonique et persiste `sourceVersion` et `sourceContentDigest` dans `promotion`. L'identifiant V2 deterministe derive du tenant, de l'auteur, du brouillon source, de sa version et de cette empreinte, puis est encode dans la forme UUID V4 acceptee par le validateur partage. La specification de derivation, son vecteur de test et le controle de collision appartiennent au micro-lot `T1-E` avant toute implementation.
+Le brouillon V1 source, son `version`, le tenant et l'auteur sont relus par le serveur. Le serveur calcule aussi une empreinte SHA-256 du JSON V1 canonique et persiste `sourceVersion`, `sourceContentDigest`, `targetEntityId` et `targetFiscalYearId` dans `promotion`. L'empreinte canonique de la requete et l'identifiant V2 deterministe couvrent le tenant, l'auteur, le brouillon source, sa version, son empreinte et les deux identifiants cibles resolus, puis l'identifiant est encode dans la forme UUID V4 acceptee par le validateur partage. La specification de derivation, son vecteur de test et le controle de collision appartiennent au micro-lot `T1-E` avant toute implementation.
 
 La creation V2 utilise un `MERGE` transactionnel sur cet identifiant. Une reprise avec la meme origine exacte et la meme empreinte de cle renvoie le resultat existant ; une autre cle pour la meme origine produit un conflit ; une reponse incertaine se reconcilie par lecture de cet identifiant. Une version V1 ulterieure constitue une nouvelle origine et peut produire un autre brouillon V2, toujours au statut `draft` et sans autorite implicite. La cle brute et le contenu source ne sont jamais journalises.
+
+Le bloc `promotion` est une metadonnee serveur immuable. Il est interdit dans toute charge cliente de creation ou de mise a jour V2. Lors d'une mise a jour d'un brouillon promu, le serveur relit ce bloc dans le document stocke, le recopie sans modification dans la nouvelle enveloppe `budget_json` au sein de la transaction de version et rejette toute tentative de surcharge. Un brouillon V2 cree directement ne possede pas ce bloc.
 
 La promotion des douze positions V1 est autorisee automatiquement uniquement vers un exercice civil janvier-decembre confirme, en reliant chaque position a son `periodId` canonique. Pour tout autre calendrier, le rapport retourne `incompatible` et aucun montant n'est deplace ou reordonne sans arbitrage explicite.
 
@@ -234,11 +251,12 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 11. Une revocation apres sauvegarde exclut le brouillon des listes et bloque lecture, export et mise a jour sans fuite.
 12. L'annee de synthese vient du referentiel d'exercice ; une annee V1 divergente bloque la promotion.
 13. Une source indisponible produit un refus ferme, sans secours par libelle.
-14. Vide, zero reel et invalide restent trois etats distincts.
+14. Vide, zero reel et invalide restent trois etats distincts ; les montants V2 suivent la grammaire decimale bornee du contrat.
 15. Un conflit de version reste `409` sans ecrasement.
 16. Un calendrier accepte est mensuel et contient exactement douze periodes valides couvrant l'exercice ; toute autre periodicite est refusee comme incompatible.
-17. Deux reprises de la meme version V1 retournent le meme UUID V2 au format accepte par le validateur partage ; une version V1 ulterieure produit un autre brouillon V2 non autoritaire.
-18. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
+17. Deux reprises de la meme version V1 vers les memes references cibles retournent le meme UUID V2 au format accepte par le validateur partage ; une autre cible ou une version V1 ulterieure produit un autre brouillon V2 non autoritaire.
+18. Les metadonnees de promotion restent serveur, immuables et preservees apres toute mise a jour V2.
+19. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
 
 ## Arbitrage groupe candidat
 
@@ -251,7 +269,7 @@ Confirmer ou amender `BUDGET-T1-TECH-001 V0.1` en une seule decision :
 5. stocker d'abord l'enveloppe V2 dans le JSON existant, sans DDL implicite ;
 6. maintenir responsabilites metier et permissions applicatives strictement separees ;
 7. deriver l'entite et l'annee de synthese des referentiels resolus et recontroler leur visibilite a chaque restitution ;
-8. promouvoir V1 vers V2 uniquement par commande explicite liee a la version et a l'empreinte source, avec identifiant V2 deterministe au format UUID V4 accepte par le validateur partage, cle idempotente hachee et reconciliation ;
+8. promouvoir V1 vers V2 uniquement par commande explicite liee a la version, a l'empreinte source et aux references cibles resolues, avec metadonnees serveur immuables, identifiant V2 deterministe au format UUID V4 accepte par le validateur partage, cle idempotente hachee et reconciliation ;
 9. executer T1 par cinq micro-lots `A` a `E`, chacun revu et autorise separement ;
 10. garder approbation, partage, allocations multiples, centre de cout, financeur et Budget personnel fermes ;
 11. maintenir toute recette preview et activation de production sous decisions distinctes.
