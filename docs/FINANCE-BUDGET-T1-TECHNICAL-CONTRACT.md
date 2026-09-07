@@ -79,6 +79,8 @@ Cet exemple abrege illustre la forme et seulement les deux premieres periodes ; 
 
 Chaque `periodValues[].value` est une chaine. Elle vaut soit `""` pour une absence explicite, soit un decimal positif ou nul en notation simple, sans signe, separateur de milliers ni exposant, avec au plus deux decimales et une valeur maximale de `1000000000`. Les nombres JSON, valeurs negatives, espaces, `NaN`, infinis et precisions superieures sont refuses. Cette grammaire reprend les bornes V1 tant qu'un contrat monetaire ulterieur n'est pas confirme.
 
+Le triplet `rate`, `rateSource`, `rateDate` conserve aussi le contrat V1. Les trois champs sont des chaines ; ils sont soit tous vides, soit tous renseignes. Un taux renseigne utilise une notation decimale simple positive, avec point ou virgule, au plus six decimales et une valeur maximale de `1000000` ; sa source non vide est bornee a 200 caracteres et sa date est une date civile ISO `YYYY-MM-DD` valide. Aucun taux nul, negatif, en notation exponentielle, sans source ou sans date n'est accepte.
+
 Le futur `budgetCode` reste absent de la charge cliente tant que son format, son autorite d'emission et son unicite ne sont pas confirmes. Il devra etre produit par le serveur, jamais derive du titre.
 
 ## Contrat des references
@@ -88,6 +90,8 @@ Chaque reference soumise est resolue par un composant serveur injecte. Un result
 ```text
 id, tenantId, status, labelSnapshot, sourceRevision
 ```
+
+Le resultat du resolveur d'exercice fournit en plus son `entityId` parent. Il n'est recevable que si cet identifiant est strictement egal a l'`entityId` d'organisation resolu pour le budget ; deux references valides du meme tenant mais appartenant a des organisations differentes constituent `BUDGET_REFERENCE_RELATION_INVALID`.
 
 Le serveur persiste ensuite dans l'enveloppe V2 courante un `referenceSnapshots` pour chaque chemin resolu. Chaque instantane conserve `id`, `labelSnapshot`, `sourceRevision` et `resolvedAt` produits par le serveur. Il couvre l'organisation, l'exercice, les responsabilites et chaque dimension de ligne, indexee par son `row.id` unique.
 
@@ -136,7 +140,7 @@ Aucun utilisateur ne peut s'auto-attribuer une permission par une responsabilite
 
 ## Controles de cardinalite
 
-1. Un budget V2 possede exactement une organisation et un exercice.
+1. Un budget V2 possede exactement une organisation et un exercice dont l'`entityId` parent correspond a cette organisation.
 2. Chaque `row.id` est non vide et unique dans le budget.
 3. Une ligne possede au plus une valeur par dimension T1 et exactement le jeu de periodes de l'exercice resolu.
 4. Un dossier exige son portefeuille parent.
@@ -241,7 +245,7 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 1. Les tests V1 actuels restent inchanges et reussissent.
 2. Une charge V2 sur V1 et une charge V1 sur V2 sont refusees sans perte.
 3. Tenant, auteur et droits fournis par le client sont ignores ou refuses.
-4. Une organisation ou un exercice non resolu bloque la creation V2.
+4. Une organisation ou un exercice non resolu bloque la creation V2 ; un exercice rattache a une autre organisation est refuse.
 5. Les relations portefeuille, dossier, projet et phase incoherentes sont refusees.
 6. Une reference restreinte non visible est refusee sans reveler son existence.
 7. Une equipe et l'agent de la meme ligne incompatibles sont refuses ; le collectif reste limite a son equipe.
@@ -252,11 +256,12 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 12. L'annee de synthese vient du referentiel d'exercice ; une annee V1 divergente bloque la promotion.
 13. Une source indisponible produit un refus ferme, sans secours par libelle.
 14. Vide, zero reel et invalide restent trois etats distincts ; les montants V2 suivent la grammaire decimale bornee du contrat.
-15. Un conflit de version reste `409` sans ecrasement.
-16. Un calendrier accepte est mensuel et contient exactement douze periodes valides couvrant l'exercice ; toute autre periodicite est refusee comme incompatible.
-17. Deux reprises de la meme version V1 vers les memes references cibles retournent le meme UUID V2 au format accepte par le validateur partage ; une autre cible ou une version V1 ulterieure produit un autre brouillon V2 non autoritaire.
-18. Les metadonnees de promotion restent serveur, immuables et preservees apres toute mise a jour V2.
-19. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
+15. Le taux est soit entierement absent, soit positif, borne et accompagne d'une source et d'une date ISO valides ; toute combinaison partielle est refusee.
+16. Un conflit de version reste `409` sans ecrasement.
+17. Un calendrier accepte est mensuel et contient exactement douze periodes valides couvrant l'exercice ; toute autre periodicite est refusee comme incompatible.
+18. Deux reprises de la meme version V1 vers les memes references cibles retournent le meme UUID V2 au format accepte par le validateur partage ; une autre cible ou une version V1 ulterieure produit un autre brouillon V2 non autoritaire.
+19. Les metadonnees de promotion restent serveur, immuables et preservees apres toute mise a jour V2.
+20. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
 
 ## Arbitrage groupe candidat
 
