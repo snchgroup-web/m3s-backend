@@ -120,7 +120,7 @@ Une indisponibilite de source, une ambiguite ou une reference inconnue produit u
 
 Organisation et exercice sont obligatoires pour tout nouveau budget V2. Par consequent, aucune creation V2 n'est possible avant leurs deux contrats de referentiel actifs. Cette fermeture est intentionnelle.
 
-Le resolveur d'exercice retourne aussi la liste ordonnee de ses periodes : `periodId`, `ordinal`, `startDate` et `endDate`. Chaque ligne V2 utilise `periodValues` avec exactement une valeur par `periodId` attendu, sans doublon ni periode etrangere. L'ordre du tableau n'a aucun effet metier. Pour un exercice juillet-juin, `P01` designe la periode definie par le referentiel et jamais janvier par position.
+Le resolveur d'exercice retourne aussi la liste ordonnee de ses periodes : `periodId`, `ordinal`, `startDate` et `endDate`. Le contrat V2 initial accepte uniquement un calendrier `monthly` contenant exactement douze periodes mensuelles valides, continues, non chevauchantes et couvrant integralement l'exercice. Tout calendrier trimestriel, hebdomadaire, a treize periodes ou autrement non mensuel est `incompatible` et bloque l'ecriture. Chaque ligne V2 utilise `periodValues` avec exactement une valeur par `periodId` attendu, sans doublon ni periode etrangere. L'ordre du tableau n'a aucun effet metier. Pour un exercice juillet-juin, `P01` designe la periode definie par le referentiel et jamais janvier par position.
 
 ## Responsabilites
 
@@ -170,7 +170,7 @@ Cette strategie n'est acceptable que si les limites de taille, le cout des filtr
 - La promotion exige les references organisation et exercice resolues et produit un rapport `apparie`, `ambigu`, `introuvable` ou `incompatible`.
 - En cas d'echec, le brouillon V1 reste intact et demeure l'unique version faisant autorite.
 
-La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraftId` exige un en-tete `Idempotency-Key` borne. Le serveur derive un UUID V5 stable du tenant, de l'auteur, du brouillon V1 source, de sa version et de son empreinte, puis persiste dans l'enveloppe V2 :
+La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraftId` exige un en-tete `Idempotency-Key` borne. Le serveur derive un identifiant UUID stable du tenant, de l'auteur, du brouillon V1 source, de sa version et de son empreinte. Cet identifiant utilise une derivation cryptographique canonique dont les bits de version et de variante sont forces au format UUID V4 afin de rester accepte par le `ID_PATTERN` du routeur V1 partage ; il ne pretend pas etre un UUID V4 aleatoire. Le serveur persiste ensuite dans l'enveloppe V2 :
 
 ```json
 {
@@ -186,7 +186,7 @@ La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraf
 }
 ```
 
-Le brouillon V1 source, son `version`, le tenant et l'auteur sont relus par le serveur. Le serveur calcule aussi une empreinte SHA-256 du JSON V1 canonique et persiste `sourceVersion` et `sourceContentDigest` dans `promotion`. L'identifiant V2 deterministe derive du tenant, de l'auteur, du brouillon source, de sa version et de cette empreinte.
+Le brouillon V1 source, son `version`, le tenant et l'auteur sont relus par le serveur. Le serveur calcule aussi une empreinte SHA-256 du JSON V1 canonique et persiste `sourceVersion` et `sourceContentDigest` dans `promotion`. L'identifiant V2 deterministe derive du tenant, de l'auteur, du brouillon source, de sa version et de cette empreinte, puis est encode dans la forme UUID V4 acceptee par le validateur partage. La specification de derivation, son vecteur de test et le controle de collision appartiennent au micro-lot `T1-E` avant toute implementation.
 
 La creation V2 utilise un `MERGE` transactionnel sur cet identifiant. Une reprise avec la meme origine exacte et la meme empreinte de cle renvoie le resultat existant ; une autre cle pour la meme origine produit un conflit ; une reponse incertaine se reconcilie par lecture de cet identifiant. Une version V1 ulterieure constitue une nouvelle origine et peut produire un autre brouillon V2, toujours au statut `draft` et sans autorite implicite. La cle brute et le contenu source ne sont jamais journalises.
 
@@ -215,7 +215,7 @@ Les messages publics restent generiques et sans identifiant sensible. Les journa
 | `T1-B` | Interfaces de resolution et doubles fictifs | Tests tenant, statut, confidentialite, revisions, indisponibilite et relations |
 | `T1-C` | Lecture V2 et liste versionnee | V1 inchange, V2 sans conversion implicite, visibilite courante recontrolee |
 | `T1-D` | Creation/mise a jour V2 derriere capacite fermee | Concurrence, droits relus et refus des references invalides |
-| `T1-E` | Promotion explicite V1 vers V2 | Version et empreinte source, UUID V2 deterministe, idempotence, reconciliation et rollback |
+| `T1-E` | Promotion explicite V1 vers V2 | Version et empreinte source, UUID V2 deterministe compatible avec le validateur partage, idempotence, reconciliation et rollback |
 
 Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 reste fermee jusqu'a un GO distinct des controles d'infrastructure et de production.
 
@@ -236,8 +236,9 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 13. Une source indisponible produit un refus ferme, sans secours par libelle.
 14. Vide, zero reel et invalide restent trois etats distincts.
 15. Un conflit de version reste `409` sans ecrasement.
-16. Deux reprises de la meme version V1 retournent le meme UUID V2 ; une version V1 ulterieure produit un autre brouillon V2 non autoritaire.
-17. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
+16. Un calendrier accepte est mensuel et contient exactement douze periodes valides couvrant l'exercice ; toute autre periodicite est refusee comme incompatible.
+17. Deux reprises de la meme version V1 retournent le meme UUID V2 au format accepte par le validateur partage ; une version V1 ulterieure produit un autre brouillon V2 non autoritaire.
+18. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
 
 ## Arbitrage groupe candidat
 
@@ -250,7 +251,7 @@ Confirmer ou amender `BUDGET-T1-TECH-001 V0.1` en une seule decision :
 5. stocker d'abord l'enveloppe V2 dans le JSON existant, sans DDL implicite ;
 6. maintenir responsabilites metier et permissions applicatives strictement separees ;
 7. deriver l'entite et l'annee de synthese des referentiels resolus et recontroler leur visibilite a chaque restitution ;
-8. promouvoir V1 vers V2 uniquement par commande explicite liee a la version et a l'empreinte source, avec identifiant V2 deterministe, cle idempotente hachee et reconciliation ;
+8. promouvoir V1 vers V2 uniquement par commande explicite liee a la version et a l'empreinte source, avec identifiant V2 deterministe au format UUID V4 accepte par le validateur partage, cle idempotente hachee et reconciliation ;
 9. executer T1 par cinq micro-lots `A` a `E`, chacun revu et autorise separement ;
 10. garder approbation, partage, allocations multiples, centre de cout, financeur et Budget personnel fermes ;
 11. maintenir toute recette preview et activation de production sous decisions distinctes.
