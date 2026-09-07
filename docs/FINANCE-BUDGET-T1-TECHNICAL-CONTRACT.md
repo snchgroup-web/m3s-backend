@@ -77,7 +77,7 @@ Le serveur continue de deriver `tenantId`, `authorUserId`, la portee et les perm
 
 Cet exemple abrege illustre la forme et seulement les deux premieres periodes ; il n'est pas une charge valide tant que tous les `periodId` de l'exercice ne sont pas fournis. `ORG-2SG`, `FY-2SG-2027` et les autres identifiants ne deviennent recevables qu'apres resolution dans leurs referentiels actifs du tenant courant. Le client ne fournit pas `entityLabelSnapshot` : le serveur le copie exclusivement depuis le `labelSnapshot` de l'organisation resolue.
 
-Le schema V2 est ferme : tout champ inconnu est refuse a chaque niveau. `budget.title` est une chaine non vide apres trim, bornee a 120 caracteres ; `budget.rows` est un tableau de 100 lignes maximum ; `row.id` et `row.label` sont des chaines non vides bornees respectivement a 64 et 120 caracteres. Les enumerations V1 sont conservees dans T1 : `kind` vaut uniquement `operating`, `investment` ou `financing` ; `direction` vaut uniquement `in` ou `out` ; `currency` vaut uniquement `CHF` ou `CFA`. L'enveloppe JSON serialisee reste bornee a 512 Kio. Une creation porte seulement `contractVersion` et `budget` ; une mise a jour ajoute `expectedVersion`, entier de 1 a `1000000`, pour la comparaison atomique, sans placer ce compteur dans le contenu metier.
+Le schema V2 est ferme : tout champ inconnu est refuse a chaque niveau. `budget.title` est une chaine non vide apres trim, bornee a 120 caracteres ; `budget.rows` est un tableau de 100 lignes maximum ; `row.id` et `row.label` sont des chaines non vides bornees respectivement a 64 et 120 caracteres. Les enumerations V1 sont conservees dans T1 : `kind` vaut uniquement `operating`, `investment` ou `financing` ; `direction` vaut uniquement `in` ou `out` ; `currency` vaut uniquement `CHF` ou `CFA`. L'enveloppe JSON serialisee reste bornee a 512 Kio. Une creation porte seulement `contractVersion` et `budget` ; une mise a jour ajoute `expectedVersion`, entier de 1 a `999999`, pour la comparaison atomique, sans placer ce compteur dans le contenu metier. La version stockee `1000000` est terminale et reste lisible ; toute nouvelle mise a jour est refusee par `BUDGET_VERSION_LIMIT` avant calcul d'un compteur hors borne.
 
 Chaque `periodValues[].value` est une chaine de 24 caracteres maximum. Elle vaut soit `""` pour une absence explicite, soit un decimal positif ou nul en notation simple, sans signe, separateur de milliers ni exposant, avec au plus deux decimales et une valeur maximale de `1000000000`. Les nombres JSON, valeurs negatives, espaces, `NaN`, infinis et precisions superieures sont refuses. Cette grammaire reprend les bornes V1 tant qu'un contrat monetaire ulterieur n'est pas confirme.
 
@@ -94,6 +94,8 @@ id, tenantId, status, labelSnapshot, sourceRevision
 ```
 
 Le resultat du resolveur d'exercice fournit en plus son `entityId` parent. Il n'est recevable que si cet identifiant est strictement egal a l'`entityId` d'organisation resolu pour le budget ; deux references valides du meme tenant mais appartenant a des organisations differentes constituent `BUDGET_REFERENCE_RELATION_INVALID`.
+
+Le resultat du resolveur de portefeuille fournit aussi son `functionId` canonique. Lorsqu'une ligne porte un `portfolioId`, son `functionId` devient obligatoire et doit etre strictement egal a celui du portefeuille resolu. Le serveur refuse toute contradiction ; il ne conserve pas deux classifications divergentes et ne remplace pas silencieusement la fonction fournie.
 
 Le serveur persiste ensuite dans l'enveloppe V2 courante un `referenceSnapshots` pour chaque chemin resolu. Chaque instantane conserve `id`, `labelSnapshot`, `sourceRevision` et `resolvedAt` produits par le serveur. Il couvre l'organisation, l'exercice, les responsabilites et chaque dimension de ligne, indexee par son `row.id` unique.
 
@@ -145,7 +147,7 @@ Aucun utilisateur ne peut s'auto-attribuer une permission par une responsabilite
 1. Un budget V2 possede exactement une organisation et un exercice dont l'`entityId` parent correspond a cette organisation.
 2. Chaque `row.id` est non vide et unique dans le budget.
 3. Une ligne possede au plus une valeur par dimension T1 et exactement le jeu de periodes de l'exercice resolu.
-4. Un dossier exige son portefeuille parent.
+4. Un portefeuille exige une fonction correspondante ; un dossier exige son portefeuille parent.
 5. Un projet exige son dossier parent ; une phase exige son projet parent.
 6. Une equipe et un agent fournis ensemble doivent etre coherents.
 7. Toutes les references appartiennent au tenant courant.
@@ -232,6 +234,7 @@ La promotion des douze positions V1 est autorisee automatiquement uniquement ver
 | `BUDGET_REFERENCE_RELATION_INVALID` | Chaine parentale incoherente |
 | `BUDGET_FISCAL_YEAR_INVALID` | Exercice absent, ferme, chevauchant ou incompatible |
 | `BUDGET_RESPONSIBILITY_INVALID` | Agent ou equipe non coherent |
+| `BUDGET_VERSION_LIMIT` | Version terminale atteinte ; aucune nouvelle mise a jour admise |
 | `BUDGET_V1_PROMOTION_REQUIRED` | Operation V2 demandee sur un brouillon V1 |
 | `BUDGET_PROMOTION_CONFLICT` | Origine deja promue sous une autre cle idempotente |
 
@@ -255,7 +258,7 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 2. Une charge V2 sur V1 et une charge V1 sur V2 sont refusees sans perte.
 3. Tenant, auteur et droits fournis par le client sont ignores ou refuses.
 4. Une organisation ou un exercice non resolu bloque la creation V2 ; un exercice rattache a une autre organisation est refuse.
-5. Les relations portefeuille, dossier, projet et phase incoherentes sont refusees.
+5. Les relations fonction, portefeuille, dossier, projet et phase incoherentes sont refusees, notamment une fonction differente de celle du portefeuille resolu.
 6. Une reference restreinte non visible est refusee sans reveler son existence.
 7. Une equipe et l'agent de la meme ligne incompatibles sont refuses ; le collectif reste limite a son equipe. Le responsable budgetaire de toute creation ou promotion V2 est un agent resolu explicite, jamais l'auteur deduit.
 8. Deux lignes ne peuvent jamais partager le meme `row.id`.
@@ -267,7 +270,7 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 14. Le schema ferme refuse les champs inconnus, les enumerations hors contrat, les tailles excessives et toute mise a jour sans `expectedVersion` valide.
 15. Vide, zero reel et invalide restent trois etats distincts ; les montants V2 suivent la grammaire decimale bornee du contrat.
 16. Le taux est soit entierement absent, soit positif, borne et accompagne d'une source et d'une date ISO valides ; toute combinaison partielle est refusee.
-17. Un conflit de version reste `409` sans ecrasement.
+17. Un conflit de version reste `409` sans ecrasement ; `expectedVersion` s'arrete a `999999` et la version stockee `1000000` est terminale.
 18. Un calendrier accepte est mensuel et contient exactement douze periodes valides couvrant l'exercice ; toute autre periodicite est refusee comme incompatible.
 19. Deux reprises de la meme version V1 vers les memes references cibles, responsable budgetaire compris, et sous la meme cle retournent le meme UUID V2 au format accepte par le validateur partage ; toute reutilisation de cle avec une autre demande et toute autre cle pour la meme demande deja creee sont refusees atomiquement, y compris sous concurrence.
 20. Les metadonnees de promotion restent serveur, immuables et preservees apres toute mise a jour V2.
