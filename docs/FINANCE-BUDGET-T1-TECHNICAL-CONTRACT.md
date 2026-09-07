@@ -37,7 +37,6 @@ Le serveur continue de deriver `tenantId`, `authorUserId`, la portee et les perm
   "contractVersion": 2,
   "budget": {
     "title": "Budget de fonctionnement 2SG",
-    "entityLabelSnapshot": "2SG",
     "legacyYear": "2027",
     "identity": {
       "entityId": "ORG-2SG",
@@ -61,6 +60,7 @@ Le serveur continue de deriver `tenantId`, `authorUserId`, la portee et les perm
         "dimensions": {
           "functionId": "administration",
           "teamId": null,
+          "agentId": null,
           "countryId": null,
           "portfolioId": "PORT-2SG-GLOBAL",
           "dossierId": "GD-001",
@@ -73,7 +73,7 @@ Le serveur continue de deriver `tenantId`, `authorUserId`, la portee et les perm
 }
 ```
 
-Cet exemple illustre la forme, pas des valeurs autorisees. `ORG-2SG`, `FY-2SG-2027` et les autres identifiants ne deviennent recevables qu'apres resolution dans leurs referentiels actifs du tenant courant.
+Cet exemple illustre la forme, pas des valeurs autorisees. `ORG-2SG`, `FY-2SG-2027` et les autres identifiants ne deviennent recevables qu'apres resolution dans leurs referentiels actifs du tenant courant. Le client ne fournit pas `entityLabelSnapshot` : le serveur le copie exclusivement depuis le `labelSnapshot` de l'organisation resolue.
 
 Le futur `budgetCode` reste absent de la charge cliente tant que son format, son autorite d'emission et son unicite ne sont pas confirmes. Il devra etre produit par le serveur, jamais derive du titre.
 
@@ -90,8 +90,11 @@ Le resultat est recevable seulement si :
 1. l'identifiant est exact et unique ;
 2. le tenant correspond a l'identite authentifiee ;
 3. le statut autorise l'usage budgetaire a la date de la requete ;
-4. la revision source est disponible pour l'audit ;
-5. les relations parent-enfant sont coherentes.
+4. la politique de confidentialite et de visibilite propre a l'objet autorise cet utilisateur a le referencer et a revoir son libelle ;
+5. la revision source est disponible pour l'audit ;
+6. les relations parent-enfant sont coherentes.
+
+Une permission Finance et l'appartenance au tenant ne suffisent pas a ouvrir un objet `restricted`. Le resolveur applique aussi la confidentialite de chaque portefeuille, dossier ou future reference ; il renvoie le meme refus generique pour un objet absent et un objet non visible afin de ne pas reveler son existence.
 
 Une indisponibilite de source, une ambiguite ou une reference inconnue produit un refus ferme. Aucun libelle, alias, devise, texte `Autre` ou valeur historique ne remplace un identifiant.
 
@@ -137,7 +140,7 @@ Aucun utilisateur ne peut s'auto-attribuer une permission par une responsabilite
 Le premier lot executable T1 devrait conserver les tables V1 et stocker l'enveloppe V2 versionnee dans `budget_json`, sans ajouter de colonne par anticipation. Les colonnes de resume actuelles resteraient des instantanes compatibles :
 
 - `title` depuis `budget.title` ;
-- `entity` depuis `budget.entityLabelSnapshot` ;
+- `entity` depuis le `labelSnapshot` canonique retourne par le resolveur d'organisation, jamais depuis la charge cliente ;
 - `year` depuis `budget.legacyYear` ;
 - `tenant_id` et `owner_user_id` derives du serveur.
 
@@ -154,18 +157,34 @@ Cette strategie n'est acceptable que si les limites de taille, le cout des filtr
 - La promotion exige les references organisation et exercice resolues et produit un rapport `apparie`, `ambigu`, `introuvable` ou `incompatible`.
 - En cas d'echec, le brouillon V1 reste intact et demeure l'unique version faisant autorite.
 
+La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraftId` exige un en-tete `Idempotency-Key` borne. Le serveur derive un UUID V5 stable du tenant, de l'auteur et du brouillon V1 source, puis persiste dans l'enveloppe V2 :
+
+```json
+{
+  "promotion": {
+    "sourceContractVersion": 1,
+    "sourceDraftId": "uuid-v4-source",
+    "idempotencyKeyHash": "empreinte-bornee",
+    "promotedAt": "horodatage-serveur"
+  }
+}
+```
+
+Le brouillon V1 source, le tenant et l'auteur sont relus par le serveur. La creation V2 utilise un `MERGE` transactionnel sur l'identifiant V2 deterministe. Une reprise avec la meme origine et la meme empreinte renvoie le resultat existant ; une autre cle pour la meme origine produit un conflit ; une reponse incertaine se reconcilie par lecture de cet identifiant. La cle brute n'est jamais stockee ni journalisee.
+
 ## Codes d'erreur candidats
 
 | Code | Sens |
 | --- | --- |
 | `BUDGET_V2_DISABLED` | Contrat T1 non ouvert dans l'environnement |
 | `BUDGET_REFERENCE_UNAVAILABLE` | Source de referentiel indisponible |
-| `BUDGET_REFERENCE_NOT_FOUND` | Identifiant absent ou non recevable |
+| `BUDGET_REFERENCE_NOT_FOUND` | Identifiant absent, non recevable ou non visible ; aucun detail public |
 | `BUDGET_REFERENCE_TENANT_MISMATCH` | Reference hors tenant |
 | `BUDGET_REFERENCE_RELATION_INVALID` | Chaine parentale incoherente |
 | `BUDGET_FISCAL_YEAR_INVALID` | Exercice absent, ferme, chevauchant ou incompatible |
 | `BUDGET_RESPONSIBILITY_INVALID` | Agent ou equipe non coherent |
 | `BUDGET_V1_PROMOTION_REQUIRED` | Operation V2 demandee sur un brouillon V1 |
+| `BUDGET_PROMOTION_CONFLICT` | Origine deja promue sous une autre cle idempotente |
 
 Les messages publics restent generiques et sans identifiant sensible. Les journaux techniques ne contiennent ni montant, charge JSON, libelle prive ou jeton.
 
@@ -174,10 +193,10 @@ Les messages publics restent generiques et sans identifiant sensible. Les journa
 | Lot | Contenu | Preuve de sortie |
 | --- | --- | --- |
 | `T1-A` | Contrats purs des objets V2 et validateurs sans route | Tests unitaires de forme, absence/zero et refus des champs inconnus |
-| `T1-B` | Interfaces de resolution et doubles fictifs | Tests tenant, statut, indisponibilite et relations |
+| `T1-B` | Interfaces de resolution et doubles fictifs | Tests tenant, statut, confidentialite, indisponibilite et relations |
 | `T1-C` | Lecture V2 et liste versionnee | V1 inchange, V2 sans conversion implicite |
 | `T1-D` | Creation/mise a jour V2 derriere capacite fermee | Concurrence, droits relus et refus des references invalides |
-| `T1-E` | Promotion explicite V1 vers V2 | Idempotence, rapport de rapprochement et rollback |
+| `T1-E` | Promotion explicite V1 vers V2 | UUID V2 deterministe, origine persistante, idempotence, reconciliation et rollback |
 
 Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 reste fermee jusqu'a un GO distinct des controles d'infrastructure et de production.
 
@@ -188,11 +207,13 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 3. Tenant, auteur et droits fournis par le client sont ignores ou refuses.
 4. Une organisation ou un exercice non resolu bloque la creation V2.
 5. Les relations portefeuille, dossier, projet et phase incoherentes sont refusees.
-6. Une equipe et un agent incompatibles sont refuses ; le collectif reste limite a son equipe.
-7. Une source indisponible produit un refus ferme, sans secours par libelle.
-8. Vide, zero reel et invalide restent trois etats distincts.
-9. Un conflit de version reste `409` sans ecrasement.
-10. Aucun montant ni contenu de brouillon n'apparait dans les journaux techniques.
+6. Une reference restreinte non visible est refusee sans reveler son existence.
+7. Une equipe et l'agent de la meme ligne incompatibles sont refuses ; le collectif reste limite a son equipe.
+8. Une source indisponible produit un refus ferme, sans secours par libelle.
+9. Vide, zero reel et invalide restent trois etats distincts.
+10. Un conflit de version reste `409` sans ecrasement.
+11. Deux reprises de promotion retournent le meme UUID V2 ; une autre cle pour la meme origine est refusee.
+12. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
 
 ## Arbitrage groupe candidat
 
@@ -201,10 +222,10 @@ Confirmer ou amender `BUDGET-T1-TECH-001 V0.1` en une seule decision :
 1. retenir des routes V1 et V2 distinctes, sans conversion implicite ;
 2. maintenir le contrat V1 executable inchange ;
 3. imposer organisation et exercice resolus avant toute creation V2 ;
-4. utiliser des resoluteurs serveur tenant-scoped pour toutes les references ;
+4. utiliser des resoluteurs serveur tenant-scoped appliquant aussi la confidentialite propre a chaque reference ;
 5. stocker d'abord l'enveloppe V2 dans le JSON existant, sans DDL implicite ;
 6. maintenir responsabilites metier et permissions applicatives strictement separees ;
-7. promouvoir V1 vers V2 uniquement par commande explicite, idempotente et reversible ;
+7. promouvoir V1 vers V2 uniquement par commande explicite, identifiant V2 deterministe, origine persistante, cle idempotente hachee et reconciliation ;
 8. executer T1 par cinq micro-lots `A` a `E`, chacun revu et autorise separement ;
 9. garder approbation, partage, allocations multiples, centre de cout, financeur et Budget personnel fermes ;
 10. maintenir toute recette preview et activation de production sous decisions distinctes.
