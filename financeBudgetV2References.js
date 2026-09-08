@@ -347,9 +347,12 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
     const requirements = collectRequirements(budget);
 
     const preflightErrors = [];
-    const uniqueRequirements = [
-      ...new Map(requirements.map(item => [`${item.type}\u0000${item.id}`, item])).values()
-    ];
+    const uniqueRequirementsByKey = new Map();
+    for (const item of requirements) {
+      const key = `${item.type}\u0000${item.id}`;
+      if (!uniqueRequirementsByKey.has(key)) uniqueRequirementsByKey.set(key, item);
+    }
+    const uniqueRequirements = [...uniqueRequirementsByKey.values()];
     for (const { type, id } of uniqueRequirements) {
       try {
         const resolver = resolvers[type];
@@ -397,16 +400,25 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
       return value;
     }
 
-    for (const { type, id, purpose } of requirements) {
+    const lifecycleErrors = new Set();
+    for (const { type, id, purpose } of uniqueRequirements) {
       const { record } = cached(type, id);
       if (compareUtcTimestamps(record.effectiveFrom, resolvedAt) > 0
         || (record.effectiveTo !== null
           && compareUtcTimestamps(record.effectiveTo, resolvedAt) <= 0)) {
-        fail(stateCode(type, purpose));
+        lifecycleErrors.add(stateCode(type, purpose));
+        continue;
       }
       if (!acceptedLifecycleStatus(record, type, operation, purpose)) {
-        fail(stateCode(type, purpose));
+        lifecycleErrors.add(stateCode(type, purpose));
       }
+    }
+    for (const code of [
+      'BUDGET_REFERENCE_STATE_INVALID',
+      'BUDGET_FISCAL_YEAR_INVALID',
+      'BUDGET_RESPONSIBILITY_INVALID'
+    ]) {
+      if (lifecycleErrors.has(code)) fail(code);
     }
 
     const entity = cached('entity', budget.identity.entityId);

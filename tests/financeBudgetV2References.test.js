@@ -221,6 +221,20 @@ test('all lifecycle checks precede fiscal, responsibility and relation validatio
   await rejects(() => setup(fiscalBeforeResponsibility).service.resolveBudgetReferences({
     budget: wrongPeriods, tenantId: TENANT, actorId: ACTOR
   }), 'BUDGET_FISCAL_YEAR_INVALID');
+
+  const generalBeforeResponsibility = fixtures();
+  generalBeforeResponsibility.agent[0].status = 'inactive';
+  generalBeforeResponsibility.function[0].status = 'inactive';
+  await rejects(() => setup(generalBeforeResponsibility).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_REFERENCE_STATE_INVALID');
+
+  const generalBeforeFiscalLifecycle = fixtures();
+  generalBeforeFiscalLifecycle.fiscalYear[0].effectiveFrom = '2027-01-01T00:00:00Z';
+  generalBeforeFiscalLifecycle.function[0].status = 'inactive';
+  await rejects(() => setup(generalBeforeFiscalLifecycle).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_REFERENCE_STATE_INVALID');
 });
 
 test('future, expired and inactive general references are rejected by lifecycle state', async () => {
