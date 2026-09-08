@@ -28,6 +28,21 @@ La compatibilite doit etre explicite. Le candidat retient une nouvelle famille d
 
 Le suffixe V2 distinct evite qu'un segment `v2` soit interprete comme l'actuel parametre `/:id`. Une charge V2 ne doit jamais etre acceptee par la route V1 ni reduite silencieusement au format V1. Une charge V1 ne doit jamais recevoir de rattachement invente. Les reponses V2 doivent annoncer `contractVersion: 2`; les reponses V1 conservent leur forme actuelle.
 
+Toutes les routes V2 exigent le Bearer courant et repondent avec `Cache-Control: no-store`. Les routes statiques `/capabilities` et `/promotions/:sourceDraftId` sont enregistrees avant `/:id`. Aucun `DELETE`, partage, approbation ou changement de proprietaire n'existe dans T1.
+
+| Methode / chemin sous `/api/finance/budget-drafts-v2` | Entree | Succes |
+| --- | --- | --- |
+| `GET /capabilities` | aucune requete de stockage | `200`, `{ success: true, contractVersion: 2, enabled, canWrite, scope: "organization", access: "owner-only", personalEnabled: false, reason }` |
+| `GET /` | `limit` entier `1..50`, defaut `20`; `offset` entier `0..10000`, defaut `0`; aucun autre parametre | `200`, `{ success: true, contractVersion: 2, data: summary[], hasMore }` |
+| `GET /:id` | UUID au format accepte par `ID_PATTERN`; aucun parametre de requete | `200`, `{ success: true, contractVersion: 2, data: { ...summary, budget, referenceSnapshots } }` |
+| `POST /` | charge de creation V2 fermee definie ci-dessous | `201`, `{ success: true, contractVersion: 2, data: summary }` |
+| `PUT /:id` | charge de mise a jour V2 fermee avec `expectedVersion` | `200`, `{ success: true, contractVersion: 2, data: summary }` |
+| `POST /promotions/:sourceDraftId` | charge et cle idempotente definies dans la section Promotion | `201` a la creation ou `200` a la reprise, avec `{ success: true, contractVersion: 2, data: summary, replayed }` |
+
+`summary` contient exactement `id`, `version`, `title`, `entity`, `year`, `createdAt`, `updatedAt`, `scope`, `status` et `access`. `entity` et `year` sont les colonnes de resume serveur derivees des referentiels ; les listes ne contiennent ni `budget`, montants, `referenceSnapshots` ou metadonnees `promotion`. Une lecture directe restitue le bloc `referenceSnapshots` seulement apres le controle complet de visibilite ; le bloc serveur `promotion`, ses empreintes et sa cle hachee ne sont pas exposes par les routes metier. Une premiere promotion retourne `replayed: false`; toute reprise reussie retourne `replayed: true`, le meme `id` et la `version` V2 courante validee.
+
+Les echecs utilisent exactement `{ success: false, contractVersion: 2, code }`, complete uniquement par `draftId` et `reconcileRequired: true` lorsqu'une ecriture a un resultat techniquement incertain. Les statuts HTTP restent `400` pour une entree invalide, `401` pour une identite absente, `403` pour un droit insuffisant, `404` pour absent/non visible/hors auteur ou tenant, `409` pour version ou idempotence en conflit et `503` pour capacite ou source indispensable fermee, indisponible ou non verifiable. Aucune reponse d'echec ne contient de charge, montant, libelle, reference cachee ou detail de securite.
+
 ## Enveloppe V2 candidate
 
 Le serveur continue de deriver `tenantId`, `authorUserId`, la portee et les permissions. Le client ne peut pas les remplacer.
@@ -60,7 +75,7 @@ Le serveur continue de deriver `tenantId`, `authorUserId`, la portee et les perm
           { "periodId": "FY-2SG-2027-P02", "value": "" }
         ],
         "dimensions": {
-          "functionId": "administration",
+          "functionId": "management_governance",
           "teamId": null,
           "agentId": null,
           "countryId": null,
@@ -167,7 +182,7 @@ Une indisponibilite de source, une ambiguite ou une reference inconnue produit u
 | Exercice | registre a creer ou confirmer | `BLOQUANT` | Refus tant que bornes, periodicite et fuseau ne sont pas resolus |
 | Fonction | menus canoniques / portefeuille | `TRANSITION` | Lecture candidate seulement apres contrat unique |
 | Equipe et agent | RH-001 / `teamAgentContract` | `BLOQUANT` | Libelles et coherence observables, mais aucune reference V2 avant mapping agent-tenant autoritatif |
-| Portefeuille et dossier | registres Management | `ACTIF BORNE` | Resolution tenant-scoped et chaine parentale obligatoire ; references `restricted` bloquees sans contrat d'autorisation Management |
+| Portefeuille et dossier | registres Management presents, contrat de resolveur incomplet | `BLOQUANT` | Refus tant que `sourceRevision`, periode d'effet, mapping de statut et politique de visibilite ne sont pas definis ; les references `restricted` exigent en plus un contrat d'autorisation Management |
 | Projet et phase | modele documente, registre backend absent | `BLOQUANT SI FOURNI` | Valeur nulle admise ; valeur fournie refusee |
 | Pays | registre actif non confirme | `BLOQUANT SI FOURNI` | Valeur nulle admise ; valeur fournie refusee |
 | DAS | mapping derive | `DERIVE` | Jamais accepte comme saisie cliente faisant autorite |
@@ -288,7 +303,7 @@ La promotion des douze positions V1 est autorisee automatiquement uniquement ver
 | `BUDGET_SOURCE_VERSION_CONFLICT` | Version V1 courante differente de `expectedSourceVersion` |
 | `BUDGET_VERSION_LIMIT` | Version terminale atteinte ; aucune nouvelle mise a jour admise |
 | `BUDGET_V1_PROMOTION_REQUIRED` | Operation V2 demandee sur un brouillon V1 |
-| `BUDGET_PROMOTION_CONFLICT` | Origine deja promue sous une autre cle idempotente |
+| `BUDGET_PROMOTION_CONFLICT` | Cle liee a une autre intention, ou intention deja liee a une autre cle |
 
 Les messages publics restent generiques et sans identifiant sensible. Les journaux techniques ne contiennent ni montant, charge JSON, libelle prive ou jeton.
 
@@ -328,6 +343,7 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 20. Une premiere utilisation d'une cle valide sans liaison lit et compare la version V1, resout les cibles, puis cree et lie atomiquement la promotion ; `expectedSourceVersion` accepte toute version V1 lisible de `1` a `1000000`. Deux reprises portant la meme cle, la meme version source attendue et les memes references cibles, responsable budgetaire compris, retournent le meme UUID V2 au format accepte par le validateur partage avant toute relecture du V1, y compris si le V1 a change apres une reponse perdue ; une nouvelle cle avec une version source obsolete echoue sans creation. Toute reutilisation de cle avec une autre intention et toute autre cle pour la meme intention ou demande deja creee sont refusees atomiquement, y compris sous concurrence.
 21. Les metadonnees de promotion restent serveur, immuables et preservees apres toute mise a jour V2 ; les valeurs V1 `budget.revision`, `budget.entity` et `budget.year` sont conservees exactement comme provenance, sans devenir la version serveur, l'identite ou l'exercice V2 ni etre reconstruites.
 22. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
+23. Les cinq operations V2 ordinaires et la promotion respectent les chemins, charges, codes HTTP, enveloppes de succes et d'erreur, pagination, resume sans montant et indicateur `replayed` definis par le contrat filaire ; aucune route T1 implicite n'est ajoutee.
 
 ## Arbitrage groupe candidat
 
