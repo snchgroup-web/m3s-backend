@@ -184,10 +184,11 @@ Cette strategie n'est acceptable que si les limites de taille, le cout des filtr
 - La promotion exige les references organisation et exercice resolues et produit un rapport `apparie`, `ambigu`, `introuvable` ou `incompatible`.
 - En cas d'echec, le brouillon V1 reste intact et demeure l'unique version faisant autorite.
 
-La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraftId` exige un en-tete `Idempotency-Key` et une charge limitee aux references cibles. La cle est sensible a la casse, contient de 16 a 128 caracteres ASCII parmi `[A-Za-z0-9._:-]`, n'est ni trimmee ni normalisee et est refusee si elle ne respecte pas exactement cette grammaire. Son empreinte est l'hexadecimal minuscule de `SHA-256(UTF8("m3s:budget:promotion:v1\\0" + tenantId + "\\0" + authorUserId + "\\0" + Idempotency-Key))`. La chaine de domaine, les separateurs NUL et les octets UTF-8 sont normatifs afin que toutes les instances calculent la meme valeur sans conserver la cle brute.
+La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraftId` exige un en-tete `Idempotency-Key` et une charge limitee a la version source attendue et aux references cibles. La cle est sensible a la casse, contient de 16 a 128 caracteres ASCII parmi `[A-Za-z0-9._:-]`, n'est ni trimmee ni normalisee et est refusee si elle ne respecte pas exactement cette grammaire. Son empreinte est l'hexadecimal minuscule de `SHA-256(UTF8("m3s:budget:promotion:v1\\0" + tenantId + "\\0" + authorUserId + "\\0" + Idempotency-Key))`. La chaine de domaine, les separateurs NUL et les octets UTF-8 sont normatifs afin que toutes les instances calculent la meme valeur sans conserver la cle brute.
 
 ```json
 {
+  "expectedSourceVersion": 3,
   "target": {
     "entityId": "ORG-2SG",
     "fiscalYearId": "FY-2SG-2027",
@@ -196,7 +197,7 @@ La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraf
 }
 ```
 
-Le serveur re-resout ces trois identifiants dans le tenant courant, verifie le responsable metier avec le contrat RH-001, refuse tout champ supplementaire et ne deduit jamais l'organisation du tenant, du libelle V1 ou de l'auteur technique. Le `controllerAgentId` du brouillon promu est initialise a `null` et peut etre renseigne seulement par une mise a jour V2 ulterieure valide. Le serveur derive ensuite un identifiant UUID stable du tenant, de l'auteur, du brouillon V1 source, de sa version, de son empreinte et des trois identifiants cibles canoniques. Cet identifiant utilise une derivation cryptographique canonique dont les bits de version et de variante sont forces au format UUID V4 afin de rester accepte par le `ID_PATTERN` du routeur V1 partage ; il ne pretend pas etre un UUID V4 aleatoire. Le serveur persiste ensuite dans l'enveloppe V2 :
+`expectedSourceVersion` est un entier compris entre `1` et `999999`. Le serveur re-resout ces trois identifiants dans le tenant courant, verifie le responsable metier avec le contrat RH-001, refuse tout champ supplementaire et ne deduit jamais l'organisation du tenant, du libelle V1 ou de l'auteur technique. Le `controllerAgentId` du brouillon promu est initialise a `null` et peut etre renseigne seulement par une mise a jour V2 ulterieure valide. Le serveur derive ensuite un identifiant UUID stable du tenant, de l'auteur, du brouillon V1 source, de sa version, de son empreinte et des trois identifiants cibles canoniques. Cet identifiant utilise une derivation cryptographique canonique dont les bits de version et de variante sont forces au format UUID V4 afin de rester accepte par le `ID_PATTERN` du routeur V1 partage ; il ne pretend pas etre un UUID V4 aleatoire. Le serveur persiste ensuite dans l'enveloppe V2 :
 
 ```json
 {
@@ -209,6 +210,7 @@ Le serveur re-resout ces trois identifiants dans le tenant courant, verifie le r
     "targetEntityId": "ORG-2SG",
     "targetFiscalYearId": "FY-2SG-2027",
     "targetBudgetOwnerAgentId": "agent-id",
+    "intentFingerprint": "sha256-intention-stable",
     "requestFingerprint": "sha256-requete-canonique",
     "idempotencyKeyHash": "empreinte-bornee",
     "promotedAt": "horodatage-serveur"
@@ -216,11 +218,13 @@ Le serveur re-resout ces trois identifiants dans le tenant courant, verifie le r
 }
 ```
 
-Le brouillon V1 source, son `version`, le tenant et l'auteur sont relus par le serveur. Le serveur calcule aussi une empreinte SHA-256 du JSON V1 canonique et persiste `sourceVersion`, `sourceContentDigest`, `targetEntityId`, `targetFiscalYearId` et `targetBudgetOwnerAgentId` dans `promotion`. L'empreinte canonique de la requete et l'identifiant V2 deterministe couvrent le tenant, l'auteur, le brouillon source, sa version, son empreinte et les trois identifiants cibles resolus, puis l'identifiant est encode dans la forme UUID V4 acceptee par le validateur partage. La specification de derivation, son vecteur de test et le controle de collision appartiennent au micro-lot `T1-E` avant toute implementation.
+Apres validation de la grammaire de la cle et de la charge fermee, le serveur calcule d'abord un `intentFingerprint` stable couvrant le tenant, l'auteur, `sourceDraftId`, `expectedSourceVersion` et les trois identifiants cibles fournis. Il consulte ensuite la liaison par `idempotencyKeyHash` avant de relire le brouillon V1 ou de resoudre de nouveau ses references. Si la cle est deja liee a la meme intention, il restitue le brouillon V2 et le resultat initialement persistes, meme si la version V1 courante a change entre-temps. Si la cle est liee a une autre intention, il retourne `BUDGET_PROMOTION_CONFLICT` sans lire ni creer de brouillon.
 
-Avant toute ecriture, le serveur lie atomiquement, dans la portee tenant-auteur, chaque `idempotencyKeyHash` a son premier `requestFingerprint` canonique et chaque empreinte de demande a sa premiere empreinte de cle. Une reprise avec la meme paire renvoie le resultat existant. La reutilisation d'une cle avec une autre source, version, empreinte ou cible, comme l'emploi d'une autre cle pour la meme demande canonique deja creee, retourne `BUDGET_PROMOTION_CONFLICT` sans creer de brouillon.
+Lorsque la cle est absente, le brouillon V1 source, son `version`, le tenant et l'auteur sont relus par le serveur. La promotion exige alors `version === expectedSourceVersion` ; sinon elle retourne `BUDGET_SOURCE_VERSION_CONFLICT` sans creation. Le serveur calcule aussi une empreinte SHA-256 du JSON V1 canonique et persiste `sourceVersion`, `sourceContentDigest`, `targetEntityId`, `targetFiscalYearId` et `targetBudgetOwnerAgentId` dans `promotion`. L'empreinte canonique complete de la requete et l'identifiant V2 deterministe couvrent le tenant, l'auteur, le brouillon source, sa version, son empreinte et les trois identifiants cibles resolus, puis l'identifiant est encode dans la forme UUID V4 acceptee par le validateur partage. La specification des deux derivations, leurs vecteurs de test et le controle de collision appartiennent au micro-lot `T1-E` avant toute implementation.
 
-La creation V2 utilise ensuite un `MERGE` transactionnel sur l'identifiant deterministe ; une reponse incertaine se reconcilie par la liaison precedente et par lecture de cet identifiant. Une version V1 ulterieure ou une autre cible constitue une autre demande canonique et peut produire un autre brouillon V2, toujours au statut `draft` et sans autorite implicite, mais elle exige sa propre cle encore inutilisee. La cle brute et le contenu source ne sont jamais journalises.
+Avant toute ecriture, le serveur lie atomiquement, dans la portee tenant-auteur, chaque `idempotencyKeyHash` a son premier `intentFingerprint`, a son `requestFingerprint` canonique complet et au resultat V2 persiste ; chaque intention et chaque empreinte complete de demande sont reciproquement liees a leur premiere empreinte de cle. Une reprise avec la meme cle et la meme intention renvoie ce resultat existant avant toute relecture du V1. La reutilisation d'une cle avec une autre source, version attendue ou cible, comme l'emploi d'une autre cle pour la meme intention ou la meme demande canonique deja creee, retourne `BUDGET_PROMOTION_CONFLICT` sans creer de brouillon.
+
+La creation V2 utilise ensuite un `MERGE` transactionnel sur l'identifiant deterministe ; une reponse incertaine se reconcilie par la liaison precedente et par lecture de cet identifiant. Une relance avec la meme cle et la meme charge retrouve donc le resultat initial apres une mutation du V1. Une nouvelle cle portant une `expectedSourceVersion` devenue obsolete echoue avec `BUDGET_SOURCE_VERSION_CONFLICT`. Une version V1 ulterieure explicitement attendue ou une autre cible constitue une autre intention et peut produire un autre brouillon V2, toujours au statut `draft` et sans autorite implicite, mais elle exige sa propre cle encore inutilisee. La cle brute et le contenu source ne sont jamais journalises.
 
 Cette liaison doit resister a deux requetes concurrentes et ne peut pas reposer sur un scan JSON suivi d'une insertion non protegee. Si `T1-E` ne peut pas prouver cette unicite bidirectionnelle avec le stockage autorise, il reste `NO-GO` jusqu'a la confirmation d'un micro-lot de persistance ou d'index distinct ; aucun DDL n'est deduit du present contrat.
 
@@ -238,6 +242,7 @@ La promotion des douze positions V1 est autorisee automatiquement uniquement ver
 | `BUDGET_REFERENCE_RELATION_INVALID` | Chaine parentale incoherente |
 | `BUDGET_FISCAL_YEAR_INVALID` | Exercice absent, ferme, chevauchant ou incompatible |
 | `BUDGET_RESPONSIBILITY_INVALID` | Agent ou equipe non coherent |
+| `BUDGET_SOURCE_VERSION_CONFLICT` | Version V1 courante differente de `expectedSourceVersion` |
 | `BUDGET_VERSION_LIMIT` | Version terminale atteinte ; aucune nouvelle mise a jour admise |
 | `BUDGET_V1_PROMOTION_REQUIRED` | Operation V2 demandee sur un brouillon V1 |
 | `BUDGET_PROMOTION_CONFLICT` | Origine deja promue sous une autre cle idempotente |
@@ -277,7 +282,7 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 17. Un conflit de version reste `409` sans ecrasement ; `expectedVersion` s'arrete a `999999` et la version stockee `1000000` est terminale.
 18. Un calendrier accepte est mensuel et contient exactement douze periodes valides couvrant l'exercice ; toute autre periodicite est refusee comme incompatible. Une valeur V1 avec espaces est egalement signalee incompatible, sans normalisation silencieuse.
 19. La grammaire de `Idempotency-Key` et sa derivation SHA-256 normative produisent la meme empreinte sur toutes les instances ; aucune cle brute n'est persistee ou journalisee.
-20. Deux reprises de la meme version V1 vers les memes references cibles, responsable budgetaire compris, et sous la meme cle retournent le meme UUID V2 au format accepte par le validateur partage ; toute reutilisation de cle avec une autre demande et toute autre cle pour la meme demande deja creee sont refusees atomiquement, y compris sous concurrence.
+20. Deux reprises portant la meme cle, la meme `expectedSourceVersion` et les memes references cibles, responsable budgetaire compris, retournent le meme UUID V2 au format accepte par le validateur partage avant toute relecture du V1, y compris si le V1 a change apres une reponse perdue ; une nouvelle cle avec une version source obsolete echoue sans creation. Toute reutilisation de cle avec une autre intention et toute autre cle pour la meme intention ou demande deja creee sont refusees atomiquement, y compris sous concurrence.
 21. Les metadonnees de promotion restent serveur, immuables et preservees apres toute mise a jour V2.
 22. Aucun montant, cle idempotente brute ni contenu de brouillon n'apparait dans les journaux techniques.
 
