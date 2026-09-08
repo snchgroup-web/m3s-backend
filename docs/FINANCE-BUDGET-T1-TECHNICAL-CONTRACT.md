@@ -41,7 +41,7 @@ Toutes les routes V2 exigent le Bearer courant et repondent avec `Cache-Control:
 
 `summary` contient exactement `id`, `version`, `title`, `entity`, `year`, `createdAt`, `updatedAt`, `scope`, `status` et `access`. `entity` et `year` sont les colonnes de resume serveur derivees des referentiels ; les listes ne contiennent ni `budget`, montants, `referenceSnapshots` ou metadonnees `promotion`. Une lecture directe restitue le bloc `referenceSnapshots` seulement apres le controle complet de visibilite ; le bloc serveur `promotion`, ses empreintes et sa cle hachee ne sont pas exposes par les routes metier. Une premiere promotion retourne `replayed: false`; toute reprise reussie retourne `replayed: true`, le meme `id` et la `version` V2 courante validee.
 
-Les echecs utilisent exactement `{ success: false, contractVersion: 2, code }`, complete uniquement par `draftId` et `reconcileRequired: true` lorsqu'une ecriture a un resultat techniquement incertain, ou par le seul `report` nettoye pour `BUDGET_PROMOTION_REVIEW_REQUIRED`. Les statuts HTTP restent `400` pour une entree invalide, `401` pour une identite absente, `403` pour un droit insuffisant, `404` pour absent/non visible/hors auteur ou tenant, `409` pour version ou idempotence en conflit, `422` pour une promotion bien formee exigeant un arbitrage et `503` pour capacite ou source indispensable fermee, indisponible ou non verifiable. Aucune reponse d'echec ne contient de charge, montant, libelle, reference cachee ou detail de securite.
+Les echecs utilisent exactement `{ success: false, contractVersion: 2, code }`, complete uniquement par `draftId` et `reconcileRequired: true` avec `BUDGET_WRITE_UNCERTAIN` lorsqu'une ecriture a un resultat techniquement incertain, ou par le seul `report` nettoye pour `BUDGET_PROMOTION_REVIEW_REQUIRED`. Les associations generales sont normatives : `400 BUDGET_REQUEST_INVALID` pour tout identifiant, parametre, en-tete ou corps mal forme ; `401 BUDGET_AUTH_REQUIRED` pour l'identite absente ou invalide ; `403 BUDGET_ACCESS_DENIED` pour un droit insuffisant ; `404 BUDGET_DRAFT_NOT_FOUND` pour un brouillon absent, non visible, hors auteur ou hors tenant ; `503 BUDGET_STORAGE_UNAVAILABLE` pour le stockage indispensable indisponible. Les codes specialises de referentiel, version, promotion et capacite enumeres plus bas remplacent ces codes generaux lorsque leur condition exacte s'applique. Aucune reponse d'echec ne contient de charge, montant, libelle, reference cachee ou detail de securite.
 
 ## Enveloppe V2 candidate
 
@@ -240,7 +240,9 @@ Cette strategie n'est acceptable que si les limites de taille, le cout des filtr
 - La promotion exige les references organisation et exercice resolues et produit un rapport `apparie`, `ambigu`, `introuvable` ou `incompatible`.
 - En cas d'echec, le brouillon V1 reste intact et demeure l'unique version faisant autorite.
 
-Le rapport de promotion est un objet ferme de forme `{ outcome, checks }`. `outcome` et chaque `checks[].result` valent exactement `apparie`, `ambigu`, `introuvable` ou `incompatible`. Chaque controle contient exactement `{ path, result, code }`, sans valeur source, candidat, identifiant cache ou libelle. Les chemins sont emis dans cet ordre normatif : `identity.entityId`, `identity.fiscalYearId`, `responsibilities.budgetOwnerAgentId`, `budget.year`, `budget.rate`, puis, pour chaque ligne dans l'ordre V1, `rows[<ordinal>].periodValues`, ou `<ordinal>` est un entier decimal sans zero initial. `code` vaut exactement `REFERENCE_RESOLVED`, `REFERENCE_AMBIGUOUS`, `REFERENCE_NOT_FOUND`, `YEAR_MISMATCH`, `CALENDAR_INCOMPATIBLE`, `VALUE_INCOMPATIBLE` ou `WHITESPACE_INCOMPATIBLE`. Le resultat global applique la precedence `incompatible` puis `ambigu` puis `introuvable` puis `apparie` ; il vaut donc le premier etat present selon cette precedence, independamment de l'ordre des controles.
+Le rapport de promotion est un objet ferme de forme `{ outcome, checks }`. `outcome` et chaque `checks[].result` valent exactement `apparie`, `ambigu`, `introuvable` ou `incompatible`. Chaque controle contient exactement `{ path, result, code }`, sans valeur source, candidat, identifiant cache ou libelle. Les chemins sont emis dans cet ordre normatif : `identity.entityId`, `identity.fiscalYearId`, `responsibilities.budgetOwnerAgentId`, `budget.year`, `budget.rate`, puis, pour chaque ligne dans l'ordre V1, `rows[<ordinal>].periodValues`, ou `<ordinal>` est un entier decimal sans zero initial. Le resultat global applique la precedence `incompatible` puis `ambigu` puis `introuvable` puis `apparie` ; il vaut donc le premier etat present selon cette precedence, independamment de l'ordre des controles.
+
+Les couples `path`, `result` et `code` admis sont fermes. Pour `identity.entityId`, `identity.fiscalYearId` et `responsibilities.budgetOwnerAgentId`, les couples sont `apparie / REFERENCE_RESOLVED`, `ambigu / REFERENCE_AMBIGUOUS` ou `introuvable / REFERENCE_NOT_FOUND`; `identity.fiscalYearId` admet en plus `incompatible / CALENDAR_INCOMPATIBLE`. Pour `budget.year`, seuls `apparie / YEAR_MATCHED` et `incompatible / YEAR_MISMATCH` sont admis. Pour `budget.rate`, seuls `apparie / RATE_COMPATIBLE`, `incompatible / VALUE_INCOMPATIBLE` et `incompatible / WHITESPACE_INCOMPATIBLE` sont admis. Pour chaque `rows[<ordinal>].periodValues`, seuls `apparie / PERIOD_VALUES_COMPATIBLE`, `incompatible / CALENDAR_INCOMPATIBLE`, `incompatible / VALUE_INCOMPATIBLE` et `incompatible / WHITESPACE_INCOMPATIBLE` sont admis. Tout autre chemin, code ou combinaison est invalide et ne peut etre emis.
 
 Une promotion reussit uniquement lorsque tous les controles sont `apparie`. Le serveur renvoie alors le rapport avec le resume V2 et le conserve, sans modification, dans les metadonnees serveur de promotion et dans la liaison idempotente afin que toute reprise restitue le meme rapport. Une demande bien formee contenant au moins un controle non apparie retourne `422 BUDGET_PROMOTION_REVIEW_REQUIRED` avec le seul rapport nettoye en complement de l'enveloppe d'erreur ; elle ne cree aucun brouillon V2 et aucune liaison idempotente. Le rapport n'est pas expose par les autres routes metier.
 
@@ -308,6 +310,10 @@ La promotion des douze positions V1 est autorisee automatiquement uniquement ver
 
 | Code | Sens |
 | --- | --- |
+| `BUDGET_REQUEST_INVALID` | Identifiant, parametre, en-tete ou corps de requete invalide ; retourne HTTP `400` |
+| `BUDGET_AUTH_REQUIRED` | Identite absente ou invalide ; retourne HTTP `401` |
+| `BUDGET_ACCESS_DENIED` | Permission courante insuffisante ; retourne HTTP `403` |
+| `BUDGET_DRAFT_NOT_FOUND` | Brouillon absent, non visible, hors auteur ou hors tenant ; retourne HTTP `404` sans distinction publique |
 | `BUDGET_V2_DISABLED` | Contrat T1 non ouvert dans l'environnement |
 | `BUDGET_REFERENCE_UNAVAILABLE` | Source de referentiel indisponible |
 | `BUDGET_REFERENCE_NOT_FOUND` | Identifiant absent, non recevable, non visible ou hors tenant ; aucun detail public |
@@ -320,6 +326,8 @@ La promotion des douze positions V1 est autorisee automatiquement uniquement ver
 | `BUDGET_V1_PROMOTION_REQUIRED` | Operation V2 demandee sur un brouillon V1 |
 | `BUDGET_PROMOTION_CONFLICT` | Cle liee a une autre intention, ou intention deja liee a une autre cle |
 | `BUDGET_PROMOTION_REVIEW_REQUIRED` | Promotion bien formee mais rapport non entierement `apparie`; retourne HTTP `422` et le rapport nettoye |
+| `BUDGET_WRITE_UNCERTAIN` | Resultat d'ecriture techniquement incertain ; retourne HTTP `503` avec `draftId` et `reconcileRequired: true` |
+| `BUDGET_STORAGE_UNAVAILABLE` | Stockage indispensable indisponible ou non verifiable ; retourne HTTP `503` |
 
 Les messages publics restent generiques et sans identifiant sensible. Les journaux techniques ne contiennent ni montant, charge JSON, libelle prive ou jeton.
 
