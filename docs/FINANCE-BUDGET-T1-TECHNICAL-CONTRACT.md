@@ -90,7 +90,7 @@ Le futur `budgetCode` reste absent de la charge cliente tant que son format, son
 Chaque reference soumise est resolue par un composant serveur injecte. Un resultat de resolution possede au minimum :
 
 ```text
-id, tenantId, status, labelSnapshot, sourceRevision
+id, tenantId, status, effectiveFrom, effectiveTo, labelSnapshot, sourceRevision
 ```
 
 Le resultat du resolveur d'exercice fournit en plus son `entityId` parent. Il n'est recevable que si cet identifiant est strictement egal a l'`entityId` d'organisation resolu pour le budget ; deux references valides du meme tenant mais appartenant a des organisations differentes constituent `BUDGET_REFERENCE_RELATION_INVALID`.
@@ -107,10 +107,23 @@ Le resultat est recevable seulement si :
 
 1. l'identifiant est exact et unique ;
 2. le tenant correspond a l'identite authentifiee ;
-3. le statut autorise l'usage budgetaire a la date de la requete ;
+3. le statut et sa periode d'effet autorisent l'operation budgetaire a l'instant serveur de la requete ;
 4. la politique de confidentialite et de visibilite propre a l'objet autorise cet utilisateur a le referencer et a revoir son libelle ;
 5. la revision source est disponible pour l'audit ;
 6. les relations parent-enfant sont coherentes.
+
+Le serveur capture un seul instant UTC pour la requete. Chaque resolveur normalise une periode d'effet semi-ouverte `[effectiveFrom, effectiveTo)` ; `effectiveTo` peut etre nul pour une reference non expirante. Une revision future, expiree ou sans datation verifiable est refusee. Un registre sans dates natives doit fournir une regle d'activation versionnee et auditable dans son contrat de resolveur avant ouverture ; aucune date n'est deduite d'un libelle ou de la saisie cliente.
+
+Les statuts canoniques recevables sont lies a l'operation :
+
+| Reference | Creation, mise a jour ou promotion | Liste, lecture ou export d'un brouillon existant |
+| --- | --- | --- |
+| Organisation | `active` dans sa periode d'effet | `active`; un statut `inactive`, `suspended`, `revoked` ou `deleted` bloque aussi la restitution |
+| Exercice | `planned` seulement avant `startDate`; `open` entre `startDate` et `endDate` incluses, dans le fuseau de l'exercice | `planned`, `open` ou `closed`, si l'exercice reste visible ; `cancelled` ou `deleted` bloque la restitution |
+| Fonction, equipe, agent, portefeuille, dossier et pays | `active` dans leur periode d'effet | `active`, ou `archived` si la politique de conservation maintient explicitement la visibilite historique ; `inactive`, `revoked` ou `deleted` bloque la restitution |
+| Projet et phase, lorsqu'un registre sera autorise | `planned`, `active` ou `open` dans leur periode d'effet | ces statuts, ainsi que `completed` ou `closed` si la visibilite historique est maintenue ; `cancelled`, `revoked` ou `deleted` bloque la restitution |
+
+Tout statut natif doit etre mappe explicitement vers cette enumeration dans le contrat du resolveur. Un statut inconnu, un mapping absent ou une periode d'effet non prouvable ferme l'operation. Le statut `restricted` reste un niveau de confidentialite, jamais un statut de cycle de vie, et continue d'exiger sa politique Management propre.
 
 Une permission Finance et l'appartenance au tenant ne suffisent pas a ouvrir un objet `restricted`. Le resolveur applique aussi la confidentialite de chaque portefeuille, dossier ou future reference ; il renvoie le meme refus generique pour un objet absent et un objet non visible afin de ne pas reveler son existence. Dans T1, toute reference Management marquee `restricted` reste bloquee par `BUDGET_REFERENCE_NOT_FOUND` tant qu'un contrat d'autorisation Management actif ne relie pas explicitement l'identite courante a cet objet. `responsible_agent_id` seul, surtout nul, n'accorde aucun acces et aucune permission Finance ne lui est substituee.
 
@@ -218,11 +231,11 @@ La commande candidate `POST /api/finance/budget-drafts-v2/promotions/:sourceDraf
 }
 ```
 
-Apres validation de la grammaire de la cle et de la charge fermee, le serveur calcule d'abord un `intentFingerprint` stable couvrant le tenant, l'auteur, `sourceDraftId`, `expectedSourceVersion` et les trois identifiants cibles fournis. Il consulte ensuite la liaison par `idempotencyKeyHash` avant de relire le brouillon V1 ou de resoudre de nouveau ses references. Si la cle est deja liee a la meme intention, il restitue le brouillon V2 et le resultat initialement persistes, meme si la version V1 courante a change entre-temps. Si la cle est liee a une autre intention, il retourne `BUDGET_PROMOTION_CONFLICT` sans lire ni creer de brouillon.
+Apres validation de la grammaire de la cle et de la charge fermee, le serveur calcule d'abord un `intentFingerprint` stable couvrant le tenant, l'auteur, `sourceDraftId`, `expectedSourceVersion` et les trois identifiants cibles fournis. Il consulte ensuite la liaison par `idempotencyKeyHash` avant de relire le brouillon V1. Si la cle est deja liee a la meme intention, il ne relit pas le contenu mutable du V1, mais re-resout les references cibles persistees et recontrole leurs statuts, periodes d'effet, relations et visibilite courante avant toute restitution. Si ces controles reussissent, il restitue le brouillon V2 et le resultat initialement persistes, meme si la version V1 courante a change entre-temps ; sinon il applique le meme refus generique que la lecture V2, conserve la liaison et ne cree rien. Si la cle est liee a une autre intention, il retourne `BUDGET_PROMOTION_CONFLICT` sans lire ni creer de brouillon.
 
 Lorsque la cle est absente, le brouillon V1 source, son `version`, le tenant et l'auteur sont relus par le serveur. La promotion exige alors `version === expectedSourceVersion` ; sinon elle retourne `BUDGET_SOURCE_VERSION_CONFLICT` sans creation. Le serveur calcule aussi une empreinte SHA-256 du JSON V1 canonique et persiste `sourceVersion`, `sourceContentDigest`, `targetEntityId`, `targetFiscalYearId` et `targetBudgetOwnerAgentId` dans `promotion`. L'empreinte canonique complete de la requete et l'identifiant V2 deterministe couvrent le tenant, l'auteur, le brouillon source, sa version, son empreinte et les trois identifiants cibles resolus, puis l'identifiant est encode dans la forme UUID V4 acceptee par le validateur partage. La specification des deux derivations, leurs vecteurs de test et le controle de collision appartiennent au micro-lot `T1-E` avant toute implementation.
 
-Avant toute ecriture, le serveur lie atomiquement, dans la portee tenant-auteur, chaque `idempotencyKeyHash` a son premier `intentFingerprint`, a son `requestFingerprint` canonique complet et au resultat V2 persiste ; chaque intention et chaque empreinte complete de demande sont reciproquement liees a leur premiere empreinte de cle. Une reprise avec la meme cle et la meme intention renvoie ce resultat existant avant toute relecture du V1. La reutilisation d'une cle avec une autre source, version attendue ou cible, comme l'emploi d'une autre cle pour la meme intention ou la meme demande canonique deja creee, retourne `BUDGET_PROMOTION_CONFLICT` sans creer de brouillon.
+Avant toute ecriture, le serveur lie atomiquement, dans la portee tenant-auteur, chaque `idempotencyKeyHash` a son premier `intentFingerprint`, a son `requestFingerprint` canonique complet et au resultat V2 persiste ; chaque intention et chaque empreinte complete de demande sont reciproquement liees a leur premiere empreinte de cle. Une reprise avec la meme cle et la meme intention retrouve ce resultat avant toute relecture du V1, puis applique les controles courants de restitution aux references persistees. La reutilisation d'une cle avec une autre source, version attendue ou cible, comme l'emploi d'une autre cle pour la meme intention ou la meme demande canonique deja creee, retourne `BUDGET_PROMOTION_CONFLICT` sans creer de brouillon.
 
 La creation V2 utilise ensuite un `MERGE` transactionnel sur l'identifiant deterministe ; une reponse incertaine se reconcilie par la liaison precedente et par lecture de cet identifiant. Une relance avec la meme cle et la meme charge retrouve donc le resultat initial apres une mutation du V1. Une nouvelle cle portant une `expectedSourceVersion` devenue obsolete echoue avec `BUDGET_SOURCE_VERSION_CONFLICT`. Une version V1 ulterieure explicitement attendue ou une autre cible constitue une autre intention et peut produire un autre brouillon V2, toujours au statut `draft` et sans autorite implicite, mais elle exige sa propre cle encore inutilisee. La cle brute et le contenu source ne sont jamais journalises.
 
@@ -273,7 +286,7 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 8. Deux lignes ne peuvent jamais partager le meme `row.id`.
 9. Chaque ligne contient exactement les `periodId` de l'exercice resolu ; l'ordre du tableau ne change pas leur sens.
 10. Chaque reference resolue persiste sa revision et son libelle canonique dans l'instantane de la version courante, sans pretendre conserver l'historique anterieur.
-11. Une revocation apres sauvegarde exclut le brouillon des listes et bloque lecture, export et mise a jour sans fuite.
+11. Une revocation apres sauvegarde exclut le brouillon des listes et bloque lecture, export, mise a jour et restitution d'une reprise idempotente sans fuite ; la reprise conserve sa liaison et ne relit pas le contenu V1.
 12. L'annee de synthese vient du referentiel d'exercice ; une annee V1 divergente bloque la promotion.
 13. Une source indisponible produit un refus ferme, sans secours par libelle.
 14. Le schema ferme refuse les champs inconnus, les enumerations hors contrat, les tailles excessives et toute mise a jour sans `expectedVersion` valide.
