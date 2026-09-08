@@ -139,12 +139,11 @@ test('explicit null dimensions stay null and do not require unused resolver inte
   });
 });
 
-test('wrong-tenant, hidden, absent and duplicate references share the non-disclosing not-found code', async () => {
+test('wrong-tenant, hidden and absent references share the non-disclosing not-found code', async () => {
   for (const mutate of [
     data => { data.entity[0].tenantId = 'another-tenant'; },
     data => { data.entity[0].visible = false; },
-    data => { data.entity = []; },
-    data => { data.entity.push({ ...data.entity[0] }); }
+    data => { data.entity = []; }
   ]) {
     const data = fixtures();
     mutate(data);
@@ -152,6 +151,14 @@ test('wrong-tenant, hidden, absent and duplicate references share the non-disclo
       budget: budget(), tenantId: TENANT, actorId: ACTOR
     }), 'BUDGET_REFERENCE_NOT_FOUND');
   }
+});
+
+test('duplicate resolver matches make the source unverifiable', async () => {
+  const data = fixtures();
+  data.entity.push({ ...data.entity[0] });
+  await rejects(() => setup(data).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_REFERENCE_UNAVAILABLE');
 });
 
 test('restricted references stay hidden by default and require an explicit policy grant', async () => {
