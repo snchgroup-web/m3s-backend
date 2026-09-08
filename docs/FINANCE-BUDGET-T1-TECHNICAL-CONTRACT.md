@@ -39,6 +39,8 @@ Toutes les routes V2 exigent le Bearer courant et repondent avec `Cache-Control:
 | `PUT /:id` | charge de mise a jour V2 fermee avec `expectedVersion` | `200`, `{ success: true, contractVersion: 2, data: summary }` |
 | `POST /promotions/:sourceDraftId` | charge et cle idempotente definies dans la section Promotion | `201` a la creation ou `200` a la reprise, avec `{ success: true, contractVersion: 2, data: summary, replayed, report }` |
 
+Pour `GET /`, les brouillons visibles sont ordonnes exactement par `updatedAt DESC`, puis `id ASC` comme departage canonique, avant l'application de `offset` puis de la lecture `limit + 1` necessaire a `hasMore`. Cet ordre rend les pages deterministes pour un jeu de donnees stable ; une garantie d'instantane sous ecritures concurrentes exigerait un futur contrat par curseur.
+
 `summary` contient exactement `id`, `version`, `title`, `entity`, `year`, `createdAt`, `updatedAt`, `scope`, `status` et `access`. `entity` et `year` sont les colonnes de resume serveur derivees des referentiels ; les listes ne contiennent ni `budget`, montants, `referenceSnapshots` ou metadonnees `promotion`. Une lecture directe restitue le bloc `referenceSnapshots` seulement apres le controle complet de visibilite ; le bloc serveur `promotion`, ses empreintes et sa cle hachee ne sont pas exposes par les routes metier. Une premiere promotion retourne `replayed: false`; toute reprise reussie retourne `replayed: true`, le meme `id` et la `version` V2 courante validee.
 
 Les echecs utilisent exactement `{ success: false, contractVersion: 2, code }`, complete uniquement par `draftId` et `reconcileRequired: true` avec `BUDGET_WRITE_UNCERTAIN` lorsqu'une ecriture a un resultat techniquement incertain, ou par le seul `report` nettoye pour `BUDGET_PROMOTION_REVIEW_REQUIRED`. Les associations generales sont normatives : `400 BUDGET_REQUEST_INVALID` pour tout identifiant, parametre, en-tete ou corps mal forme ; `401 BUDGET_AUTH_REQUIRED` pour l'identite absente ou invalide ; `403 BUDGET_ACCESS_DENIED` pour un droit insuffisant ; `404 BUDGET_DRAFT_NOT_FOUND` pour un brouillon absent, non visible, hors auteur ou hors tenant ; `503 BUDGET_STORAGE_UNAVAILABLE` pour le stockage indispensable indisponible. Les codes specialises de referentiel, version, promotion et capacite enumeres plus bas remplacent ces codes generaux lorsque leur condition exacte s'applique. Aucune reponse d'echec ne contient de charge, montant, libelle, reference cachee ou detail de securite.
@@ -308,26 +310,28 @@ La promotion des douze positions V1 est autorisee automatiquement uniquement ver
 
 ## Codes d'erreur candidats
 
-| Code | Sens |
-| --- | --- |
-| `BUDGET_REQUEST_INVALID` | Identifiant, parametre, en-tete ou corps de requete invalide ; retourne HTTP `400` |
-| `BUDGET_AUTH_REQUIRED` | Identite absente ou invalide ; retourne HTTP `401` |
-| `BUDGET_ACCESS_DENIED` | Permission courante insuffisante ; retourne HTTP `403` |
-| `BUDGET_DRAFT_NOT_FOUND` | Brouillon absent, non visible, hors auteur ou hors tenant ; retourne HTTP `404` sans distinction publique |
-| `BUDGET_V2_DISABLED` | Contrat T1 non ouvert dans l'environnement |
-| `BUDGET_REFERENCE_UNAVAILABLE` | Source de referentiel indisponible |
-| `BUDGET_REFERENCE_NOT_FOUND` | Identifiant absent, non recevable, non visible ou hors tenant ; aucun detail public |
-| `BUDGET_REFERENCE_RELATION_INVALID` | Chaine parentale incoherente |
-| `BUDGET_FISCAL_YEAR_INVALID` | Exercice absent, ferme, chevauchant ou incompatible |
-| `BUDGET_RESPONSIBILITY_INVALID` | Agent ou equipe non coherent |
-| `BUDGET_SOURCE_VERSION_CONFLICT` | Version V1 courante differente de `expectedSourceVersion` |
-| `BUDGET_VERSION_CONFLICT` | Version V2 courante differente de `expectedVersion` lors d'un `PUT`; retourne HTTP `409` sans ecrasement |
-| `BUDGET_VERSION_LIMIT` | Version terminale atteinte ; aucune nouvelle mise a jour admise |
-| `BUDGET_V1_PROMOTION_REQUIRED` | Operation V2 demandee sur un brouillon V1 |
-| `BUDGET_PROMOTION_CONFLICT` | Cle liee a une autre intention, ou intention deja liee a une autre cle |
-| `BUDGET_PROMOTION_REVIEW_REQUIRED` | Promotion bien formee mais rapport non entierement `apparie`; retourne HTTP `422` et le rapport nettoye |
-| `BUDGET_WRITE_UNCERTAIN` | Resultat d'ecriture techniquement incertain ; retourne HTTP `503` avec `draftId` et `reconcileRequired: true` |
-| `BUDGET_STORAGE_UNAVAILABLE` | Stockage indispensable indisponible ou non verifiable ; retourne HTTP `503` |
+| Code | HTTP | Condition disjointe |
+| --- | ---: | --- |
+| `BUDGET_REQUEST_INVALID` | `400` | Identifiant, parametre, en-tete ou corps syntaxiquement invalide |
+| `BUDGET_AUTH_REQUIRED` | `401` | Identite absente ou invalide |
+| `BUDGET_ACCESS_DENIED` | `403` | Identite valide mais permission courante insuffisante |
+| `BUDGET_DRAFT_NOT_FOUND` | `404` | Brouillon absent, non visible, hors auteur ou hors tenant, sans distinction publique |
+| `BUDGET_V2_DISABLED` | `503` | Contrat T1 ferme dans l'environnement |
+| `BUDGET_REFERENCE_UNAVAILABLE` | `503` | Au moins une source de referentiel requise est indisponible ou non verifiable |
+| `BUDGET_REFERENCE_NOT_FOUND` | `404` | Source disponible mais identifiant de reference absent, non visible ou hors tenant, quel que soit son type |
+| `BUDGET_FISCAL_YEAR_INVALID` | `422` | Exercice visible et resolu, mais son propre statut, intervalle, chevauchement ou calendrier est invalide ; une relation a l'organisation releve du code suivant |
+| `BUDGET_RESPONSIBILITY_INVALID` | `422` | Agents visibles et resolus, mais statut, role ou coherence agent-equipe invalide |
+| `BUDGET_REFERENCE_RELATION_INVALID` | `422` | Toutes les references sont visibles, resolues et individuellement recevables, mais leur chaine parentale est incoherente |
+| `BUDGET_SOURCE_VERSION_CONFLICT` | `409` | Version V1 courante differente de `expectedSourceVersion` |
+| `BUDGET_VERSION_CONFLICT` | `409` | Version V2 courante differente de `expectedVersion` lors d'un `PUT`, sans ecrasement |
+| `BUDGET_VERSION_LIMIT` | `409` | Version terminale atteinte ; aucune nouvelle mise a jour admise |
+| `BUDGET_V1_PROMOTION_REQUIRED` | `409` | Operation V2 demandee sur un brouillon V1 |
+| `BUDGET_PROMOTION_CONFLICT` | `409` | Cle liee a une autre intention, ou intention deja liee a une autre cle |
+| `BUDGET_PROMOTION_REVIEW_REQUIRED` | `422` | Promotion bien formee mais rapport non entierement `apparie`, avec rapport nettoye |
+| `BUDGET_WRITE_UNCERTAIN` | `503` | Resultat d'ecriture techniquement incertain, avec `draftId` et `reconcileRequired: true` |
+| `BUDGET_STORAGE_UNAVAILABLE` | `503` | Stockage indispensable indisponible ou non verifiable |
+
+Le serveur evalue ces familles dans cet ordre normatif et retourne le premier echec : syntaxe, authentification, capacite V2, permission, disponibilite du stockage, existence et portee du brouillon, disponibilite des referentiels, resolution et visibilite de chaque reference, validite propre de l'exercice, validite des responsabilites, relations parentales, versions, puis regles propres a la promotion. Ainsi, une reference manquante utilise toujours `BUDGET_REFERENCE_NOT_FOUND`; `BUDGET_FISCAL_YEAR_INVALID` et `BUDGET_RESPONSIBILITY_INVALID` ne s'appliquent qu'a des objets deja visibles et resolus, et `BUDGET_REFERENCE_RELATION_INVALID` seulement apres leur validation individuelle. Une ecriture devenue techniquement incertaine apres le debut de la transaction remplace toute erreur de stockage generique par `BUDGET_WRITE_UNCERTAIN`.
 
 Les messages publics restent generiques et sans identifiant sensible. Les journaux techniques ne contiennent ni montant, charge JSON, libelle prive ou jeton.
 
