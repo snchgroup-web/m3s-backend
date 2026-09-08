@@ -413,6 +413,15 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
     const fiscalYear = cached('fiscalYear', budget.identity.fiscalYearId);
     validateTypeRecord(fiscalYear.record, 'fiscalYear', 'identity', operation, at);
 
+    const expectedPeriodIds = new Set(fiscalYear.record.periods.map(period => period.periodId));
+    for (const row of budget.rows) {
+      const actualPeriodIds = new Set(row.periodValues.map(period => period.periodId));
+      if (actualPeriodIds.size !== expectedPeriodIds.size
+        || [...expectedPeriodIds].some(id => !actualPeriodIds.has(id))) {
+        fail('BUDGET_FISCAL_YEAR_INVALID');
+      }
+    }
+
     const owner = cached('agent', budget.responsibilities.budgetOwnerAgentId);
     validateTypeRecord(
       { ...owner.record, responsibility: 'budgetOwnerAgentId' },
@@ -426,15 +435,6 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
         { ...controller.record, responsibility: 'controllerAgentId' },
         'agent', 'responsibility', operation, at
       );
-    }
-
-    const expectedPeriodIds = new Set(fiscalYear.record.periods.map(period => period.periodId));
-    for (const row of budget.rows) {
-      const actualPeriodIds = new Set(row.periodValues.map(period => period.periodId));
-      if (actualPeriodIds.size !== expectedPeriodIds.size
-        || [...expectedPeriodIds].some(id => !actualPeriodIds.has(id))) {
-        fail('BUDGET_FISCAL_YEAR_INVALID');
-      }
     }
 
     const resolvedRows = budget.rows.map(row => {

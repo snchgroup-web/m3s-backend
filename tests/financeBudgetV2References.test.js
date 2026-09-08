@@ -213,6 +213,14 @@ test('all lifecycle checks precede fiscal, responsibility and relation validatio
   await rejects(() => setup(beforeRelation).service.resolveBudgetReferences({
     budget: budget(), tenantId: TENANT, actorId: ACTOR
   }), 'BUDGET_RESPONSIBILITY_INVALID');
+
+  const fiscalBeforeResponsibility = fixtures();
+  fiscalBeforeResponsibility.agent[0].allowedResponsibilities = ['controllerAgentId'];
+  const wrongPeriods = budget();
+  wrongPeriods.rows[0].periodValues[11].periodId = 'OTHER-P12';
+  await rejects(() => setup(fiscalBeforeResponsibility).service.resolveBudgetReferences({
+    budget: wrongPeriods, tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_FISCAL_YEAR_INVALID');
 });
 
 test('future, expired and inactive general references are rejected by lifecycle state', async () => {
