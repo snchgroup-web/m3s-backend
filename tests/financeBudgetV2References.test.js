@@ -371,7 +371,12 @@ test('team-agent coherence and responsibility eligibility are independently enfo
   wrongTeam.agent[0].teamId = 'TSN';
   await rejects(() => setup(wrongTeam).service.resolveBudgetReferences({
     budget: budget(), tenantId: TENANT, actorId: ACTOR
-  }), 'BUDGET_REFERENCE_RELATION_INVALID');
+  }), 'BUDGET_RESPONSIBILITY_INVALID');
+
+  wrongTeam.portfolio[0].functionId = 'other-function';
+  await rejects(() => setup(wrongTeam).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_RESPONSIBILITY_INVALID');
 
   const wrongRole = fixtures();
   wrongRole.agent[0].allowedResponsibilities = ['controllerAgentId'];
@@ -386,6 +391,13 @@ test('malformed resolver contracts and invalid caller context never fall through
   await rejects(() => setup(data).service.resolveBudgetReferences({
     budget: budget(), tenantId: TENANT, actorId: ACTOR
   }), 'BUDGET_REFERENCE_UNAVAILABLE');
+
+  const missingFiscalParent = fixtures();
+  missingFiscalParent.fiscalYear[0].entityId = null;
+  await rejects(() => setup(missingFiscalParent).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_REFERENCE_UNAVAILABLE');
+
   await rejects(() => setup().service.resolveBudgetReferences({
     budget: budget(), tenantId: '', actorId: ACTOR
   }), 'BUDGET_REQUEST_INVALID');

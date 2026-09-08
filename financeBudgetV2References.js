@@ -186,8 +186,7 @@ function acceptedLifecycleStatus(record, type, operation, purpose) {
 }
 
 function validateFiscalYear(record, operation, at) {
-  if (!isReferenceId(record.entityId)
-    || typeof record.summaryYear !== 'string' || !SUMMARY_YEAR_PATTERN.test(record.summaryYear)
+  if (typeof record.summaryYear !== 'string' || !SUMMARY_YEAR_PATTERN.test(record.summaryYear)
     || !isIsoDate(record.startDate) || !isIsoDate(record.endDate)
     || record.startDate > record.endDate || record.periodicity !== 'monthly'
     || !isTimezone(record.timezone) || !Array.isArray(record.periods)
@@ -236,6 +235,9 @@ function validateFiscalYear(record, operation, at) {
 }
 
 function validateSourceRecord(record, type) {
+  if (type === 'fiscalYear' && !isReferenceId(record.entityId)) {
+    fail('BUDGET_REFERENCE_UNAVAILABLE');
+  }
   if (type === 'portfolio' && !isReferenceId(record.functionId)) {
     fail('BUDGET_REFERENCE_UNAVAILABLE');
   }
@@ -459,6 +461,13 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
       return { rowId: row.id, records };
     });
 
+    for (const { records } of resolvedRows) {
+      if (records.agentId
+        && records.teamId && records.agentId.teamId !== records.teamId.id) {
+        fail('BUDGET_RESPONSIBILITY_INVALID');
+      }
+    }
+
     if (fiscalYear.record.entityId !== entity.record.id) {
       fail('BUDGET_REFERENCE_RELATION_INVALID');
     }
@@ -477,10 +486,6 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
       }
       if (records.phaseId
         && (!records.projectId || records.phaseId.projectId !== records.projectId.id)) {
-        fail('BUDGET_REFERENCE_RELATION_INVALID');
-      }
-      if (records.agentId
-        && records.teamId && records.agentId.teamId !== records.teamId.id) {
         fail('BUDGET_REFERENCE_RELATION_INVALID');
       }
     }
