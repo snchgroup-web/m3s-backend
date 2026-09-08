@@ -114,6 +114,8 @@ Le resultat est recevable seulement si :
 
 Une permission Finance et l'appartenance au tenant ne suffisent pas a ouvrir un objet `restricted`. Le resolveur applique aussi la confidentialite de chaque portefeuille, dossier ou future reference ; il renvoie le meme refus generique pour un objet absent et un objet non visible afin de ne pas reveler son existence. Dans T1, toute reference Management marquee `restricted` reste bloquee par `BUDGET_REFERENCE_NOT_FOUND` tant qu'un contrat d'autorisation Management actif ne relie pas explicitement l'identite courante a cet objet. `responsible_agent_id` seul, surtout nul, n'accorde aucun acces et aucune permission Finance ne lui est substituee.
 
+RH-001 ne porte actuellement aucun `tenantId` autoritatif. Il peut documenter les libelles et la coherence equipe-agent dans le contexte 2SG, mais ne peut pas prouver seul l'appartenance d'un agent au tenant authentifie. Toute reference d'agent V2, y compris `budgetOwnerAgentId` obligatoire et `controllerAgentId`, reste donc `BLOQUANTE` jusqu'a l'activation d'un mapping agent-tenant explicite, versionne et tenant-scoped. Aucun tenant implicite n'est invente et aucun annuaire inter-tenant n'est ouvert.
+
 Une indisponibilite de source, une ambiguite ou une reference inconnue produit un refus ferme. Aucun libelle, alias, devise, texte `Autre` ou valeur historique ne remplace un identifiant.
 
 ## Matrice d'ouverture technique
@@ -123,7 +125,7 @@ Une indisponibilite de source, une ambiguite ou une reference inconnue produit u
 | Organisation | registre a confirmer | `BLOQUANT` | Refus tant que le registre actif n'existe pas |
 | Exercice | registre a creer ou confirmer | `BLOQUANT` | Refus tant que bornes, periodicite et fuseau ne sont pas resolus |
 | Fonction | menus canoniques / portefeuille | `TRANSITION` | Lecture candidate seulement apres contrat unique |
-| Equipe et agent | RH-001 / `teamAgentContract` | `TRANSITION` | Controle candidat, jamais source d'un droit |
+| Equipe et agent | RH-001 / `teamAgentContract` | `BLOQUANT` | Libelles et coherence observables, mais aucune reference V2 avant mapping agent-tenant autoritatif |
 | Portefeuille et dossier | registres Management | `ACTIF BORNE` | Resolution tenant-scoped et chaine parentale obligatoire ; references `restricted` bloquees sans contrat d'autorisation Management |
 | Projet et phase | modele documente, registre backend absent | `BLOQUANT SI FOURNI` | Valeur nulle admise ; valeur fournie refusee |
 | Pays | registre actif non confirme | `BLOQUANT SI FOURNI` | Valeur nulle admise ; valeur fournie refusee |
@@ -224,7 +226,7 @@ Cette liaison doit resister a deux requetes concurrentes et ne peut pas reposer 
 
 Le bloc `promotion` est une metadonnee serveur immuable. Il est interdit dans toute charge cliente de creation ou de mise a jour V2. Lors d'une mise a jour d'un brouillon promu, le serveur relit ce bloc dans le document stocke, le recopie sans modification dans la nouvelle enveloppe `budget_json` au sein de la transaction de version et rejette toute tentative de surcharge. Un brouillon V2 cree directement ne possede pas ce bloc.
 
-La promotion des douze positions V1 est autorisee automatiquement uniquement vers un exercice civil janvier-decembre confirme, en reliant chaque position a son `periodId` canonique. Pour tout autre calendrier, le rapport retourne `incompatible` et aucun montant n'est deplace ou reordonne sans arbitrage explicite.
+La promotion des douze positions V1 est autorisee automatiquement uniquement vers un exercice civil janvier-decembre confirme, en reliant chaque position a son `periodId` canonique. Chaque chaine V1 doit deja respecter la grammaire V2 exacte : `""` pour l'absence ou decimal sans espace exterieur. Une valeur V1 entierement composee d'espaces ou dont `value !== value.trim()` retourne `incompatible` dans le rapport ; elle n'est ni trimmee, ni convertie, ni persistee en V2. Pour tout autre calendrier ou valeur incompatible, aucun montant n'est deplace ou reordonne sans arbitrage explicite.
 
 ## Codes d'erreur candidats
 
@@ -262,7 +264,7 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 4. Une organisation ou un exercice non resolu bloque la creation V2 ; un exercice rattache a une autre organisation est refuse.
 5. Les relations fonction, portefeuille, dossier, projet et phase incoherentes sont refusees, notamment une fonction differente de celle du portefeuille resolu.
 6. Une reference `restricted` est refusee sans reveler son existence tant qu'aucune politique Management active ne prouve l'acces de l'identite courante.
-7. Une equipe et l'agent de la meme ligne incompatibles sont refuses ; le collectif reste limite a son equipe. Le responsable budgetaire de toute creation ou promotion V2 est un agent resolu explicite, jamais l'auteur deduit.
+7. Une equipe et l'agent de la meme ligne incompatibles sont refuses ; le collectif reste limite a son equipe. Le responsable budgetaire de toute creation ou promotion V2 est un agent resolu explicite, jamais l'auteur deduit, et toute reference d'agent reste bloquee tant que son appartenance au tenant n'est pas prouvee par une source autoritative.
 8. Deux lignes ne peuvent jamais partager le meme `row.id`.
 9. Chaque ligne contient exactement les `periodId` de l'exercice resolu ; l'ordre du tableau ne change pas leur sens.
 10. Chaque reference resolue persiste sa revision et son libelle canonique dans l'instantane de la version courante, sans pretendre conserver l'historique anterieur.
@@ -273,7 +275,7 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 15. Vide, zero reel et invalide restent trois etats distincts ; les montants V2 suivent la grammaire decimale bornee du contrat.
 16. Le taux est soit entierement absent, soit positif, borne et accompagne d'une source et d'une date ISO valides ; toute combinaison partielle est refusee.
 17. Un conflit de version reste `409` sans ecrasement ; `expectedVersion` s'arrete a `999999` et la version stockee `1000000` est terminale.
-18. Un calendrier accepte est mensuel et contient exactement douze periodes valides couvrant l'exercice ; toute autre periodicite est refusee comme incompatible.
+18. Un calendrier accepte est mensuel et contient exactement douze periodes valides couvrant l'exercice ; toute autre periodicite est refusee comme incompatible. Une valeur V1 avec espaces est egalement signalee incompatible, sans normalisation silencieuse.
 19. La grammaire de `Idempotency-Key` et sa derivation SHA-256 normative produisent la meme empreinte sur toutes les instances ; aucune cle brute n'est persistee ou journalisee.
 20. Deux reprises de la meme version V1 vers les memes references cibles, responsable budgetaire compris, et sous la meme cle retournent le meme UUID V2 au format accepte par le validateur partage ; toute reutilisation de cle avec une autre demande et toute autre cle pour la meme demande deja creee sont refusees atomiquement, y compris sous concurrence.
 21. Les metadonnees de promotion restent serveur, immuables et preservees apres toute mise a jour V2.
