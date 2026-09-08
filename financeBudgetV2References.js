@@ -1,7 +1,7 @@
 const { validateBudgetV2 } = require('./financeBudgetV2Contracts');
 
 const REFERENCE_ID_PATTERN = /^[\x20-\x7e]{1,128}$/;
-const RFC3339_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+const RFC3339_UTC_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const SUMMARY_YEAR_PATTERN = /^\d{4}$/;
 const IANA_TIMEZONE_MAX_LENGTH = 64;
@@ -47,8 +47,12 @@ function isIsoDate(value) {
 }
 
 function isUtcTimestamp(value) {
-  return typeof value === 'string' && RFC3339_UTC_PATTERN.test(value)
-    && Number.isFinite(Date.parse(value));
+  if (typeof value !== 'string') return false;
+  const match = value.match(RFC3339_UTC_PATTERN);
+  if (!match || !Number.isFinite(Date.parse(value))) return false;
+  const milliseconds = (match[7] || '').padEnd(3, '0');
+  const canonical = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}.${milliseconds}Z`;
+  return new Date(value).toISOString() === canonical;
 }
 
 function isBoundedText(value, maximum) {
@@ -76,6 +80,16 @@ function addUtcDay(value) {
   const date = new Date(`${value}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + 1);
   return date.toISOString().slice(0, 10);
+}
+
+function addUtcMonth(value) {
+  const [year, month, day] = value.split('-').map(Number);
+  const targetMonthStart = new Date(Date.UTC(year, month, 1));
+  const targetYear = targetMonthStart.getUTCFullYear();
+  const targetMonth = targetMonthStart.getUTCMonth();
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(targetYear, targetMonth, Math.min(day, lastDay)))
+    .toISOString().slice(0, 10);
 }
 
 function dateInTimezone(date, timeZone) {
@@ -141,13 +155,14 @@ function acceptedStatus(record, type, operation, purpose, at) {
       || (record.status === 'open' && localDate >= record.startDate && localDate <= record.endDate);
   }
   if (type === 'project' || type === 'phase') {
-    const accepted = operation === OPERATIONS.WRITE
-      ? ['planned', 'active', 'open']
-      : ['planned', 'active', 'open', 'completed', 'closed'];
-    return accepted.includes(record.status);
+    if (['planned', 'active', 'open'].includes(record.status)) return true;
+    return operation === OPERATIONS.READ && ['completed', 'closed'].includes(record.status)
+      && record.historicalVisible === true;
   }
   if (type === 'agent' && purpose === 'responsibility') {
-    return record.status === 'active';
+    if (record.status === 'active') return true;
+    return operation === OPERATIONS.READ && record.status === 'archived'
+      && record.historicalVisible === true;
   }
   if (record.status === 'active') return true;
   return operation === OPERATIONS.READ && record.status === 'archived'
@@ -185,6 +200,14 @@ function validateFiscalYear(record) {
   }
   for (let index = 1; index < ordered.length; index += 1) {
     if (ordered[index].startDate !== addUtcDay(ordered[index - 1].endDate)) {
+      fail('BUDGET_FISCAL_YEAR_INVALID');
+    }
+  }
+  for (const period of ordered) {
+    const nextMonth = addUtcMonth(period.startDate);
+    const expectedEnd = new Date(`${nextMonth}T00:00:00Z`);
+    expectedEnd.setUTCDate(expectedEnd.getUTCDate() - 1);
+    if (period.endDate !== expectedEnd.toISOString().slice(0, 10)) {
       fail('BUDGET_FISCAL_YEAR_INVALID');
     }
   }

@@ -210,6 +210,37 @@ test('read accepts explicitly retained archives while writes remain closed', asy
   }));
 });
 
+test('read retains archived responsibility agents only under explicit historical visibility', async () => {
+  const data = fixtures();
+  Object.assign(data.agent[0], { status: 'archived', historicalVisible: true });
+  const { service } = setup(data);
+  await rejects(() => service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR, operation: OPERATIONS.WRITE
+  }), 'BUDGET_RESPONSIBILITY_INVALID');
+  await assert.doesNotReject(() => service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR, operation: OPERATIONS.READ
+  }));
+
+  data.agent[0].historicalVisible = false;
+  await rejects(() => setup(data).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR, operation: OPERATIONS.READ
+  }), 'BUDGET_RESPONSIBILITY_INVALID');
+});
+
+test('completed projects and closed phases require explicit historical visibility on reads', async () => {
+  const data = fixtures();
+  data.project[0].status = 'completed';
+  data.phase[0].status = 'closed';
+  await rejects(() => setup(data).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR, operation: OPERATIONS.READ
+  }), 'BUDGET_REFERENCE_STATE_INVALID');
+  data.project[0].historicalVisible = true;
+  data.phase[0].historicalVisible = true;
+  await assert.doesNotReject(() => setup(data).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR, operation: OPERATIONS.READ
+  }));
+});
+
 test('fiscal-year lifecycle, calendar and period membership use the specialised code', async () => {
   const planned = fixtures();
   planned.fiscalYear[0].status = 'planned';
@@ -232,6 +263,17 @@ test('fiscal-year lifecycle, calendar and period membership use the specialised 
   const missingPeriods = fixtures();
   missingPeriods.fiscalYear[0].periods = null;
   await rejects(() => setup(missingPeriods).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_FISCAL_YEAR_INVALID');
+
+  const notMonthly = fixtures();
+  notMonthly.fiscalYear[0].periods = Array.from({ length: 12 }, (_, index) => ({
+    periodId: `P${String(index + 1).padStart(2, '0')}`,
+    ordinal: index + 1,
+    startDate: index === 0 ? '2026-01-01' : `2026-01-${String(index + 1).padStart(2, '0')}`,
+    endDate: index === 11 ? '2026-12-31' : `2026-01-${String(index + 1).padStart(2, '0')}`
+  }));
+  await rejects(() => setup(notMonthly).service.resolveBudgetReferences({
     budget: budget(), tenantId: TENANT, actorId: ACTOR
   }), 'BUDGET_FISCAL_YEAR_INVALID');
 
@@ -288,4 +330,12 @@ test('malformed resolver contracts and invalid caller context never fall through
   await rejects(() => setup().service.resolveBudgetReferences({
     budget: budget(), tenantId: '', actorId: ACTOR
   }), 'BUDGET_REQUEST_INVALID');
+
+  for (const timestamp of ['2026-02-30T00:00:00Z', '2026-01-01T24:00:00Z']) {
+    const invalidTimestamp = fixtures();
+    invalidTimestamp.entity[0].effectiveFrom = timestamp;
+    await rejects(() => setup(invalidTimestamp).service.resolveBudgetReferences({
+      budget: budget(), tenantId: TENANT, actorId: ACTOR
+    }), 'BUDGET_REFERENCE_UNAVAILABLE');
+  }
 });
