@@ -184,6 +184,21 @@ test('source failure, unavailable result and missing source revision fail closed
   }), 'BUDGET_REFERENCE_UNAVAILABLE');
 });
 
+test('source availability and visibility take precedence over lifecycle regardless of field order', async () => {
+  const unavailable = fixtures();
+  unavailable.entity[0].effectiveFrom = '2027-01-01T00:00:00Z';
+  await rejects(() => setup(unavailable, { portfolio: { available: false } })
+    .service.resolveBudgetReferences({ budget: budget(), tenantId: TENANT, actorId: ACTOR }),
+  'BUDGET_REFERENCE_UNAVAILABLE');
+
+  const hidden = fixtures();
+  hidden.entity[0].effectiveFrom = '2027-01-01T00:00:00Z';
+  hidden.portfolio[0].visible = false;
+  await rejects(() => setup(hidden).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_REFERENCE_NOT_FOUND');
+});
+
 test('future, expired and inactive general references are rejected by lifecycle state', async () => {
   for (const change of [
     { effectiveFrom: '2027-01-01T00:00:00Z' },
@@ -266,6 +281,12 @@ test('fiscal-year lifecycle, calendar and period membership use the specialised 
     budget: budget(), tenantId: TENANT, actorId: ACTOR
   }), 'BUDGET_FISCAL_YEAR_INVALID');
 
+  const numericYear = fixtures();
+  numericYear.fiscalYear[0].summaryYear = 2026;
+  await rejects(() => setup(numericYear).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_FISCAL_YEAR_INVALID');
+
   const notMonthly = fixtures();
   notMonthly.fiscalYear[0].periods = Array.from({ length: 12 }, (_, index) => ({
     periodId: `P${String(index + 1).padStart(2, '0')}`,
@@ -338,4 +359,10 @@ test('malformed resolver contracts and invalid caller context never fall through
       budget: budget(), tenantId: TENANT, actorId: ACTOR
     }), 'BUDGET_REFERENCE_UNAVAILABLE');
   }
+
+  const preciseTimestamp = fixtures();
+  preciseTimestamp.entity[0].effectiveFrom = '2025-01-01T00:00:00.123456789Z';
+  await assert.doesNotReject(() => setup(preciseTimestamp).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }));
 });

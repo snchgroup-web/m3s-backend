@@ -1,7 +1,7 @@
 const { validateBudgetV2 } = require('./financeBudgetV2Contracts');
 
 const REFERENCE_ID_PATTERN = /^[\x20-\x7e]{1,128}$/;
-const RFC3339_UTC_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/;
+const RFC3339_UTC_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?Z$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const SUMMARY_YEAR_PATTERN = /^\d{4}$/;
 const IANA_TIMEZONE_MAX_LENGTH = 64;
@@ -50,9 +50,13 @@ function isUtcTimestamp(value) {
   if (typeof value !== 'string') return false;
   const match = value.match(RFC3339_UTC_PATTERN);
   if (!match || !Number.isFinite(Date.parse(value))) return false;
-  const milliseconds = (match[7] || '').padEnd(3, '0');
-  const canonical = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}.${milliseconds}Z`;
-  return new Date(value).toISOString() === canonical;
+  const parsed = new Date(value);
+  return parsed.getUTCFullYear() === Number(match[1])
+    && parsed.getUTCMonth() + 1 === Number(match[2])
+    && parsed.getUTCDate() === Number(match[3])
+    && parsed.getUTCHours() === Number(match[4])
+    && parsed.getUTCMinutes() === Number(match[5])
+    && parsed.getUTCSeconds() === Number(match[6]);
 }
 
 function isBoundedText(value, maximum) {
@@ -171,7 +175,7 @@ function acceptedStatus(record, type, operation, purpose, at) {
 
 function validateFiscalYear(record) {
   if (!isReferenceId(record.entityId)
-    || !SUMMARY_YEAR_PATTERN.test(record.summaryYear)
+    || typeof record.summaryYear !== 'string' || !SUMMARY_YEAR_PATTERN.test(record.summaryYear)
     || !isIsoDate(record.startDate) || !isIsoDate(record.endDate)
     || record.startDate > record.endDate || record.periodicity !== 'monthly'
     || !isTimezone(record.timezone) || !Array.isArray(record.periods)
@@ -213,8 +217,7 @@ function validateFiscalYear(record) {
   }
 }
 
-function validateTypeRecord(record, type, purpose) {
-  if (type === 'fiscalYear') validateFiscalYear(record);
+function validateSourceRecord(record, type) {
   if (type === 'portfolio' && !isReferenceId(record.functionId)) {
     fail('BUDGET_REFERENCE_UNAVAILABLE');
   }
@@ -229,14 +232,37 @@ function validateTypeRecord(record, type, purpose) {
   }
   if (type === 'agent') {
     if (!isReferenceId(record.teamId)) fail('BUDGET_REFERENCE_UNAVAILABLE');
-    if (purpose === 'responsibility') {
-      const expected = record.responsibility;
-      if (!Array.isArray(record.allowedResponsibilities)
-        || !record.allowedResponsibilities.includes(expected)) {
-        fail('BUDGET_RESPONSIBILITY_INVALID');
+  }
+}
+
+function validateTypeRecord(record, type, purpose) {
+  if (type === 'fiscalYear') validateFiscalYear(record);
+  if (type === 'agent' && purpose === 'responsibility') {
+    const expected = record.responsibility;
+    if (!Array.isArray(record.allowedResponsibilities)
+      || !record.allowedResponsibilities.includes(expected)) {
+      fail('BUDGET_RESPONSIBILITY_INVALID');
+    }
+  }
+}
+
+function collectRequirements(budget) {
+  const requirements = [
+    { type: 'entity', id: budget.identity.entityId },
+    { type: 'fiscalYear', id: budget.identity.fiscalYearId },
+    { type: 'agent', id: budget.responsibilities.budgetOwnerAgentId }
+  ];
+  if (budget.responsibilities.controllerAgentId !== null) {
+    requirements.push({ type: 'agent', id: budget.responsibilities.controllerAgentId });
+  }
+  for (const row of budget.rows) {
+    for (const [key, type] of Object.entries(DIMENSION_TYPES)) {
+      if (row.dimensions[key] !== null) {
+        requirements.push({ type, id: row.dimensions[key] });
       }
     }
   }
+  return [...new Map(requirements.map(item => [`${item.type}\u0000${item.id}`, item])).values()];
 }
 
 function baseSnapshot(record, resolvedAt) {
@@ -295,13 +321,11 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
     const resolvedAt = at.toISOString();
     const cache = new Map();
 
-    async function resolve(type, id, purpose = 'dimension', responsibility = null) {
-      const cacheKey = `${type}\u0000${id}`;
-      let value = cache.get(cacheKey);
-      if (!value) {
+    const preflightErrors = [];
+    for (const { type, id } of collectRequirements(budget)) {
+      try {
         const resolver = resolvers[type];
         if (typeof resolver !== 'function') fail('BUDGET_REFERENCE_UNAVAILABLE');
-
         let result;
         try {
           result = await resolver({ id, tenantId, actorId, operation, resolvedAt });
@@ -324,15 +348,31 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
           }
           if (!allowed) fail('BUDGET_REFERENCE_NOT_FOUND');
         }
-        if (Date.parse(record.effectiveFrom) > at.getTime()
-          || (record.effectiveTo !== null && Date.parse(record.effectiveTo) <= at.getTime())) {
-          fail(stateCode(type, purpose));
-        }
-        value = { record, snapshot: null };
-        cache.set(cacheKey, value);
+        validateSourceRecord(record, type);
+        cache.set(`${type}\u0000${id}`, { record, snapshot: null });
+      } catch (error) {
+        preflightErrors.push(error instanceof BudgetReferenceError
+          ? error.code
+          : 'BUDGET_REFERENCE_UNAVAILABLE');
       }
+    }
+    if (preflightErrors.includes('BUDGET_REFERENCE_UNAVAILABLE')) {
+      fail('BUDGET_REFERENCE_UNAVAILABLE');
+    }
+    if (preflightErrors.includes('BUDGET_REFERENCE_NOT_FOUND')) {
+      fail('BUDGET_REFERENCE_NOT_FOUND');
+    }
+
+    async function resolve(type, id, purpose = 'dimension', responsibility = null) {
+      const cacheKey = `${type}\u0000${id}`;
+      let value = cache.get(cacheKey);
+      if (!value) fail('BUDGET_REFERENCE_UNAVAILABLE');
 
       const { record } = value;
+      if (Date.parse(record.effectiveFrom) > at.getTime()
+        || (record.effectiveTo !== null && Date.parse(record.effectiveTo) <= at.getTime())) {
+        fail(stateCode(type, purpose));
+      }
       const recordForValidation = responsibility
         ? { ...record, responsibility }
         : record;
