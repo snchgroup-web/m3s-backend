@@ -99,7 +99,33 @@ Le resultat du resolveur de portefeuille fournit aussi son `functionId` canoniqu
 
 Le resolveur de dossier fournit son `portfolioId` canonique ; un futur resolveur de projet fournit son `dossierId` et celui de phase son `projectId`. Chaque identifiant enfant est compare au parent soumis et resolu. L'absence du champ parent canonique dans une source rend cette relation indisponible et bloque la reference ; deux identifiants individuellement valides ne suffisent jamais.
 
-Le serveur persiste ensuite dans l'enveloppe V2 courante un `referenceSnapshots` pour chaque chemin resolu. Chaque instantane conserve `id`, `labelSnapshot`, `sourceRevision` et `resolvedAt` produits par le serveur. Il couvre l'organisation, l'exercice, les responsabilites et chaque dimension de ligne, indexee par son `row.id` unique.
+Le serveur persiste ensuite `referenceSnapshots` a la racine de l'enveloppe V2 stockee, a cote de `contractVersion`, `budget` et de l'eventuel bloc `promotion`. Ce champ est interdit dans les charges clientes et suit le schema ferme suivant ; `ref` designe exactement `{ "id", "labelSnapshot", "statusSnapshot", "effectiveFrom", "effectiveTo", "sourceRevision", "resolvedAt" }`, sans autre champ, avec `effectiveTo: null` lorsqu'il n'existe pas :
+
+```text
+referenceSnapshots
+├── identity
+│   ├── entityId: ref
+│   └── fiscalYearId: ref + entityId + summaryYear + startDate + endDate
+│       + periodicity + timezone + periods[{periodId, ordinal, startDate, endDate}]
+├── responsibilities
+│   ├── budgetOwnerAgentId: ref + teamId
+│   └── controllerAgentId: null | ref + teamId
+└── rows[]
+    ├── rowId: valeur exacte de budget.rows[].id
+    └── dimensions
+        ├── functionId: null | ref
+        ├── teamId: null | ref
+        ├── agentId: null | ref + teamId
+        ├── countryId: null | ref
+        ├── portfolioId: null | ref + functionId
+        ├── dossierId: null | ref + portfolioId
+        ├── projectId: null | ref + dossierId
+        └── phaseId: null | ref + projectId
+```
+
+`identity` et `responsibilities` possedent exactement les cles affichees. `rows` contient exactement une entree par ligne budgetaire, sans doublon ni entree orpheline ; la correspondance se fait par `rowId`, jamais par position. Chaque objet `dimensions` contient exactement les huit cles, avec `null` pour une dimension absente. Tous les champs supplementaires par type ci-dessus sont serveur, canoniques et inclus dans l'instantane. A chaque creation, promotion ou mise a jour V2, le serveur re-resout toutes les references et remplace atomiquement le bloc complet avec la version de `budget` correspondante ; il ne fusionne jamais un ancien instantane avec une nouvelle ligne.
+
+Les identifiants, revisions source et statuts sont des chaines ASCII non vides de 128 caracteres maximum ; les libelles UTF-8 sont bornes a 200 caracteres. `effectiveFrom`, `effectiveTo` et `resolvedAt` sont des horodatages RFC 3339 UTC, sauf `effectiveTo: null`. Les dates d'exercice et de periode sont ISO `YYYY-MM-DD`, `summaryYear` porte exactement quatre chiffres, `periodicity` vaut `monthly`, `timezone` est un identifiant IANA borne a 64 caracteres et `ordinal` est un entier unique de `1` a `12`. Chaque identifiant parent suit la meme grammaire que `id` et doit correspondre au parent resolu du budget.
 
 Avec les tables V1 inchangees, une mise a jour remplace `budget_json` et ne conserve donc pas les instantanes des versions precedentes. T1 ne revendique aucun historique probatoire des revisions. Un historique immuable exige un stockage versionne distinct, relevant d'un futur lot DDL et d'audit explicitement autorise. Le journal d'evenements courant conserve uniquement l'action et le numero de version.
 
@@ -286,7 +312,7 @@ Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 re
 7. Une equipe et l'agent de la meme ligne incompatibles sont refuses ; le collectif reste limite a son equipe. Le responsable budgetaire de toute creation ou promotion V2 est un agent resolu explicite, jamais l'auteur deduit, et toute reference d'agent reste bloquee tant que son appartenance au tenant n'est pas prouvee par une source autoritative.
 8. Deux lignes ne peuvent jamais partager le meme `row.id`.
 9. Chaque ligne contient exactement les `periodId` de l'exercice resolu ; l'ordre du tableau ne change pas leur sens.
-10. Chaque reference resolue persiste sa revision et son libelle canonique dans l'instantane de la version courante, sans pretendre conserver l'historique anterieur.
+10. Chaque reference resolue persiste sa revision, son statut, sa periode d'effet, son libelle et ses parents canoniques dans le schema ferme de `referenceSnapshots` ; il existe exactement une entree par `row.id`, remplacee atomiquement avec la version courante, sans pretendre conserver l'historique anterieur.
 11. Une revocation apres sauvegarde exclut le brouillon des listes et bloque lecture, export, mise a jour et restitution d'une reprise idempotente sans fuite ; la reprise conserve sa liaison, ne relit pas le contenu V1 et applique la validation de lecture V2 a toutes les references de la version V2 courante, y compris celles ajoutees apres promotion.
 12. L'annee de synthese vient du referentiel d'exercice ; une annee V1 divergente bloque la promotion.
 13. Une source indisponible produit un refus ferme, sans secours par libelle.
