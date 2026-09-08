@@ -59,6 +59,21 @@ function isUtcTimestamp(value) {
     && parsed.getUTCSeconds() === Number(match[6]);
 }
 
+function compareUtcTimestamps(left, right) {
+  const leftMatch = left.match(RFC3339_UTC_PATTERN);
+  const rightMatch = right.match(RFC3339_UTC_PATTERN);
+  const leftBase = left.slice(0, 19);
+  const rightBase = right.slice(0, 19);
+  if (leftBase !== rightBase) return leftBase < rightBase ? -1 : 1;
+  const leftFraction = (leftMatch[7] || '').replace(/0+$/, '');
+  const rightFraction = (rightMatch[7] || '').replace(/0+$/, '');
+  const width = Math.max(leftFraction.length, rightFraction.length);
+  const leftPadded = leftFraction.padEnd(width, '0');
+  const rightPadded = rightFraction.padEnd(width, '0');
+  if (leftPadded === rightPadded) return 0;
+  return leftPadded < rightPadded ? -1 : 1;
+}
+
 function isBoundedText(value, maximum) {
   return typeof value === 'string' && Array.from(value).length <= maximum
     && Boolean(value.trim());
@@ -135,7 +150,7 @@ function validateBaseRecord(record) {
     fail('BUDGET_REFERENCE_UNAVAILABLE');
   }
   if (record.effectiveTo !== null
-    && Date.parse(record.effectiveTo) <= Date.parse(record.effectiveFrom)) {
+    && compareUtcTimestamps(record.effectiveTo, record.effectiveFrom) <= 0) {
     fail('BUDGET_REFERENCE_UNAVAILABLE');
   }
 }
@@ -148,15 +163,12 @@ function stateCode(type, purpose) {
   return 'BUDGET_REFERENCE_STATE_INVALID';
 }
 
-function acceptedStatus(record, type, operation, purpose, at) {
+function acceptedLifecycleStatus(record, type, operation, purpose) {
   if (type === 'entity') return record.status === 'active';
   if (type === 'fiscalYear') {
-    if (operation === OPERATIONS.READ) {
-      return ['planned', 'open', 'closed'].includes(record.status);
-    }
-    const localDate = dateInTimezone(at, record.timezone);
-    return (record.status === 'planned' && localDate < record.startDate)
-      || (record.status === 'open' && localDate >= record.startDate && localDate <= record.endDate);
+    return operation === OPERATIONS.READ
+      ? ['planned', 'open', 'closed'].includes(record.status)
+      : ['planned', 'open'].includes(record.status);
   }
   if (type === 'project' || type === 'phase') {
     if (['planned', 'active', 'open'].includes(record.status)) return true;
@@ -173,7 +185,7 @@ function acceptedStatus(record, type, operation, purpose, at) {
     && record.historicalVisible === true;
 }
 
-function validateFiscalYear(record) {
+function validateFiscalYear(record, operation, at) {
   if (!isReferenceId(record.entityId)
     || typeof record.summaryYear !== 'string' || !SUMMARY_YEAR_PATTERN.test(record.summaryYear)
     || !isIsoDate(record.startDate) || !isIsoDate(record.endDate)
@@ -215,6 +227,12 @@ function validateFiscalYear(record) {
       fail('BUDGET_FISCAL_YEAR_INVALID');
     }
   }
+  if (operation === OPERATIONS.WRITE) {
+    const localDate = dateInTimezone(at, record.timezone);
+    const validForWrite = (record.status === 'planned' && localDate < record.startDate)
+      || (record.status === 'open' && localDate >= record.startDate && localDate <= record.endDate);
+    if (!validForWrite) fail('BUDGET_FISCAL_YEAR_INVALID');
+  }
 }
 
 function validateSourceRecord(record, type) {
@@ -235,8 +253,8 @@ function validateSourceRecord(record, type) {
   }
 }
 
-function validateTypeRecord(record, type, purpose) {
-  if (type === 'fiscalYear') validateFiscalYear(record);
+function validateTypeRecord(record, type, purpose, operation, at) {
+  if (type === 'fiscalYear') validateFiscalYear(record, operation, at);
   if (type === 'agent' && purpose === 'responsibility') {
     const expected = record.responsibility;
     if (!Array.isArray(record.allowedResponsibilities)
@@ -248,21 +266,27 @@ function validateTypeRecord(record, type, purpose) {
 
 function collectRequirements(budget) {
   const requirements = [
-    { type: 'entity', id: budget.identity.entityId },
-    { type: 'fiscalYear', id: budget.identity.fiscalYearId },
-    { type: 'agent', id: budget.responsibilities.budgetOwnerAgentId }
+    { type: 'entity', id: budget.identity.entityId, purpose: 'identity' },
+    { type: 'fiscalYear', id: budget.identity.fiscalYearId, purpose: 'identity' },
+    {
+      type: 'agent', id: budget.responsibilities.budgetOwnerAgentId,
+      purpose: 'responsibility', responsibility: 'budgetOwnerAgentId'
+    }
   ];
   if (budget.responsibilities.controllerAgentId !== null) {
-    requirements.push({ type: 'agent', id: budget.responsibilities.controllerAgentId });
+    requirements.push({
+      type: 'agent', id: budget.responsibilities.controllerAgentId,
+      purpose: 'responsibility', responsibility: 'controllerAgentId'
+    });
   }
   for (const row of budget.rows) {
     for (const [key, type] of Object.entries(DIMENSION_TYPES)) {
       if (row.dimensions[key] !== null) {
-        requirements.push({ type, id: row.dimensions[key] });
+        requirements.push({ type, id: row.dimensions[key], purpose: 'dimension' });
       }
     }
   }
-  return [...new Map(requirements.map(item => [`${item.type}\u0000${item.id}`, item])).values()];
+  return requirements;
 }
 
 function baseSnapshot(record, resolvedAt) {
@@ -320,9 +344,13 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
     if (!(at instanceof Date) || !Number.isFinite(at.getTime())) fail('BUDGET_REFERENCE_UNAVAILABLE');
     const resolvedAt = at.toISOString();
     const cache = new Map();
+    const requirements = collectRequirements(budget);
 
     const preflightErrors = [];
-    for (const { type, id } of collectRequirements(budget)) {
+    const uniqueRequirements = [
+      ...new Map(requirements.map(item => [`${item.type}\u0000${item.id}`, item])).values()
+    ];
+    for (const { type, id } of uniqueRequirements) {
       try {
         const resolver = resolvers[type];
         if (typeof resolver !== 'function') fail('BUDGET_REFERENCE_UNAVAILABLE');
@@ -363,66 +391,66 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
       fail('BUDGET_REFERENCE_NOT_FOUND');
     }
 
-    async function resolve(type, id, purpose = 'dimension', responsibility = null) {
-      const cacheKey = `${type}\u0000${id}`;
-      let value = cache.get(cacheKey);
+    function cached(type, id) {
+      const value = cache.get(`${type}\u0000${id}`);
       if (!value) fail('BUDGET_REFERENCE_UNAVAILABLE');
-
-      const { record } = value;
-      if (Date.parse(record.effectiveFrom) > at.getTime()
-        || (record.effectiveTo !== null && Date.parse(record.effectiveTo) <= at.getTime())) {
-        fail(stateCode(type, purpose));
-      }
-      const recordForValidation = responsibility
-        ? { ...record, responsibility }
-        : record;
-      validateTypeRecord(recordForValidation, type, purpose);
-      if (!acceptedStatus(recordForValidation, type, operation, purpose, at)) {
-        fail(stateCode(type, purpose));
-      }
-      if (value.snapshot === null) value.snapshot = typedSnapshot(record, type, resolvedAt);
       return value;
     }
 
-    const entity = await resolve('entity', budget.identity.entityId, 'identity');
-    const fiscalYear = await resolve('fiscalYear', budget.identity.fiscalYearId, 'identity');
-    if (fiscalYear.record.entityId !== entity.record.id) {
-      fail('BUDGET_REFERENCE_RELATION_INVALID');
+    for (const { type, id, purpose } of requirements) {
+      const { record } = cached(type, id);
+      if (compareUtcTimestamps(record.effectiveFrom, resolvedAt) > 0
+        || (record.effectiveTo !== null
+          && compareUtcTimestamps(record.effectiveTo, resolvedAt) <= 0)) {
+        fail(stateCode(type, purpose));
+      }
+      if (!acceptedLifecycleStatus(record, type, operation, purpose)) {
+        fail(stateCode(type, purpose));
+      }
     }
 
-    const owner = await resolve(
-      'agent', budget.responsibilities.budgetOwnerAgentId,
-      'responsibility', 'budgetOwnerAgentId'
+    const entity = cached('entity', budget.identity.entityId);
+    const fiscalYear = cached('fiscalYear', budget.identity.fiscalYearId);
+    validateTypeRecord(fiscalYear.record, 'fiscalYear', 'identity', operation, at);
+
+    const owner = cached('agent', budget.responsibilities.budgetOwnerAgentId);
+    validateTypeRecord(
+      { ...owner.record, responsibility: 'budgetOwnerAgentId' },
+      'agent', 'responsibility', operation, at
     );
     const controller = budget.responsibilities.controllerAgentId === null
       ? null
-      : await resolve(
-        'agent', budget.responsibilities.controllerAgentId,
-        'responsibility', 'controllerAgentId'
+      : cached('agent', budget.responsibilities.controllerAgentId);
+    if (controller) {
+      validateTypeRecord(
+        { ...controller.record, responsibility: 'controllerAgentId' },
+        'agent', 'responsibility', operation, at
       );
+    }
 
     const expectedPeriodIds = new Set(fiscalYear.record.periods.map(period => period.periodId));
-    const rows = [];
     for (const row of budget.rows) {
       const actualPeriodIds = new Set(row.periodValues.map(period => period.periodId));
       if (actualPeriodIds.size !== expectedPeriodIds.size
         || [...expectedPeriodIds].some(id => !actualPeriodIds.has(id))) {
         fail('BUDGET_FISCAL_YEAR_INVALID');
       }
+    }
 
-      const dimensions = {};
+    const resolvedRows = budget.rows.map(row => {
       const records = {};
       for (const [key, type] of Object.entries(DIMENSION_TYPES)) {
-        if (row.dimensions[key] === null) {
-          dimensions[key] = null;
-          records[key] = null;
-        } else {
-          const resolved = await resolve(type, row.dimensions[key]);
-          dimensions[key] = resolved.snapshot;
-          records[key] = resolved.record;
-        }
+        records[key] = row.dimensions[key] === null
+          ? null
+          : cached(type, row.dimensions[key]).record;
       }
+      return { rowId: row.id, records };
+    });
 
+    if (fiscalYear.record.entityId !== entity.record.id) {
+      fail('BUDGET_REFERENCE_RELATION_INVALID');
+    }
+    for (const { records } of resolvedRows) {
       if (records.portfolioId
         && (!records.functionId || records.portfolioId.functionId !== records.functionId.id)) {
         fail('BUDGET_REFERENCE_RELATION_INVALID');
@@ -443,17 +471,34 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
         && records.teamId && records.agentId.teamId !== records.teamId.id) {
         fail('BUDGET_REFERENCE_RELATION_INVALID');
       }
-      rows.push({ rowId: row.id, dimensions });
     }
+
+    function snapshot(type, id) {
+      const value = cached(type, id);
+      if (value.snapshot === null) value.snapshot = typedSnapshot(value.record, type, resolvedAt);
+      return value.snapshot;
+    }
+
+    const rows = budget.rows.map((row, rowIndex) => {
+      const dimensions = {};
+      for (const [key, type] of Object.entries(DIMENSION_TYPES)) {
+        dimensions[key] = row.dimensions[key] === null
+          ? null
+          : snapshot(type, row.dimensions[key]);
+      }
+      return { rowId: resolvedRows[rowIndex].rowId, dimensions };
+    });
 
     return {
       identity: {
-        entityId: entity.snapshot,
-        fiscalYearId: fiscalYear.snapshot
+        entityId: snapshot('entity', budget.identity.entityId),
+        fiscalYearId: snapshot('fiscalYear', budget.identity.fiscalYearId)
       },
       responsibilities: {
-        budgetOwnerAgentId: owner.snapshot,
-        controllerAgentId: controller ? controller.snapshot : null
+        budgetOwnerAgentId: snapshot('agent', budget.responsibilities.budgetOwnerAgentId),
+        controllerAgentId: controller
+          ? snapshot('agent', budget.responsibilities.controllerAgentId)
+          : null
       },
       rows
     };

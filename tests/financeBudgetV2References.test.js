@@ -199,6 +199,22 @@ test('source availability and visibility take precedence over lifecycle regardle
   }), 'BUDGET_REFERENCE_NOT_FOUND');
 });
 
+test('all lifecycle checks precede fiscal, responsibility and relation validation', async () => {
+  const beforeFiscal = fixtures();
+  beforeFiscal.fiscalYear[0].periods = null;
+  beforeFiscal.function[0].status = 'inactive';
+  await rejects(() => setup(beforeFiscal).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_REFERENCE_STATE_INVALID');
+
+  const beforeRelation = fixtures();
+  beforeRelation.fiscalYear[0].entityId = 'ORG-OTHER';
+  beforeRelation.agent[0].allowedResponsibilities = ['controllerAgentId'];
+  await rejects(() => setup(beforeRelation).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_RESPONSIBILITY_INVALID');
+});
+
 test('future, expired and inactive general references are rejected by lifecycle state', async () => {
   for (const change of [
     { effectiveFrom: '2027-01-01T00:00:00Z' },
@@ -363,6 +379,13 @@ test('malformed resolver contracts and invalid caller context never fall through
   const preciseTimestamp = fixtures();
   preciseTimestamp.entity[0].effectiveFrom = '2025-01-01T00:00:00.123456789Z';
   await assert.doesNotReject(() => setup(preciseTimestamp).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }));
+
+  const preciseInterval = fixtures();
+  preciseInterval.entity[0].effectiveFrom = '2026-09-09T09:59:59.123456789Z';
+  preciseInterval.entity[0].effectiveTo = '2026-09-09T10:00:00.000000001Z';
+  await assert.doesNotReject(() => setup(preciseInterval).service.resolveBudgetReferences({
     budget: budget(), tenantId: TENANT, actorId: ACTOR
   }));
 });
