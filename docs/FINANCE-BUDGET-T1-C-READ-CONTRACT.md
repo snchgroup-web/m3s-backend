@@ -142,7 +142,7 @@ Une future interface de liste devra donc parcourir des candidats V2 bornes au te
 - Un candidat absent, V1, hors portee ou rendu invisible est omis sans signaler son existence.
 - Un candidat qui produit `BUDGET_REFERENCE_NOT_FOUND`, `BUDGET_REFERENCE_STATE_INVALID`, `BUDGET_FISCAL_YEAR_INVALID`, `BUDGET_RESPONSIBILITY_INVALID` ou `BUDGET_REFERENCE_RELATION_INVALID` est omis : ces codes decrivent un brouillon individuellement non restituable, sans rendre les autres brouillons illisibles.
 - L'indisponibilite ou l'ambiguite d'une source necessaire bloque toute la liste ; aucune page partielle n'est retournee.
-- Une corruption du stockage ou un doublon bloque toute la liste ; aucun resume douteux n'est omis silencieusement.
+- Une corruption du stockage ou un doublon qui demeure le premier resultat observable apres la precedence normative bloque toute la liste ; aucun resume douteux n'est restitue. Une corruption independante masquee par un refus referentiel anterieur propre au brouillon ne remplace pas son omission et n'est pas exposee pendant cette requete.
 - Le parcours technique devra posseder une borne explicite et testee. Si cette borne ne permet pas de determiner la page et `hasMore`, l'operation echoue fermee au lieu de presenter une liste incomplete comme exhaustive.
 
 Cette pagination est deterministe pour un jeu stable. Un instantane coherent sous ecritures concurrentes necessiterait un futur contrat par curseur, hors T1-C.
@@ -207,9 +207,10 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 22. T1-B.1 prouvant la precedence complete des refus referentiels sur un document dont un champ non referentiel est corrompu mais dont les references restent extractibles ;
 23. T1-B.1 classant zero enregistrement en `BUDGET_REFERENCE_NOT_FOUND`, donc `404` direct ou omission de liste, avant la corruption non referentielle ;
 24. T1-B.1 limitant `BUDGET_REFERENCE_UNAVAILABLE` aux echecs de `validateBaseRecord` et `validateSourceRecord`, puis conservant les codes specialises des champs fiscaux, responsabilites et relations ;
-25. liste omettant de facon deterministe les cinq familles de refus propres a un brouillon et bloquant seulement sur indisponibilite systemique ou corruption stockee ;
-26. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
-27. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
+25. liste omettant un brouillon sur son refus referentiel prioritaire meme si une corruption independante existe, mais bloquant lorsque la corruption reste le premier resultat observable ;
+26. liste omettant de facon deterministe les cinq familles de refus propres a un brouillon et bloquant seulement sur indisponibilite systemique ou corruption stockee encore observable ;
+27. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
+28. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
