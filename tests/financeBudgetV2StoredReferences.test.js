@@ -518,6 +518,34 @@ test('stored source work is concurrent but never exceeds the fixed ceiling', asy
   assert.equal(maximumActive, MAX_CONCURRENT_STORED_RESOLUTIONS);
 });
 
+test('timed-out non-cooperative resolvers keep occupying their concurrency slots', async () => {
+  let active = 0;
+  let maximumActive = 0;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const { service, calls } = dynamicService({
+    beforeReturn: async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await gate;
+      active -= 1;
+    },
+    serviceOptions: { storedResolverTimeoutMs: 10 }
+  });
+
+  await rejects(
+    () => storedCall(service, largeBudget('non-cooperative', 2)),
+    'BUDGET_REFERENCE_UNAVAILABLE'
+  );
+  assert.equal(active, MAX_CONCURRENT_STORED_RESOLUTIONS);
+  assert.equal(maximumActive, MAX_CONCURRENT_STORED_RESOLUTIONS);
+  assert.equal(calls.length, MAX_CONCURRENT_STORED_RESOLUTIONS);
+
+  release();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(maximumActive, MAX_CONCURRENT_STORED_RESOLUTIONS);
+});
+
 test('the 805th distinct pair in one draft is refused before source access', async () => {
   assert.equal(MAX_DETAIL_REFERENCE_PAIRS, 804);
   const { service, calls } = dynamicService();

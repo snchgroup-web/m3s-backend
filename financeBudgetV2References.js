@@ -380,9 +380,15 @@ function createBoundedScheduler(limit) {
   });
 }
 
-async function callResolverWithTimeout(resolver, query, timeoutMs) {
+async function callResolverWithTimeout(schedule, resolver, query, timeoutMs) {
   const controller = new AbortController();
   let timeoutId;
+  const scheduledResolution = schedule(() => {
+    if (controller.signal.aborted) {
+      throw new BudgetReferenceError('BUDGET_REFERENCE_UNAVAILABLE');
+    }
+    return resolver({ ...query, signal: controller.signal });
+  });
   const timeout = new Promise((resolve, reject) => {
     timeoutId = setTimeout(() => {
       controller.abort();
@@ -391,7 +397,7 @@ async function callResolverWithTimeout(resolver, query, timeoutMs) {
   });
   try {
     return await Promise.race([
-      Promise.resolve().then(() => resolver({ ...query, signal: controller.signal })),
+      scheduledResolution,
       timeout
     ]);
   } finally {
@@ -756,13 +762,13 @@ function createBudgetReferenceService({
           capacityExceeded = true;
           break;
         }
-        const pendingEntry = storedScheduler(async () => {
+        const pendingEntry = Promise.resolve().then(async () => {
           try {
             const resolver = resolvers[type];
             if (typeof resolver !== 'function') fail('BUDGET_REFERENCE_UNAVAILABLE');
             let result;
             try {
-              result = await callResolverWithTimeout(resolver, {
+              result = await callResolverWithTimeout(storedScheduler, resolver, {
                 id, tenantId, actorId, operation, resolvedAt: resolvedAtIso
               }, storedTimeoutMs);
             } catch (_error) {
