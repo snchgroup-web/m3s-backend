@@ -626,7 +626,12 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
           validateResolverResult(result);
           if (result.records.length === 0) fail('BUDGET_REFERENCE_NOT_FOUND');
           if (result.records.length > 1) fail('BUDGET_REFERENCE_UNAVAILABLE');
-          const record = result.records[0];
+          let record;
+          try {
+            record = structuredClone(result.records[0]);
+          } catch (_error) {
+            fail('BUDGET_REFERENCE_UNAVAILABLE');
+          }
           validateBaseRecord(record);
           if (record.id !== id || record.tenantId !== tenantId || !record.visible) {
             fail('BUDGET_REFERENCE_NOT_FOUND');

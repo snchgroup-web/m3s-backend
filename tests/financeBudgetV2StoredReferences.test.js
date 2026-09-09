@@ -170,6 +170,26 @@ test('mutating one returned snapshot cannot contaminate the shared cache', async
   assert.equal(resolvers.fiscalYear.calls.length, 1);
 });
 
+test('mutating a resolver source after resolution cannot contaminate the shared cache', async () => {
+  const data = fixtures();
+  const sharedEntityResolver = async query => {
+    sharedEntityResolver.calls.push(query);
+    return { available: true, records: data.entity };
+  };
+  sharedEntityResolver.calls = [];
+  const resolvers = Object.fromEntries(Object.entries(data).map(([type, records]) => [
+    type, type === 'entity' ? sharedEntityResolver : createFakeBudgetReferenceResolver(records)
+  ]));
+  const service = createBudgetReferenceService({ resolvers });
+  await storedCall(service);
+  data.entity[0].labelSnapshot = 'Source changed';
+
+  const second = await storedCall(service);
+
+  assert.equal(second.identity.entityId.labelSnapshot, 'Reference ORG-2SG');
+  assert.equal(sharedEntityResolver.calls.length, 1);
+});
+
 test('reference refusal precedes an independent stored budget corruption', async () => {
   const data = fixtures();
   data.entity = [];
