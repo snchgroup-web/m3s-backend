@@ -98,12 +98,15 @@ Avant restitution, une future implementation devra verifier :
 - `scope: "organization"`, `status: "draft"` et `access: "owner-only"` exacts ;
 - `createdAt` et `updatedAt` valides ; pour `version === 1`, `resolvedAt <= createdAt` et `createdAt === updatedAt` ; pour `version > 1`, `createdAt <= resolvedAt <= updatedAt` ;
 - aucune contradiction entre les parents soumis, resolus et instantanes ;
-- l'absence totale de `promotion` pour un brouillon cree directement ; lorsqu'un bloc `promotion` existe, sa forme fermee, ses types, ses bornes, son rapport, ses empreintes, sa provenance et ses invariants sont valides par le futur validateur pur confirme de T1-E, sans jamais exposer ce bloc ;
+- une correspondance bidirectionnelle, dans la portee tenant-auteur, entre la presence du bloc `promotion` et une unique liaison T1-E persistante vers ce brouillon V2 : ni bloc sans liaison, ni liaison sans bloc, ni liaison multiple ;
+- lorsqu'un bloc `promotion` existe avec sa liaison unique, sa forme fermee, ses types, ses bornes, son rapport, ses empreintes, sa provenance, l'identifiant V2 lie et ses invariants sont valides par le futur validateur pur confirme de T1-E, sans jamais exposer ce bloc ;
 - des dates et champs de resume valides sans les recalculer depuis un libelle client.
 
 Un doublon, un document mal forme, un instantane incomplet ou une incoherence interne produit un refus ferme. La lecture ne repare rien et ne retourne pas une version partielle.
 
-Le schema T1-B ne persiste pas `allowedResponsibilities`. T1-C ne peut donc ni prouver ni nier retrospectivement qu'un agent possedait un role donne au `resolvedAt` stocke. Il recontrole seulement l'eligibilite actuelle du responsable et du controleur avec T1-B `READ`. Une preuve historique immuable des roles exigerait un schema d'instantane et un lot separes. Tant que T1-E et son validateur de provenance ne sont pas livres, tout document portant un bloc `promotion` echoue ferme avec `BUDGET_STORAGE_UNAVAILABLE` ; aucun controle partiel de ce bloc n'est admis.
+Le schema T1-B ne persiste pas `allowedResponsibilities`. T1-C ne peut donc ni prouver ni nier retrospectivement qu'un agent possedait un role donne au `resolvedAt` stocke. Il recontrole seulement l'eligibilite actuelle du responsable et du controleur avec T1-B `READ`. Une preuve historique immuable des roles exigerait un schema d'instantane et un lot separes.
+
+Avant T1-E, aucun bloc ni liaison de promotion ne peut exister ; toute presence signalee echoue fermee avec `BUDGET_STORAGE_UNAVAILABLE`. T1-E devra injecter sa lecture de liaison et son validateur dans le parcours T1-C avant d'autoriser la premiere promotion. Apres cette integration, l'absence du bloc n'etablit une creation directe que si la recherche tenant-auteur par identifiant V2 confirme aussi l'absence de liaison. Une source de liaison indisponible, un resultat ambigu ou toute divergence bloc-liaison produit `BUDGET_STORAGE_UNAVAILABLE` ; aucun controle partiel n'est admis.
 
 ## Liste, ordre et pagination
 
@@ -175,7 +178,8 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 18. refus d'un resume dont `title` diverge de `budget.title`, comme de `entity` ou `year` divergents ;
 19. refus d'une portee, d'un statut, d'un acces ou d'une chronologie serveur incoherents, avec les relations temporelles propres a la version initiale et aux versions mises a jour ;
 20. refus d'une enveloppe racine ouverte ou d'un bloc `promotion` incomplet, inconnu ou non validable ;
-21. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
+21. refus de tout bloc sans liaison T1-E unique, de toute liaison sans bloc et de toute divergence entre les deux, avec preuve du cas direct `zero bloc + zero liaison` ;
+22. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
