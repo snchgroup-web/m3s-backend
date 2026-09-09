@@ -89,6 +89,7 @@ Avant restitution, une future implementation devra verifier :
 - une correspondance exacte entre chaque `row.id` et chaque `rowId` d'instantane ;
 - pour chaque chemin d'identite, de responsabilite ou de dimension, un `snapshot.id` non nul strictement egal a l'identifiant porte par `budget` au meme chemin, et `null` des deux cotes lorsqu'une dimension est absente ;
 - pour chaque ligne, un ensemble de `periodValues[].periodId` strictement egal a celui des `periods[].periodId` de l'exercice instantane, sans manque, doublon ou periode etrangere ;
+- un tableau `referenceSnapshots.identity.fiscalYearId.periods` stocke dans l'ordre canonique strictement croissant de `ordinal`, de `1` a `12`, tel que produit par T1-B ;
 - pour chaque couple `type de reference + id` repete dans le budget, des instantanes stockes strictement identiques sur tous leurs champs canoniques ;
 - un unique `resolvedAt` commun a tous les instantanes non nuls de la version stockee ;
 - chaque `resolvedAt` inclus dans la periode d'effet semi-ouverte `[effectiveFrom, effectiveTo)` de son instantane, avec `effectiveTo: null` pour une reference non expirante ;
@@ -172,7 +173,7 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 12. codes fermes en lecture directe pour absence, statut, exercice, responsabilite et relation ;
 13. indisponibilite, ambiguite, doublon ou corruption sans succes partiel ;
 14. version `1000000` lisible et versions hors borne refusees ;
-15. refus d'une ligne dont les periodes divergent du calendrier de l'exercice instantane ;
+15. refus d'une ligne dont les periodes divergent du calendrier de l'exercice instantane et refus d'un tableau d'exercice hors ordre canonique des ordinaux ;
 16. refus de deux instantanes divergents pour un meme couple `type + id` repete ;
 17. refus d'instantanes portant plusieurs `resolvedAt`, un instant hors periode d'effet ou un statut historiquement incompatible avec les champs persistes, sans inventer un historique des roles ;
 18. refus d'un resume dont `title` diverge de `budget.title`, comme de `entity` ou `year` divergents ;
