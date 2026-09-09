@@ -30,22 +30,25 @@ Apres ce prerequis, une future implementation T1-C dependra uniquement des inter
 
 ## Prerequis pur T1-B.1 candidat
 
-Le futur micro-amendement T1-B.1 ajouterait une operation de preflight sans restitution, sans instantane et sans effet :
+Le futur micro-amendement T1-B.1 ajouterait une operation de resolution stockee, sans restitution externe et sans effet :
 
 ```text
-preflightBudgetReferenceAvailability({ rawBudget, tenantId, actorId, operation, resolvedAt })
+resolveStoredBudgetReferences({ rawBudget, tenantId, actorId, operation, resolvedAt })
 ```
 
 Cette operation candidate :
 
 1. recoit le document Budget brut deja borne par le stockage, sans le declarer valide ;
-2. utilise dans T1-B un extracteur ferme et borne pour enumerer les couples uniques `type + id` lorsqu'ils sont structurellement accessibles ;
-3. appelle les memes interfaces de resolveur injectees avec le meme `resolvedAt` fige pour verifier qu'elles existent et rendent une reponse disponible, bien formee et non ambigue ; un tableau vide reussit ce preflight, plusieurs enregistrements produisent `BUDGET_REFERENCE_UNAVAILABLE`, et un enregistrement unique ne reussit qu'apres les memes validations structurelles `validateBaseRecord` et `validateSourceRecord` que T1-B ;
-4. ne prononce ni visibilite, cycle de vie, exercice, responsabilite ou relation et ne retourne aucun enregistrement ; la validation des champs structurels comme `visible`, `status`, dates, revision source et parents canoniques ne vaut jamais decision sur leur contenu metier ;
-5. retourne seulement un succes interne vide, ou les echecs fermes `BUDGET_REFERENCE_UNAVAILABLE` et `BUDGET_STORAGE_UNAVAILABLE` ;
-6. traite un identifiant ou un chemin impossible a enumerer comme corruption stockee, sans inventer de reference ni appeler une source avec une valeur douteuse.
+2. utilise dans T1-B un extracteur ferme et borne pour enumerer les references et les seules relations necessaires lorsqu'elles sont structurellement accessibles ;
+3. resout une seule fois chaque couple unique `type + id` avec les interfaces confirmees et le meme `resolvedAt` fige ;
+4. applique dans l'ordre confirme disponibilite, unicite structurelle, tenant, visibilite et confidentialite, cycle de vie, periode d'effet, exercice, responsabilites et relations ;
+5. traite un tableau vide comme `BUDGET_REFERENCE_NOT_FOUND`, plusieurs enregistrements ou un enregistrement structurellement invalide comme `BUDGET_REFERENCE_UNAVAILABLE`, puis conserve les refus specialises T1-B pour les controles suivants ;
+6. applique seulement apres ces controles le validateur complet T1-A a l'enveloppe Budget ;
+7. ne produit ses instantanes internes qu'apres le succes T1-A, a partir du meme cache resolu, sans rappeler une source ni changer d'instant ;
+8. ne retourne aucun enregistrement brut et ne rend jamais un budget invalide recevable ;
+9. traite un identifiant ou un chemin necessaire impossible a enumerer comme corruption stockee, sans inventer de reference ni appeler une source avec une valeur douteuse.
 
-Apres un preflight reussi, T1-C applique T1-A a l'enveloppe complete, puis l'operation T1-B `READ` confirmee pour la resolution, la visibilite, les statuts et les relations. Le preflight ne remplace donc aucun controle et ne peut jamais rendre un budget recevable. Sa specification executable, ses erreurs exactes et ses tests relevent d'une autorisation d'implementation distincte ; le present document ne l'implemente pas.
+Une absence ou une invisibilite est donc classee par T1-B.1 avant une corruption independante du titre, d'un montant ou d'un autre champ non referentiel : `404` en lecture directe et omission non revelatrice dans une liste. Si la structure des references elle-meme est inexploitable, `BUDGET_STORAGE_UNAVAILABLE` reste immediat. Cette operation remplace, pour les brouillons stockes seulement, le double parcours `preflight puis READ` ; elle garantit une resolution unique et une precedence stable. Sa specification executable, ses erreurs exactes et ses tests relevent d'une autorisation d'implementation distincte ; le present document ne l'implemente pas.
 
 ## Contrat de restitution candidat
 
@@ -163,7 +166,7 @@ Les echecs conservent l'enveloppe fermee `{ success: false, contractVersion: 2, 
 | `BUDGET_RESPONSIBILITY_INVALID` | `422` | responsabilite visible mais non recevable |
 | `BUDGET_REFERENCE_RELATION_INVALID` | `422` | relation parent-enfant contradictoire apres validation individuelle |
 
-La precedence conserve exactement celle de `BUDGET-T1-TECH-001 V0.1` : syntaxe, authentification, capacite, permission, disponibilite du stockage, existence et portee du brouillon, preflight T1-B.1 de disponibilite des referentiels, validation complete T1-A, resolution et visibilite T1-B, cycle de vie et periode d'effet, exercice, responsabilites, relations, puis version et autres controles d'integrite stockee applicables a la lecture. Une corruption detectee ne remplace donc pas un `BUDGET_REFERENCE_UNAVAILABLE` deja etabli. Si le document est trop mal forme pour identifier le jeu de references a interroger, `BUDGET_STORAGE_UNAVAILABLE` s'applique immediatement, puisqu'aucune disponibilite referentielle propre a ce document ne peut etre determinee. Pour une liste, les cas volontairement omis ci-dessus ne sont pas des reponses d'erreur individuelles ; toute indisponibilite systemique reste bloquante. Tant que T1-B.1 n'existe pas, les lectures T1-C restent desactivees.
+La precedence conserve exactement celle de `BUDGET-T1-TECH-001 V0.1` : syntaxe, authentification, capacite, permission, disponibilite du stockage, existence et portee du brouillon, puis T1-B.1 pour disponibilite des referentiels, resolution et visibilite, cycle de vie et periode d'effet, exercice, responsabilites et relations, avant la validation complete T1-A, la version et les autres controles d'integrite stockee applicables a la lecture. Une corruption non referentielle detectee ne remplace donc pas un refus referentiel deja etabli. Si le document est trop mal forme pour identifier le jeu de references a interroger, `BUDGET_STORAGE_UNAVAILABLE` s'applique immediatement, puisqu'aucune decision referentielle propre a ce document ne peut etre determinee. Pour une liste, les cas volontairement omis ci-dessus ne sont pas des reponses d'erreur individuelles ; toute indisponibilite systemique reste bloquante. Tant que T1-B.1 n'existe pas, les lectures T1-C restent desactivees.
 
 ## Non-effets obligatoires
 
@@ -201,9 +204,9 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 19. refus d'une portee, d'un statut, d'un acces ou d'une chronologie serveur incoherents, avec les relations temporelles propres a la version initiale et aux versions mises a jour ;
 20. refus d'une enveloppe racine ouverte ou d'un bloc `promotion` incomplet, inconnu ou non validable ;
 21. refus de tout bloc sans liaison T1-E unique, de toute liaison sans bloc et de toute divergence entre les deux, avec preuve du cas direct `zero bloc + zero liaison` ;
-22. preflight T1-B.1 prouvant la precedence referentielle sur un document corrompu mais extractible, sans retourner de donnee ni contourner T1-A/T1-B ;
-23. preflight reussi lorsqu'une source disponible retourne zero enregistrement, puis traitement de l'absence uniquement par T1-B `READ` en `404` direct ou omission de liste ;
-24. preflight refuse en `BUDGET_REFERENCE_UNAVAILABLE` un enregistrement unique qui echoue aux validations structurelles de source, avant toute integrite Budget, tout en deferant visibilite, cycle de vie et relations ;
+22. T1-B.1 prouvant la precedence complete des refus referentiels sur un document dont un champ non referentiel est corrompu mais dont les references restent extractibles ;
+23. T1-B.1 classant zero enregistrement en `BUDGET_REFERENCE_NOT_FOUND`, donc `404` direct ou omission de liste, avant la corruption non referentielle ;
+24. T1-B.1 classant avant T1-A un enregistrement structurellement invalide, invisible, hors cycle de vie, incoherent par responsabilite ou relation, avec le code T1-B exact ;
 25. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
 26. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
