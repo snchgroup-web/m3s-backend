@@ -133,7 +133,7 @@ Avant restitution, une future implementation devra verifier :
 - `title` strictement egal a `budget.title` ;
 - `entity` et `year` egaux aux valeurs serveur de l'instantane d'identite stocke ;
 - `scope: "organization"`, `status: "draft"` et `access: "owner-only"` exacts ;
-- `createdAt` et `updatedAt` valides et issus du meme instant applicatif que les instantanes de leur version ; pour `version === 1`, `resolvedAt === createdAt === updatedAt` ; pour `version > 1`, `createdAt <= resolvedAt` et `resolvedAt === updatedAt` ;
+- `createdAt` et `updatedAt` valides, non posterieurs au `requestAt` de la lecture et issus du meme instant applicatif que les instantanes de leur version ; pour `version === 1`, `resolvedAt === createdAt === updatedAt <= requestAt` ; pour `version > 1`, `createdAt <= resolvedAt`, `resolvedAt === updatedAt` et `updatedAt <= requestAt` ;
 - aucune contradiction entre les parents soumis, resolus et instantanes ;
 - une correspondance bidirectionnelle, dans la portee tenant-auteur, entre la presence du bloc `promotion` et une unique liaison T1-E persistante vers ce brouillon V2 : ni bloc sans liaison, ni liaison sans bloc, ni liaison multiple ;
 - lorsqu'un bloc `promotion` existe avec sa liaison unique, sa forme fermee, ses types, ses bornes, son rapport, ses empreintes, sa provenance, l'identifiant V2 lie et ses invariants sont valides par le futur validateur pur confirme de T1-E, sans jamais exposer ce bloc ;
@@ -215,7 +215,7 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 16. refus de deux instantanes divergents pour un meme couple `type + id` repete ;
 17. refus d'instantanes portant plusieurs `resolvedAt`, un instant hors periode d'effet ou un statut historiquement incompatible avec les champs persistes, sans inventer un historique des roles ;
 18. refus d'un resume dont `title` diverge de `budget.title`, comme de `entity` ou `year` divergents ;
-19. refus d'une portee, d'un statut, d'un acces ou d'une chronologie serveur incoherents, avec egalite stricte `resolvedAt === createdAt === updatedAt` a la creation, puis `resolvedAt === updatedAt` et `createdAt` immuable a la mise a jour ;
+19. refus d'une portee, d'un statut, d'un acces ou d'une chronologie serveur incoherents, notamment de tout `createdAt` ou `updatedAt` posterieur au `requestAt`, avec egalite stricte `resolvedAt === createdAt === updatedAt` a la creation, puis `resolvedAt === updatedAt` et `createdAt` immuable a la mise a jour ;
 20. refus d'une enveloppe racine ouverte ou d'un bloc `promotion` incomplet, inconnu ou non validable ;
 21. refus de tout bloc sans liaison T1-E unique, de toute liaison sans bloc et de toute divergence entre les deux, avec preuve du cas direct `zero bloc + zero liaison` ;
 22. T1-B.1 prouvant la precedence complete des refus referentiels sur un document dont un champ non referentiel est corrompu mais dont les references restent extractibles ;
