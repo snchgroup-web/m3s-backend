@@ -137,13 +137,13 @@ Avant T1-E, aucun bloc ni liaison de promotion ne peut exister ; toute presence 
 
 Les brouillons actuellement lisibles sont ordonnes par `updatedAt DESC`, puis `id ASC`. `offset` et `limit` s'appliquent apres les controles de portee, de contrat et de visibilite courante.
 
-Une future interface de liste devra donc parcourir des candidats V2 bornes au tenant et a l'auteur, puis verifier leur lisibilite avant de constituer la page. Elle collecte au plus `offset + limit + 1` brouillons lisibles afin de calculer `hasMore`.
+Une future interface de liste devra donc parcourir des candidats V2 bornes au tenant et a l'auteur, puis verifier leur lisibilite avant de constituer la page. Elle collecte au plus `offset + limit + 1` brouillons lisibles afin de calculer `hasMore`. La borne normative `MAX_LIST_CANDIDATES` vaut exactement `10051`, soit `offset maximal 10000 + limit maximal 50 + 1`.
 
 - Un candidat absent, V1, hors portee ou rendu invisible est omis sans signaler son existence.
 - Un candidat qui produit `BUDGET_REFERENCE_NOT_FOUND`, `BUDGET_REFERENCE_STATE_INVALID`, `BUDGET_FISCAL_YEAR_INVALID`, `BUDGET_RESPONSIBILITY_INVALID` ou `BUDGET_REFERENCE_RELATION_INVALID` est omis : ces codes decrivent un brouillon individuellement non restituable, sans rendre les autres brouillons illisibles.
 - L'indisponibilite ou l'ambiguite d'une source necessaire bloque toute la liste ; aucune page partielle n'est retournee.
 - Une corruption du stockage ou un doublon qui demeure le premier resultat observable apres la precedence normative bloque toute la liste ; aucun resume douteux n'est restitue. Une corruption independante masquee par un refus referentiel anterieur propre au brouillon ne remplace pas son omission et n'est pas exposee pendant cette requete.
-- Le parcours technique devra posseder une borne explicite et testee. Si cette borne ne permet pas de determiner la page et `hasMore`, l'operation echoue fermee au lieu de presenter une liste incomplete comme exhaustive.
+- Le stockage retourne au plus `MAX_LIST_CANDIDATES + 1`, donc `10052`, candidats ordonnes : les `10051` premiers peuvent etre resolus et le dernier sert uniquement de sentinelle d'existence, sans resolution. Le parcours s'arrete avec succes des que `offset + limit + 1` brouillons lisibles sont collectes ou lorsque la source est exhaustivement terminee dans cette borne. Si la sentinelle existe et que les `10051` candidats inspectables ne suffisent pas a determiner la page et `hasMore`, toute la liste echoue en `503 BUDGET_STORAGE_UNAVAILABLE`, sans page partielle. Cette borne et ce code sont identiques pour toute implementation.
 
 Cette pagination est deterministe pour un jeu stable. Un instantane coherent sous ecritures concurrentes necessiterait un futur contrat par curseur, hors T1-C.
 
@@ -157,7 +157,7 @@ Les echecs conservent l'enveloppe fermee `{ success: false, contractVersion: 2, 
 | `BUDGET_AUTH_REQUIRED` | `401` | identite absente ou invalide |
 | `BUDGET_V2_DISABLED` | `503` | capacite V2 fermee |
 | `BUDGET_ACCESS_DENIED` | `403` | `finance:read` absent |
-| `BUDGET_STORAGE_UNAVAILABLE` | `503` | stockage indispensable indisponible, ambigu ou corrompu |
+| `BUDGET_STORAGE_UNAVAILABLE` | `503` | stockage indispensable indisponible, ambigu ou corrompu, ou sentinelle presente apres `10051` candidats sans page et `hasMore` determinables |
 | `BUDGET_DRAFT_NOT_FOUND` | `404` | brouillon absent, V1, hors tenant, hors auteur ou non visible |
 | `BUDGET_REFERENCE_UNAVAILABLE` | `503` | source necessaire absente, ambigue ou mal formee |
 | `BUDGET_REFERENCE_NOT_FOUND` | `404` | reference absente, hors tenant ou non visible en lecture directe |
@@ -189,7 +189,7 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 4. exclusion croisee V1/V2 et absence de conversion implicite ;
 5. validation stricte de l'enveloppe, de la version et des instantanes, y compris l'egalite de chaque identifiant entre `budget` et son chemin d'instantane ;
 6. liste limitee aux dix champs de resume, sans contenu financier ;
-7. ordre canonique, pagination apres filtrage et calcul de `hasMore` ;
+7. ordre canonique, pagination apres filtrage et calcul de `hasMore`, avec `MAX_LIST_CANDIDATES = 10051` et echec `BUDGET_STORAGE_UNAVAILABLE` si la sentinelle prouve que la page reste indeterminable ;
 8. recontrole T1-B.1 a chaque requete avec `operation: READ` et `resolvedAt` explicitement egal au seul `requestAt` capture, y compris le refus d'un appel omettant l'operation ou utilisant `WRITE` ;
 9. liste de plusieurs brouillons proches d'une borne d'effet dont chaque appel T1-B.1 recoit `operation: READ` et ce meme `requestAt`, meme si l'horloge reelle avance pendant le parcours ;
 10. reference archivee ou cloturee seulement lorsque la visibilite historique l'autorise ;
@@ -210,7 +210,8 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 25. liste omettant un brouillon sur son refus referentiel prioritaire meme si une corruption independante existe, mais bloquant lorsque la corruption reste le premier resultat observable ;
 26. liste omettant de facon deterministe les cinq familles de refus propres a un brouillon et bloquant seulement sur indisponibilite systemique ou corruption stockee encore observable ;
 27. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
-28. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
+28. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal ;
+29. pagination inspectant au plus `10051` candidats, ne resolvant jamais la sentinelle `10052`, reussissant si la page est determinable ou la source epuisee et retournant exactement `503 BUDGET_STORAGE_UNAVAILABLE` sinon.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
