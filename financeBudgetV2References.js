@@ -606,58 +606,63 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
     }
 
     const preflightErrors = [];
+    const draftEntries = new Map();
     for (const [key, { type, id }] of uniqueRequirementsByKey) {
       if (!storedCache.has(key)) {
         if (storedCache.size >= MAX_LIST_REFERENCE_RESOLUTIONS) {
           fail('BUDGET_STORAGE_UNAVAILABLE');
         }
-        let entry;
-        try {
-          const resolver = resolvers[type];
-          if (typeof resolver !== 'function') fail('BUDGET_REFERENCE_UNAVAILABLE');
-          let result;
+        const pendingEntry = Promise.resolve().then(async () => {
           try {
-            result = await resolver({
-              id, tenantId, actorId, operation, resolvedAt: resolvedAtIso
-            });
-          } catch (_error) {
-            fail('BUDGET_REFERENCE_UNAVAILABLE');
-          }
-          validateResolverResult(result);
-          if (result.records.length === 0) fail('BUDGET_REFERENCE_NOT_FOUND');
-          if (result.records.length > 1) fail('BUDGET_REFERENCE_UNAVAILABLE');
-          let record;
-          try {
-            record = structuredClone(result.records[0]);
-          } catch (_error) {
-            fail('BUDGET_REFERENCE_UNAVAILABLE');
-          }
-          validateBaseRecord(record);
-          if (record.id !== id || record.tenantId !== tenantId || !record.visible) {
-            fail('BUDGET_REFERENCE_NOT_FOUND');
-          }
-          if (record.confidentiality === 'restricted') {
-            let allowed = false;
+            const resolver = resolvers[type];
+            if (typeof resolver !== 'function') fail('BUDGET_REFERENCE_UNAVAILABLE');
+            let result;
             try {
-              allowed = restrictedPolicy({ type, record, tenantId, actorId, operation }) === true;
+              result = await resolver({
+                id, tenantId, actorId, operation, resolvedAt: resolvedAtIso
+              });
             } catch (_error) {
               fail('BUDGET_REFERENCE_UNAVAILABLE');
             }
-            if (!allowed) fail('BUDGET_REFERENCE_NOT_FOUND');
+            validateResolverResult(result);
+            if (result.records.length === 0) fail('BUDGET_REFERENCE_NOT_FOUND');
+            if (result.records.length > 1) fail('BUDGET_REFERENCE_UNAVAILABLE');
+            let record;
+            try {
+              record = structuredClone(result.records[0]);
+            } catch (_error) {
+              fail('BUDGET_REFERENCE_UNAVAILABLE');
+            }
+            validateBaseRecord(record);
+            if (record.id !== id || record.tenantId !== tenantId || !record.visible) {
+              fail('BUDGET_REFERENCE_NOT_FOUND');
+            }
+            if (record.confidentiality === 'restricted') {
+              let allowed = false;
+              try {
+                allowed = restrictedPolicy({
+                  type, record, tenantId, actorId, operation
+                }) === true;
+              } catch (_error) {
+                fail('BUDGET_REFERENCE_UNAVAILABLE');
+              }
+              if (!allowed) fail('BUDGET_REFERENCE_NOT_FOUND');
+            }
+            validateSourceRecord(record, type);
+            return { record, errorCode: null };
+          } catch (error) {
+            return {
+              record: null,
+              errorCode: error instanceof BudgetReferenceError
+                ? error.code
+                : 'BUDGET_REFERENCE_UNAVAILABLE'
+            };
           }
-          validateSourceRecord(record, type);
-          entry = { record, errorCode: null };
-        } catch (error) {
-          entry = {
-            record: null,
-            errorCode: error instanceof BudgetReferenceError
-              ? error.code
-              : 'BUDGET_REFERENCE_UNAVAILABLE'
-          };
-        }
-        storedCache.set(key, entry);
+        });
+        storedCache.set(key, pendingEntry);
       }
-      const entry = storedCache.get(key);
+      const entry = await storedCache.get(key);
+      draftEntries.set(key, entry);
       if (entry.errorCode !== null) preflightErrors.push(entry.errorCode);
     }
     if (preflightErrors.includes('BUDGET_REFERENCE_UNAVAILABLE')) {
@@ -668,7 +673,7 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
     }
 
     function cached(type, id) {
-      const value = storedCache.get(`${type}\u0000${id}`);
+      const value = draftEntries.get(`${type}\u0000${id}`);
       if (!value || value.errorCode !== null || !value.record) {
         fail('BUDGET_REFERENCE_UNAVAILABLE');
       }

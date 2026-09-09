@@ -156,6 +156,30 @@ test('shared cache resolves each type and id pair only once across stored drafts
   }
 });
 
+test('concurrent stored drafts share one in-flight resolution per pair', async () => {
+  const data = fixtures();
+  let releaseEntity;
+  const entityGate = new Promise(resolve => { releaseEntity = resolve; });
+  const entityCalls = [];
+  const entityResolver = async query => {
+    entityCalls.push(query);
+    await entityGate;
+    return { available: true, records: data.entity };
+  };
+  const resolvers = Object.fromEntries(Object.entries(data).map(([type, records]) => [
+    type, type === 'entity' ? entityResolver : createFakeBudgetReferenceResolver(records)
+  ]));
+  const service = createBudgetReferenceService({ resolvers });
+
+  const first = storedCall(service);
+  const second = storedCall(service);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(entityCalls.length, 1);
+  releaseEntity();
+  await Promise.all([first, second]);
+  assert.equal(entityCalls.length, 1);
+});
+
 test('mutating one returned snapshot cannot contaminate the shared cache', async () => {
   const { service, resolvers } = setup();
   const first = await storedCall(service);
@@ -322,6 +346,30 @@ test('the shared cache refuses the 4097th distinct pair before its source call',
   }
   await rejects(() => storedCall(service, largeBudget('b5')),
     'BUDGET_STORAGE_UNAVAILABLE');
+  assert.equal(calls.length, MAX_LIST_REFERENCE_RESOLUTIONS);
+});
+
+test('concurrent drafts cannot race past the shared 4096-pair ceiling', async () => {
+  const { service, calls } = dynamicService();
+  for (let batch = 0; batch < 5; batch += 1) {
+    await storedCall(service, largeBudget(`c${batch}`));
+  }
+  const partial = largeBudget('partial', 9);
+  partial.rows[8].dimensions.countryId = null;
+  await storedCall(service, partial);
+  assert.equal(calls.length, MAX_LIST_REFERENCE_RESOLUTIONS - 1);
+
+  const first = largeBudget('c0');
+  const second = largeBudget('c0');
+  first.rows[0].dimensions.countryId = 'country-extra-first';
+  second.rows[0].dimensions.countryId = 'country-extra-second';
+  const outcomes = await Promise.allSettled([
+    storedCall(service, first), storedCall(service, second)
+  ]);
+
+  assert.equal(outcomes.filter(outcome => outcome.status === 'fulfilled').length, 1);
+  const rejection = outcomes.find(outcome => outcome.status === 'rejected');
+  assert.equal(rejection.reason.code, 'BUDGET_STORAGE_UNAVAILABLE');
   assert.equal(calls.length, MAX_LIST_REFERENCE_RESOLUTIONS);
 });
 
