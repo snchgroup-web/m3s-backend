@@ -24,7 +24,28 @@ Dans ce paquet, `liste versionnee` signifie que chaque resume restitue le numero
 - Le contrat technique confirme separe les familles `/api/finance/budget-drafts` et `/api/finance/budget-drafts-v2`.
 - Aucun endpoint V2 n'est actuellement ouvert par le present cadrage.
 
-Une future implementation T1-C dependra uniquement des interfaces injectees confirmees. Elle ne devra pas inventer un referentiel, lire directement une table metier externe ou contourner un resolveur.
+L'operation T1-B confirmee valide actuellement toute l'enveloppe V2 avant d'appeler un resolveur. Elle ne peut donc pas, a elle seule, prouver la precedence confirmee `disponibilite des referentiels avant integrite stockee` lorsqu'un document corrompu conserve des identifiants extractibles. T1-C reste cadrable, mais son implementation est `NO-GO` tant que le micro-amendement pur `T1-B.1` ci-dessous n'est pas autorise, implemente, teste et confirme separement.
+
+Apres ce prerequis, une future implementation T1-C dependra uniquement des interfaces injectees confirmees. Elle ne devra pas inventer un referentiel, lire directement une table metier externe ou contourner un resolveur.
+
+## Prerequis pur T1-B.1 candidat
+
+Le futur micro-amendement T1-B.1 ajouterait une operation de preflight sans restitution, sans instantane et sans effet :
+
+```text
+preflightBudgetReferenceAvailability({ rawBudget, tenantId, actorId, operation, resolvedAt })
+```
+
+Cette operation candidate :
+
+1. recoit le document Budget brut deja borne par le stockage, sans le declarer valide ;
+2. utilise dans T1-B un extracteur ferme et borne pour enumerer les couples uniques `type + id` lorsqu'ils sont structurellement accessibles ;
+3. appelle les memes resolveurs injectes avec le meme `resolvedAt` fige pour verifier uniquement leur presence, leur reponse disponible et non ambigue ;
+4. ne prononce ni visibilite, cycle de vie, exercice, responsabilite ou relation et ne retourne aucun enregistrement ;
+5. retourne seulement un succes interne vide, ou les echecs fermes `BUDGET_REFERENCE_UNAVAILABLE` et `BUDGET_STORAGE_UNAVAILABLE` ;
+6. traite un identifiant ou un chemin impossible a enumerer comme corruption stockee, sans inventer de reference ni appeler une source avec une valeur douteuse.
+
+Apres un preflight reussi, T1-C applique T1-A a l'enveloppe complete, puis l'operation T1-B `READ` confirmee pour la resolution, la visibilite, les statuts et les relations. Le preflight ne remplace donc aucun controle et ne peut jamais rendre un budget recevable. Sa specification executable, ses erreurs exactes et ses tests relevent d'une autorisation d'implementation distincte ; le present document ne l'implemente pas.
 
 ## Contrat de restitution candidat
 
@@ -142,7 +163,7 @@ Les echecs conservent l'enveloppe fermee `{ success: false, contractVersion: 2, 
 | `BUDGET_RESPONSIBILITY_INVALID` | `422` | responsabilite visible mais non recevable |
 | `BUDGET_REFERENCE_RELATION_INVALID` | `422` | relation parent-enfant contradictoire apres validation individuelle |
 
-La precedence conserve exactement celle de `BUDGET-T1-TECH-001 V0.1` : syntaxe, authentification, capacite, permission, disponibilite du stockage, existence et portee du brouillon, disponibilite des referentiels, resolution et visibilite, cycle de vie et periode d'effet, exercice, responsabilites, relations, puis version et autres controles d'integrite stockee applicables a la lecture. Une corruption detectee ne remplace donc pas un `BUDGET_REFERENCE_UNAVAILABLE` deja etabli. Si le document est trop mal forme pour identifier le jeu de references a interroger, `BUDGET_STORAGE_UNAVAILABLE` s'applique immediatement, puisqu'aucune disponibilite referentielle propre a ce document ne peut etre determinee. Pour une liste, les cas volontairement omis ci-dessus ne sont pas des reponses d'erreur individuelles ; toute indisponibilite systemique reste bloquante.
+La precedence conserve exactement celle de `BUDGET-T1-TECH-001 V0.1` : syntaxe, authentification, capacite, permission, disponibilite du stockage, existence et portee du brouillon, preflight T1-B.1 de disponibilite des referentiels, validation complete T1-A, resolution et visibilite T1-B, cycle de vie et periode d'effet, exercice, responsabilites, relations, puis version et autres controles d'integrite stockee applicables a la lecture. Une corruption detectee ne remplace donc pas un `BUDGET_REFERENCE_UNAVAILABLE` deja etabli. Si le document est trop mal forme pour identifier le jeu de references a interroger, `BUDGET_STORAGE_UNAVAILABLE` s'applique immediatement, puisqu'aucune disponibilite referentielle propre a ce document ne peut etre determinee. Pour une liste, les cas volontairement omis ci-dessus ne sont pas des reponses d'erreur individuelles ; toute indisponibilite systemique reste bloquante. Tant que T1-B.1 n'existe pas, les lectures T1-C restent desactivees.
 
 ## Non-effets obligatoires
 
@@ -180,7 +201,9 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 19. refus d'une portee, d'un statut, d'un acces ou d'une chronologie serveur incoherents, avec les relations temporelles propres a la version initiale et aux versions mises a jour ;
 20. refus d'une enveloppe racine ouverte ou d'un bloc `promotion` incomplet, inconnu ou non validable ;
 21. refus de tout bloc sans liaison T1-E unique, de toute liaison sans bloc et de toute divergence entre les deux, avec preuve du cas direct `zero bloc + zero liaison` ;
-22. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
+22. preflight T1-B.1 prouvant la precedence referentielle sur un document corrompu mais extractible, sans retourner de donnee ni contourner T1-A/T1-B ;
+23. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
+24. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
@@ -197,7 +220,7 @@ Confirmer ou amender `BUDGET-T1-C-001 V0.1` en une decision groupee :
 7. appliquer ordre et pagination apres filtrage de la visibilite courante, sans succes partiel ;
 8. retourner uniquement les dix champs de resume dans la liste et le document stocke valide en lecture directe ;
 9. echouer ferme sur indisponibilite systemique, ambiguite, doublon ou corruption ;
-10. exiger une autorisation distincte avant toute implementation, fusion, recette preview ou activation.
+10. exiger une autorisation distincte pour le prerequis pur T1-B.1, puis une autre avant toute implementation T1-C, fusion, recette preview ou activation.
 
 La confirmation de ce paquet validera uniquement le cadrage candidat. Elle ne vaudra ni autorisation d'implementation ni autorisation de fusion.
 
