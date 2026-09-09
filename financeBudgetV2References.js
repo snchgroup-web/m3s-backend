@@ -11,6 +11,8 @@ const REFERENCE_TYPES = Object.freeze([
   'portfolio', 'dossier', 'project', 'phase'
 ]);
 const OPERATIONS = Object.freeze({ WRITE: 'write', READ: 'read' });
+const MAX_DETAIL_REFERENCE_PAIRS = 804;
+const MAX_LIST_REFERENCE_RESOLUTIONS = 4096;
 const CONFIDENTIALITIES = new Set(['public', 'internal', 'restricted']);
 
 const DIMENSION_TYPES = Object.freeze({
@@ -291,6 +293,64 @@ function collectRequirements(budget) {
   return requirements;
 }
 
+function extractStoredRequirements(rawBudget) {
+  if (!rawBudget || typeof rawBudget !== 'object' || Array.isArray(rawBudget)
+    || !rawBudget.identity || typeof rawBudget.identity !== 'object'
+    || Array.isArray(rawBudget.identity)
+    || !isReferenceId(rawBudget.identity.entityId)
+    || !isReferenceId(rawBudget.identity.fiscalYearId)
+    || !rawBudget.responsibilities || typeof rawBudget.responsibilities !== 'object'
+    || Array.isArray(rawBudget.responsibilities)
+    || !isReferenceId(rawBudget.responsibilities.budgetOwnerAgentId)
+    || (rawBudget.responsibilities.controllerAgentId !== null
+      && !isReferenceId(rawBudget.responsibilities.controllerAgentId))
+    || !Array.isArray(rawBudget.rows)) {
+    fail('BUDGET_STORAGE_UNAVAILABLE');
+  }
+
+  const requirements = [
+    { type: 'entity', id: rawBudget.identity.entityId, purpose: 'identity' },
+    { type: 'fiscalYear', id: rawBudget.identity.fiscalYearId, purpose: 'identity' },
+    {
+      type: 'agent', id: rawBudget.responsibilities.budgetOwnerAgentId,
+      purpose: 'responsibility', responsibility: 'budgetOwnerAgentId'
+    }
+  ];
+  if (rawBudget.responsibilities.controllerAgentId !== null) {
+    requirements.push({
+      type: 'agent', id: rawBudget.responsibilities.controllerAgentId,
+      purpose: 'responsibility', responsibility: 'controllerAgentId'
+    });
+  }
+
+  const uniquePairs = new Set(requirements.map(item => `${item.type}\u0000${item.id}`));
+  for (const row of rawBudget.rows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)
+      || !row.dimensions || typeof row.dimensions !== 'object'
+      || Array.isArray(row.dimensions) || !Array.isArray(row.periodValues)) {
+      fail('BUDGET_STORAGE_UNAVAILABLE');
+    }
+    for (const periodValue of row.periodValues) {
+      if (!periodValue || typeof periodValue !== 'object' || Array.isArray(periodValue)
+        || !isReferenceId(periodValue.periodId)) {
+        fail('BUDGET_STORAGE_UNAVAILABLE');
+      }
+    }
+    for (const [key, type] of Object.entries(DIMENSION_TYPES)) {
+      if (!Object.hasOwn(row.dimensions, key)) fail('BUDGET_STORAGE_UNAVAILABLE');
+      const id = row.dimensions[key];
+      if (id === null) continue;
+      if (!isReferenceId(id)) fail('BUDGET_STORAGE_UNAVAILABLE');
+      requirements.push({ type, id, purpose: 'dimension' });
+      uniquePairs.add(`${type}\u0000${id}`);
+      if (uniquePairs.size > MAX_DETAIL_REFERENCE_PAIRS) {
+        fail('BUDGET_STORAGE_UNAVAILABLE');
+      }
+    }
+  }
+  return requirements;
+}
+
 function baseSnapshot(record, resolvedAt) {
   return {
     id: record.id,
@@ -338,6 +398,8 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
   const restrictedPolicy = typeof canAccessRestricted === 'function'
     ? canAccessRestricted
     : () => false;
+  const storedCache = new Map();
+  let storedContextKey = null;
 
   async function resolveBudgetReferences({ budget, tenantId, actorId, operation = OPERATIONS.WRITE }) {
     validateBudgetV2(budget);
@@ -522,12 +584,215 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
     };
   }
 
-  return Object.freeze({ resolveBudgetReferences });
+  async function resolveStoredBudgetReferences({
+    rawBudget, tenantId, actorId, operation, resolvedAt
+  } = {}) {
+    validateContext({ tenantId, actorId, operation });
+    if (operation !== OPERATIONS.READ || !(resolvedAt instanceof Date)
+      || !Number.isFinite(resolvedAt.getTime())) {
+      fail('BUDGET_REQUEST_INVALID');
+    }
+    const at = new Date(resolvedAt.getTime());
+    const resolvedAtIso = at.toISOString();
+    const contextKey = `${tenantId}\u0000${actorId}\u0000${operation}\u0000${resolvedAtIso}`;
+    if (storedContextKey === null) storedContextKey = contextKey;
+    if (storedContextKey !== contextKey) fail('BUDGET_REQUEST_INVALID');
+
+    const requirements = extractStoredRequirements(rawBudget);
+    const uniqueRequirementsByKey = new Map();
+    for (const item of requirements) {
+      const key = `${item.type}\u0000${item.id}`;
+      if (!uniqueRequirementsByKey.has(key)) uniqueRequirementsByKey.set(key, item);
+    }
+
+    const preflightErrors = [];
+    for (const [key, { type, id }] of uniqueRequirementsByKey) {
+      if (!storedCache.has(key)) {
+        if (storedCache.size >= MAX_LIST_REFERENCE_RESOLUTIONS) {
+          fail('BUDGET_STORAGE_UNAVAILABLE');
+        }
+        let entry;
+        try {
+          const resolver = resolvers[type];
+          if (typeof resolver !== 'function') fail('BUDGET_REFERENCE_UNAVAILABLE');
+          let result;
+          try {
+            result = await resolver({
+              id, tenantId, actorId, operation, resolvedAt: resolvedAtIso
+            });
+          } catch (_error) {
+            fail('BUDGET_REFERENCE_UNAVAILABLE');
+          }
+          validateResolverResult(result);
+          if (result.records.length === 0) fail('BUDGET_REFERENCE_NOT_FOUND');
+          if (result.records.length > 1) fail('BUDGET_REFERENCE_UNAVAILABLE');
+          const record = result.records[0];
+          validateBaseRecord(record);
+          if (record.id !== id || record.tenantId !== tenantId || !record.visible) {
+            fail('BUDGET_REFERENCE_NOT_FOUND');
+          }
+          if (record.confidentiality === 'restricted') {
+            let allowed = false;
+            try {
+              allowed = restrictedPolicy({ type, record, tenantId, actorId, operation }) === true;
+            } catch (_error) {
+              fail('BUDGET_REFERENCE_UNAVAILABLE');
+            }
+            if (!allowed) fail('BUDGET_REFERENCE_NOT_FOUND');
+          }
+          validateSourceRecord(record, type);
+          entry = { record, errorCode: null };
+        } catch (error) {
+          entry = {
+            record: null,
+            errorCode: error instanceof BudgetReferenceError
+              ? error.code
+              : 'BUDGET_REFERENCE_UNAVAILABLE'
+          };
+        }
+        storedCache.set(key, entry);
+      }
+      const entry = storedCache.get(key);
+      if (entry.errorCode !== null) preflightErrors.push(entry.errorCode);
+    }
+    if (preflightErrors.includes('BUDGET_REFERENCE_UNAVAILABLE')) {
+      fail('BUDGET_REFERENCE_UNAVAILABLE');
+    }
+    if (preflightErrors.includes('BUDGET_REFERENCE_NOT_FOUND')) {
+      fail('BUDGET_REFERENCE_NOT_FOUND');
+    }
+
+    function cached(type, id) {
+      const value = storedCache.get(`${type}\u0000${id}`);
+      if (!value || value.errorCode !== null || !value.record) {
+        fail('BUDGET_REFERENCE_UNAVAILABLE');
+      }
+      return value;
+    }
+
+    const lifecycleErrors = new Set();
+    for (const { type, id, purpose } of requirements) {
+      const { record } = cached(type, id);
+      if (compareUtcTimestamps(record.effectiveFrom, resolvedAtIso) > 0
+        || (record.effectiveTo !== null
+          && compareUtcTimestamps(record.effectiveTo, resolvedAtIso) <= 0)) {
+        lifecycleErrors.add(stateCode(type, purpose));
+        continue;
+      }
+      if (!acceptedLifecycleStatus(record, type, operation, purpose)) {
+        lifecycleErrors.add(stateCode(type, purpose));
+      }
+    }
+    for (const code of [
+      'BUDGET_REFERENCE_STATE_INVALID',
+      'BUDGET_FISCAL_YEAR_INVALID',
+      'BUDGET_RESPONSIBILITY_INVALID'
+    ]) {
+      if (lifecycleErrors.has(code)) fail(code);
+    }
+
+    const entity = cached('entity', rawBudget.identity.entityId);
+    const fiscalYear = cached('fiscalYear', rawBudget.identity.fiscalYearId);
+    validateTypeRecord(fiscalYear.record, 'fiscalYear', 'identity', operation, at);
+
+    const expectedPeriodIds = new Set(fiscalYear.record.periods.map(period => period.periodId));
+    for (const row of rawBudget.rows) {
+      const actualPeriodIds = new Set(row.periodValues.map(period => period.periodId));
+      if (actualPeriodIds.size !== expectedPeriodIds.size
+        || [...expectedPeriodIds].some(id => !actualPeriodIds.has(id))) {
+        fail('BUDGET_FISCAL_YEAR_INVALID');
+      }
+    }
+
+    const owner = cached('agent', rawBudget.responsibilities.budgetOwnerAgentId);
+    validateTypeRecord(
+      { ...owner.record, responsibility: 'budgetOwnerAgentId' },
+      'agent', 'responsibility', operation, at
+    );
+    const controller = rawBudget.responsibilities.controllerAgentId === null
+      ? null
+      : cached('agent', rawBudget.responsibilities.controllerAgentId);
+    if (controller) {
+      validateTypeRecord(
+        { ...controller.record, responsibility: 'controllerAgentId' },
+        'agent', 'responsibility', operation, at
+      );
+    }
+
+    const resolvedRows = rawBudget.rows.map(row => {
+      const records = {};
+      for (const [key, type] of Object.entries(DIMENSION_TYPES)) {
+        records[key] = row.dimensions[key] === null
+          ? null
+          : cached(type, row.dimensions[key]).record;
+      }
+      return { rowId: row.id, records };
+    });
+    for (const { records } of resolvedRows) {
+      if (records.agentId && records.teamId
+        && records.agentId.teamId !== records.teamId.id) {
+        fail('BUDGET_RESPONSIBILITY_INVALID');
+      }
+    }
+    if (fiscalYear.record.entityId !== entity.record.id) {
+      fail('BUDGET_REFERENCE_RELATION_INVALID');
+    }
+    for (const { records } of resolvedRows) {
+      if (records.portfolioId
+        && (!records.functionId || records.portfolioId.functionId !== records.functionId.id)) {
+        fail('BUDGET_REFERENCE_RELATION_INVALID');
+      }
+      if (records.dossierId
+        && (!records.portfolioId || records.dossierId.portfolioId !== records.portfolioId.id)) {
+        fail('BUDGET_REFERENCE_RELATION_INVALID');
+      }
+      if (records.projectId
+        && (!records.dossierId || records.projectId.dossierId !== records.dossierId.id)) {
+        fail('BUDGET_REFERENCE_RELATION_INVALID');
+      }
+      if (records.phaseId
+        && (!records.projectId || records.phaseId.projectId !== records.projectId.id)) {
+        fail('BUDGET_REFERENCE_RELATION_INVALID');
+      }
+    }
+
+    validateBudgetV2(rawBudget);
+
+    function snapshot(type, id) {
+      return typedSnapshot(cached(type, id).record, type, resolvedAtIso);
+    }
+    const rows = rawBudget.rows.map((row, rowIndex) => {
+      const dimensions = {};
+      for (const [key, type] of Object.entries(DIMENSION_TYPES)) {
+        dimensions[key] = row.dimensions[key] === null
+          ? null
+          : snapshot(type, row.dimensions[key]);
+      }
+      return { rowId: resolvedRows[rowIndex].rowId, dimensions };
+    });
+    return {
+      identity: {
+        entityId: snapshot('entity', rawBudget.identity.entityId),
+        fiscalYearId: snapshot('fiscalYear', rawBudget.identity.fiscalYearId)
+      },
+      responsibilities: {
+        budgetOwnerAgentId: snapshot('agent', rawBudget.responsibilities.budgetOwnerAgentId),
+        controllerAgentId: controller
+          ? snapshot('agent', rawBudget.responsibilities.controllerAgentId)
+          : null
+      },
+      rows
+    };
+  }
+
+  return Object.freeze({ resolveBudgetReferences, resolveStoredBudgetReferences });
 }
 
 module.exports = {
   BudgetReferenceError,
   DIMENSION_TYPES,
+  MAX_DETAIL_REFERENCE_PAIRS,
+  MAX_LIST_REFERENCE_RESOLUTIONS,
   OPERATIONS,
   REFERENCE_TYPES,
   createBudgetReferenceService
