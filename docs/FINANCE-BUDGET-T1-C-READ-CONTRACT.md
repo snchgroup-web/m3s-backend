@@ -50,7 +50,7 @@ Cette operation candidate :
 
 Une absence ou une invisibilite est donc classee par T1-B.1 avant une corruption independante du titre, d'un montant ou d'un autre champ non referentiel : `404` en lecture directe et omission non revelatrice dans une liste. Si la structure des references elle-meme est inexploitable, `BUDGET_STORAGE_UNAVAILABLE` reste immediat. Cette operation remplace, pour les brouillons stockes seulement, le double parcours `preflight puis READ` ; elle garantit une resolution unique et une precedence stable. Sa specification executable, ses erreurs exactes et ses tests relevent d'une autorisation d'implementation distincte ; le present document ne l'implemente pas.
 
-## Prerequis temporel T1-D candidat
+## Contrat temporel partage T1-C / T1-D candidat
 
 Le futur stockage T1-D devra capturer un unique `writeAt` UTC a la frontiere applicative de chaque creation ou mise a jour. Ce meme instant est passe a T1-B comme `resolvedAt` et persiste par T1-D comme horodatage de la version ; les champs compares ne sont jamais produits par un `CURRENT_TIMESTAMP()` independant de la base.
 
@@ -58,7 +58,7 @@ Le futur stockage T1-D devra capturer un unique `writeAt` UTC a la frontiere app
 - A la mise a jour, `createdAt` reste immuable et anterieur ou egal a `writeAt`, tandis que `resolvedAt` et `updatedAt` sont strictement egaux a `writeAt`.
 - Une date technique de base distincte peut exister pour son exploitation interne, mais elle n'entre ni dans le contrat restitue ni dans les controles chronologiques T1-C.
 
-Ce prerequis devra etre implemente et teste dans T1-D avant toute lecture T1-C. Il exige une autorisation separee et ne modifie aucun stockage dans le present paquet.
+L'ordre confirme reste `T1-C` puis `T1-D`. T1-C peut donc etre implemente et teste d'abord avec une interface de stockage pure et des doubles fictifs qui fournissent ces horodatages coherents. T1-D implemente ensuite la capture et la persistance reelles du meme `writeAt`. Aucun cablage de route T1-C vers un stockage reel, aucune recette integree et aucune activation ne sont permis tant que T1-D n'a pas prouve ce contrat temporel. Chaque micro-lot garde son autorisation et sa revue separees ; le present paquet ne les implemente pas.
 
 ## Contrat de restitution candidat
 
@@ -239,8 +239,8 @@ Confirmer ou amender `BUDGET-T1-C-001 V0.1` en une decision groupee :
 7. appliquer ordre et pagination apres filtrage de la visibilite courante, sans succes partiel ;
 8. retourner uniquement les dix champs de resume dans la liste et le document stocke valide en lecture directe ;
 9. echouer ferme sur indisponibilite systemique, ambiguite, doublon ou corruption ;
-10. exiger l'horodatage T1-D depuis le meme `writeAt` applicatif que les instantanes, sans horloge de base independante pour les champs compares ;
-11. exiger une autorisation distincte pour les prerequis purs T1-B.1 et T1-D, puis une autre avant toute implementation T1-C, fusion, recette preview ou activation.
+10. maintenir l'ordre `T1-C` puis `T1-D` : tester T1-C avec un stockage fictif coherent, puis exiger de T1-D le meme `writeAt` applicatif pour les instantanes et les horodatages persistes ;
+11. exiger une autorisation distincte pour T1-B.1, puis T1-C et T1-D ; interdire tout cablage de route vers le stockage reel, fusion, recette preview ou activation avant confirmation des lots requis.
 
 La confirmation de ce paquet validera uniquement le cadrage candidat. Elle ne vaudra ni autorisation d'implementation ni autorisation de fusion.
 
