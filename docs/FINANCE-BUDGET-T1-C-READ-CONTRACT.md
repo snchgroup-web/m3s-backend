@@ -40,7 +40,7 @@ Cette operation candidate :
 
 1. recoit le document Budget brut deja borne par le stockage, sans le declarer valide ;
 2. utilise dans T1-B un extracteur ferme et borne pour enumerer les references et les seules relations necessaires lorsqu'elles sont structurellement accessibles ;
-3. resout une seule fois chaque couple unique `type + id` avec les interfaces confirmees et le meme `resolvedAt` fige ;
+3. resout une seule fois chaque couple unique `type + id` avec les interfaces confirmees et le meme `resolvedAt` fige ; pour une liste, ce cache est commun a tous les brouillons de la requete et non recree par candidat ;
 4. applique dans l'ordre confirme disponibilite, unicite structurelle, tenant, visibilite et confidentialite, cycle de vie, periode d'effet, exercice, responsabilites et relations ;
 5. traite un tableau vide comme `BUDGET_REFERENCE_NOT_FOUND`, plusieurs enregistrements comme `BUDGET_REFERENCE_UNAVAILABLE`, et limite ce meme code aux echecs d'un enregistrement unique dans `validateBaseRecord` ou `validateSourceRecord` ; les champs fiscaux et de responsabilite sont controles ensuite par `validateFiscalYear` et `validateTypeRecord` avec leurs codes specialises `BUDGET_FISCAL_YEAR_INVALID` et `BUDGET_RESPONSIBILITY_INVALID` ;
 6. applique seulement apres ces controles le validateur complet T1-A a l'enveloppe Budget ;
@@ -108,6 +108,8 @@ La resolution courante sert de garde d'acces, pas de reecriture. Les libelles et
 
 Pour une lecture directe comme pour une liste, la frontiere HTTP capture `requestAt` avant la premiere resolution. Chaque appel a `resolveStoredBudgetReferences` recoit explicitement `operation: READ` et une copie du meme instant avec `resolvedAt: new Date(requestAt.getTime())`. Il est interdit d'omettre l'operation, de la remplacer par `WRITE`, de recalculer cet instant par brouillon, d'utiliser l'horloge par defaut ou de substituer un autre `resolvedAt` pendant le parcours. La liste partage ainsi les memes regles de lecture et une seule frontiere temporelle pour tous ses candidats, meme si l'horloge reelle avance pendant le filtrage.
 
+La frontiere de liste construit egalement une seule instance T1-B.1 propre a la requete. Son cache interne memorise, par couple `type + id`, le succes resolu ou l'erreur fermee obtenue dans ce tenant, pour cet acteur, en `READ` et au `requestAt` commun. Les relations parent-enfant restent revalidees dans chaque brouillon ; aucun resultat brut du cache n'est restitue et le cache est detruit a la fin de la requete. `MAX_LIST_REFERENCE_RESOLUTIONS` vaut exactement `4096` couples uniques : le `4097e` couple est refuse avant tout appel de source et toute la liste echoue en `503 BUDGET_STORAGE_UNAVAILABLE`, sans page partielle. Une lecture directe reste bornee par les `804` references maximales d'un seul document valide.
+
 Une reference absente, hors tenant, non visible ou `restricted` sans autorisation Management produit `BUDGET_REFERENCE_NOT_FOUND`. Une reference visible mais dont le cycle de vie ou la periode d'effet est irrecevable produit le code specialise T1-B applicable. Une source absente, ambigue, indisponible ou dont l'enregistrement unique echoue a `validateBaseRecord` ou `validateSourceRecord` produit `BUDGET_REFERENCE_UNAVAILABLE`. Un defaut fiscal, de responsabilite ou de relation detecte apres ces controles conserve son code specialise.
 
 ## Integrite du brouillon lu
@@ -153,6 +155,7 @@ Une future interface de liste devra donc parcourir des candidats V2 bornes au te
 - Un candidat qui produit `BUDGET_REFERENCE_NOT_FOUND`, `BUDGET_REFERENCE_STATE_INVALID`, `BUDGET_FISCAL_YEAR_INVALID`, `BUDGET_RESPONSIBILITY_INVALID` ou `BUDGET_REFERENCE_RELATION_INVALID` est omis : ces codes decrivent un brouillon individuellement non restituable, sans rendre les autres brouillons illisibles.
 - L'indisponibilite ou l'ambiguite d'une source necessaire bloque toute la liste ; aucune page partielle n'est retournee.
 - Une corruption du stockage ou un doublon qui demeure le premier resultat observable apres la precedence normative bloque toute la liste ; aucun resume douteux n'est restitue. Une corruption independante masquee par un refus referentiel anterieur propre au brouillon ne remplace pas son omission et n'est pas exposee pendant cette requete.
+- L'atteinte de `MAX_LIST_REFERENCE_RESOLUTIONS = 4096` avant determination de la page bloque toute la liste en `503 BUDGET_STORAGE_UNAVAILABLE` ; le couple suivant n'est jamais resolu.
 - Le stockage retourne au plus `MAX_LIST_CANDIDATES + 1`, donc `10052`, candidats ordonnes : les `10051` premiers peuvent etre resolus et le dernier sert uniquement de sentinelle d'existence, sans resolution. Le parcours s'arrete avec succes des que `offset + limit + 1` brouillons lisibles sont collectes ou lorsque la source est exhaustivement terminee dans cette borne. Si la sentinelle existe et que les `10051` candidats inspectables ne suffisent pas a determiner la page et `hasMore`, toute la liste echoue en `503 BUDGET_STORAGE_UNAVAILABLE`, sans page partielle. Cette borne et ce code sont identiques pour toute implementation.
 
 Cette pagination est deterministe pour un jeu stable. Un instantane coherent sous ecritures concurrentes necessiterait un futur contrat par curseur, hors T1-C.
@@ -167,7 +170,7 @@ Les echecs conservent l'enveloppe fermee `{ success: false, contractVersion: 2, 
 | `BUDGET_AUTH_REQUIRED` | `401` | identite absente ou invalide |
 | `BUDGET_V2_DISABLED` | `503` | capacite V2 fermee |
 | `BUDGET_ACCESS_DENIED` | `403` | `finance:read` absent |
-| `BUDGET_STORAGE_UNAVAILABLE` | `503` | stockage indispensable indisponible, ambigu ou corrompu, ou sentinelle presente apres `10051` candidats sans page et `hasMore` determinables |
+| `BUDGET_STORAGE_UNAVAILABLE` | `503` | stockage indispensable indisponible, ambigu ou corrompu ; sentinelle presente apres `10051` candidats sans page determinable ; ou plafond de `4096` resolutions uniques atteint avant determination |
 | `BUDGET_DRAFT_NOT_FOUND` | `404` | brouillon absent, V1, hors tenant, hors auteur ou non visible |
 | `BUDGET_REFERENCE_UNAVAILABLE` | `503` | source necessaire absente, ambigue, indisponible ou enregistrement unique refusant `validateBaseRecord` ou `validateSourceRecord` |
 | `BUDGET_REFERENCE_NOT_FOUND` | `404` | reference absente, hors tenant ou non visible en lecture directe |
@@ -199,7 +202,7 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 4. exclusion croisee V1/V2 et absence de conversion implicite ;
 5. validation stricte de l'enveloppe, de la version et des instantanes, y compris l'egalite de chaque identifiant entre `budget` et son chemin d'instantane ;
 6. liste limitee aux dix champs de resume, sans contenu financier ;
-7. ordre canonique, pagination apres filtrage et calcul de `hasMore`, avec `MAX_LIST_CANDIDATES = 10051` et echec `BUDGET_STORAGE_UNAVAILABLE` si la sentinelle prouve que la page reste indeterminable ;
+7. ordre canonique, pagination apres filtrage et calcul de `hasMore`, avec cache referentiel commun, `MAX_LIST_REFERENCE_RESOLUTIONS = 4096`, `MAX_LIST_CANDIDATES = 10051` et echec `BUDGET_STORAGE_UNAVAILABLE` si l'une de ces bornes laisse la page indeterminable ;
 8. recontrole T1-B.1 a chaque requete avec `operation: READ` et `resolvedAt` explicitement egal au seul `requestAt` capture, y compris le refus d'un appel omettant l'operation ou utilisant `WRITE` ;
 9. liste de plusieurs brouillons proches d'une borne d'effet dont chaque appel T1-B.1 recoit `operation: READ` et ce meme `requestAt`, meme si l'horloge reelle avance pendant le parcours ;
 10. reference archivee ou cloturee seulement lorsque la visibilite historique l'autorise ;
@@ -222,7 +225,8 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 27. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
 28. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal ;
 29. pagination inspectant au plus `10051` candidats, ne resolvant jamais la sentinelle `10052`, reussissant si la page est determinable ou la source epuisee et retournant exactement `503 BUDGET_STORAGE_UNAVAILABLE` sinon ;
-30. T1-D capturant un seul `writeAt`, injectant `clock: () => new Date(writeAt.getTime())` dans son service T1-B de requete, appelant `operation: WRITE` et persistant ce meme instant sans `CURRENT_TIMESTAMP()` independant, avec refus T1-C de toute divergence.
+30. T1-D capturant un seul `writeAt`, injectant `clock: () => new Date(writeAt.getTime())` dans son service T1-B de requete, appelant `operation: WRITE` et persistant ce meme instant sans `CURRENT_TIMESTAMP()` independant, avec refus T1-C de toute divergence ;
+31. liste partageant un seul cache T1-B.1 entre candidats, ne resolvant chaque couple `type + id` qu'une fois, revalidant les relations par brouillon et refusant le `4097e` couple avant appel de source avec `503 BUDGET_STORAGE_UNAVAILABLE`.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
