@@ -268,6 +268,66 @@ function validateTypeRecord(record, type, purpose, operation, at) {
   }
 }
 
+function recordForStoredCache(record, type) {
+  const cached = {
+    id: record.id,
+    tenantId: record.tenantId,
+    status: record.status,
+    effectiveFrom: record.effectiveFrom,
+    effectiveTo: record.effectiveTo,
+    labelSnapshot: record.labelSnapshot,
+    sourceRevision: record.sourceRevision,
+    confidentiality: record.confidentiality,
+    visible: record.visible
+  };
+  if (Object.hasOwn(record, 'historicalVisible')) {
+    cached.historicalVisible = record.historicalVisible;
+  }
+  if (type === 'fiscalYear') {
+    let periods = null;
+    if (Array.isArray(record.periods)) {
+      try {
+        periods = record.periods.map(period => (
+          period && typeof period === 'object' && !Array.isArray(period)
+            ? {
+              periodId: period.periodId,
+              ordinal: period.ordinal,
+              startDate: period.startDate,
+              endDate: period.endDate
+            }
+            : null
+        ));
+      } catch (_error) {
+        periods = null;
+      }
+    }
+    Object.assign(cached, {
+      entityId: record.entityId,
+      summaryYear: record.summaryYear,
+      startDate: record.startDate,
+      endDate: record.endDate,
+      periodicity: record.periodicity,
+      timezone: record.timezone,
+      periods
+    });
+  }
+  if (type === 'agent') {
+    cached.teamId = record.teamId;
+    try {
+      cached.allowedResponsibilities = Array.isArray(record.allowedResponsibilities)
+        ? [...record.allowedResponsibilities]
+        : null;
+    } catch (_error) {
+      cached.allowedResponsibilities = null;
+    }
+  }
+  if (type === 'portfolio') cached.functionId = record.functionId;
+  if (type === 'dossier') cached.portfolioId = record.portfolioId;
+  if (type === 'project') cached.dossierId = record.dossierId;
+  if (type === 'phase') cached.projectId = record.projectId;
+  return cached;
+}
+
 function collectRequirements(budget) {
   const requirements = [
     { type: 'entity', id: budget.identity.entityId, purpose: 'identity' },
@@ -627,12 +687,7 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
             validateResolverResult(result);
             if (result.records.length === 0) fail('BUDGET_REFERENCE_NOT_FOUND');
             if (result.records.length > 1) fail('BUDGET_REFERENCE_UNAVAILABLE');
-            let record;
-            try {
-              record = structuredClone(result.records[0]);
-            } catch (_error) {
-              fail('BUDGET_REFERENCE_UNAVAILABLE');
-            }
+            const record = result.records[0];
             validateBaseRecord(record);
             if (record.id !== id || record.tenantId !== tenantId || !record.visible) {
               fail('BUDGET_REFERENCE_NOT_FOUND');
@@ -649,7 +704,10 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
               if (!allowed) fail('BUDGET_REFERENCE_NOT_FOUND');
             }
             validateSourceRecord(record, type);
-            return { record, errorCode: null };
+            const cachedRecord = recordForStoredCache(record, type);
+            validateBaseRecord(cachedRecord);
+            validateSourceRecord(cachedRecord, type);
+            return { record: cachedRecord, errorCode: null };
           } catch (error) {
             return {
               record: null,

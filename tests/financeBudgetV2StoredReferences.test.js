@@ -194,8 +194,9 @@ test('mutating one returned snapshot cannot contaminate the shared cache', async
   assert.equal(resolvers.fiscalYear.calls.length, 1);
 });
 
-test('mutating a resolver source after resolution cannot contaminate the shared cache', async () => {
+test('non-clonable source metadata is ignored and later mutation cannot contaminate the cache', async () => {
   const data = fixtures();
+  data.entity[0].technicalHelper = () => 'not clonable';
   const sharedEntityResolver = async query => {
     sharedEntityResolver.calls.push(query);
     return { available: true, records: data.entity };
