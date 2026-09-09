@@ -72,6 +72,8 @@ Le responsable budgetaire, le controleur, un agent mentionne ou une permission F
 
 La resolution courante sert de garde d'acces, pas de reecriture. Les libelles et instantanes nouvellement resolus ne remplacent jamais ceux de la version stockee pendant un `GET`. Aucun cache de visibilite ne peut survivre a la requete.
 
+Pour une liste, la frontiere HTTP capture `requestAt` avant la premiere resolution et construit un seul service T1-B propre a la requete avec l'horloge injectee `clock: () => new Date(requestAt.getTime())`. Toutes les resolutions de tous les brouillons de cette page utilisent cette meme instance. L'horloge par defaut et la construction d'un service par brouillon sont interdites dans ce parcours. Cette regle reutilise le point d'injection confirme de T1-B sans modifier son interface et garantit un instant UTC identique pendant tout le filtrage.
+
 Une reference absente, hors tenant, non visible ou `restricted` sans autorisation Management produit `BUDGET_REFERENCE_NOT_FOUND`. Une reference visible mais dont le cycle de vie ou la periode d'effet est irrecevable produit le code specialise T1-B applicable. Une source absente, ambigue, mal formee ou indisponible produit `BUDGET_REFERENCE_UNAVAILABLE`.
 
 ## Integrite du brouillon lu
@@ -148,12 +150,13 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 6. liste limitee aux dix champs de resume, sans contenu financier ;
 7. ordre canonique, pagination apres filtrage et calcul de `hasMore` ;
 8. recontrole T1-B `READ` a chaque requete avec un seul instant UTC ;
-9. reference archivee ou cloturee seulement lorsque la visibilite historique l'autorise ;
-10. omission non revelatrice d'un brouillon devenu invisible dans la liste ;
-11. codes fermes en lecture directe pour absence, statut, exercice, responsabilite et relation ;
-12. indisponibilite, ambiguite, doublon ou corruption sans succes partiel ;
-13. version `1000000` lisible et versions hors borne refusees ;
-14. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
+9. liste de plusieurs brouillons proches d'une borne d'effet resolue avec un unique `requestAt` injecte, meme si l'horloge reelle avance pendant le parcours ;
+10. reference archivee ou cloturee seulement lorsque la visibilite historique l'autorise ;
+11. omission non revelatrice d'un brouillon devenu invisible dans la liste ;
+12. codes fermes en lecture directe pour absence, statut, exercice, responsabilite et relation ;
+13. indisponibilite, ambiguite, doublon ou corruption sans succes partiel ;
+14. version `1000000` lisible et versions hors borne refusees ;
+15. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
