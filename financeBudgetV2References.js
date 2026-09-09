@@ -1,4 +1,8 @@
-const { validateBudgetV2 } = require('./financeBudgetV2Contracts');
+const {
+  MAX_ROWS,
+  PERIODS_PER_YEAR,
+  validateBudgetV2
+} = require('./financeBudgetV2Contracts');
 
 const REFERENCE_ID_PATTERN = /^[\x20-\x7e]{1,128}$/;
 const RFC3339_UTC_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?Z$/;
@@ -11,6 +15,10 @@ const REFERENCE_TYPES = Object.freeze([
   'portfolio', 'dossier', 'project', 'phase'
 ]);
 const OPERATIONS = Object.freeze({ WRITE: 'write', READ: 'read' });
+const MAX_DETAIL_REFERENCE_PAIRS = 804;
+const MAX_LIST_REFERENCE_RESOLUTIONS = 4096;
+const MAX_CONCURRENT_STORED_RESOLUTIONS = 16;
+const DEFAULT_STORED_RESOLVER_TIMEOUT_MS = 5000;
 const CONFIDENTIALITIES = new Set(['public', 'internal', 'restricted']);
 
 const DIMENSION_TYPES = Object.freeze({
@@ -266,6 +274,137 @@ function validateTypeRecord(record, type, purpose, operation, at) {
   }
 }
 
+function baseRecordForStoredCache(record) {
+  const cached = {
+    id: record.id,
+    tenantId: record.tenantId,
+    status: record.status,
+    effectiveFrom: record.effectiveFrom,
+    effectiveTo: record.effectiveTo,
+    labelSnapshot: record.labelSnapshot,
+    sourceRevision: record.sourceRevision,
+    confidentiality: record.confidentiality,
+    visible: record.visible
+  };
+  if (Object.hasOwn(record, 'historicalVisible')) {
+    cached.historicalVisible = record.historicalVisible;
+  }
+  return cached;
+}
+
+function freezeStoredRecord(record) {
+  if (Array.isArray(record.periods)) {
+    record.periods.forEach(period => Object.freeze(period));
+    Object.freeze(record.periods);
+  }
+  if (Array.isArray(record.allowedResponsibilities)) {
+    Object.freeze(record.allowedResponsibilities);
+  }
+  return Object.freeze(record);
+}
+
+function recordForStoredCache(record, type, baseRecord) {
+  const cached = { ...baseRecord };
+  if (type === 'fiscalYear') cached.entityId = record.entityId;
+  if (type === 'agent') cached.teamId = record.teamId;
+  if (type === 'portfolio') cached.functionId = record.functionId;
+  if (type === 'dossier') cached.portfolioId = record.portfolioId;
+  if (type === 'project') cached.dossierId = record.dossierId;
+  if (type === 'phase') cached.projectId = record.projectId;
+  validateSourceRecord(cached, type);
+
+  if (type === 'fiscalYear') {
+    const sourcePeriods = record.periods;
+    if (!Array.isArray(sourcePeriods) || sourcePeriods.length !== PERIODS_PER_YEAR) {
+      fail('BUDGET_FISCAL_YEAR_INVALID');
+    }
+    let periods;
+    try {
+      periods = sourcePeriods.map(period => {
+        if (!hasExactFields(period, PERIOD_KEYS)) {
+          fail('BUDGET_FISCAL_YEAR_INVALID');
+        }
+        return {
+          periodId: period.periodId,
+          ordinal: period.ordinal,
+          startDate: period.startDate,
+          endDate: period.endDate
+        };
+      });
+    } catch (error) {
+      if (error instanceof BudgetReferenceError) throw error;
+      fail('BUDGET_FISCAL_YEAR_INVALID');
+    }
+    Object.assign(cached, {
+      summaryYear: record.summaryYear,
+      startDate: record.startDate,
+      endDate: record.endDate,
+      periodicity: record.periodicity,
+      timezone: record.timezone,
+      periods
+    });
+  }
+  if (type === 'agent') {
+    try {
+      cached.allowedResponsibilities = Array.isArray(record.allowedResponsibilities)
+        ? [...record.allowedResponsibilities]
+        : null;
+    } catch (_error) {
+      cached.allowedResponsibilities = null;
+    }
+  }
+  return freezeStoredRecord(cached);
+}
+
+function createBoundedScheduler(limit) {
+  const queue = [];
+  let active = 0;
+
+  function drain() {
+    while (active < limit && queue.length > 0) {
+      const { task, resolve, reject } = queue.shift();
+      active += 1;
+      Promise.resolve()
+        .then(task)
+        .then(resolve, reject)
+        .finally(() => {
+          active -= 1;
+          drain();
+        });
+    }
+  }
+
+  return task => new Promise((resolve, reject) => {
+    queue.push({ task, resolve, reject });
+    drain();
+  });
+}
+
+async function callResolverWithTimeout(schedule, resolver, query, timeoutMs) {
+  const controller = new AbortController();
+  let timeoutId;
+  const scheduledResolution = schedule(() => {
+    if (controller.signal.aborted) {
+      throw new BudgetReferenceError('BUDGET_REFERENCE_UNAVAILABLE');
+    }
+    return resolver({ ...query, signal: controller.signal });
+  });
+  const timeout = new Promise((resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new BudgetReferenceError('BUDGET_REFERENCE_UNAVAILABLE'));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      scheduledResolution,
+      timeout
+    ]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function collectRequirements(budget) {
   const requirements = [
     { type: 'entity', id: budget.identity.entityId, purpose: 'identity' },
@@ -285,6 +424,65 @@ function collectRequirements(budget) {
     for (const [key, type] of Object.entries(DIMENSION_TYPES)) {
       if (row.dimensions[key] !== null) {
         requirements.push({ type, id: row.dimensions[key], purpose: 'dimension' });
+      }
+    }
+  }
+  return requirements;
+}
+
+function extractStoredRequirements(rawBudget) {
+  if (!rawBudget || typeof rawBudget !== 'object' || Array.isArray(rawBudget)
+    || !rawBudget.identity || typeof rawBudget.identity !== 'object'
+    || Array.isArray(rawBudget.identity)
+    || !isReferenceId(rawBudget.identity.entityId)
+    || !isReferenceId(rawBudget.identity.fiscalYearId)
+    || !rawBudget.responsibilities || typeof rawBudget.responsibilities !== 'object'
+    || Array.isArray(rawBudget.responsibilities)
+    || !isReferenceId(rawBudget.responsibilities.budgetOwnerAgentId)
+    || (rawBudget.responsibilities.controllerAgentId !== null
+      && !isReferenceId(rawBudget.responsibilities.controllerAgentId))
+    || !Array.isArray(rawBudget.rows) || rawBudget.rows.length > MAX_ROWS) {
+    fail('BUDGET_STORAGE_UNAVAILABLE');
+  }
+
+  const requirements = [
+    { type: 'entity', id: rawBudget.identity.entityId, purpose: 'identity' },
+    { type: 'fiscalYear', id: rawBudget.identity.fiscalYearId, purpose: 'identity' },
+    {
+      type: 'agent', id: rawBudget.responsibilities.budgetOwnerAgentId,
+      purpose: 'responsibility', responsibility: 'budgetOwnerAgentId'
+    }
+  ];
+  if (rawBudget.responsibilities.controllerAgentId !== null) {
+    requirements.push({
+      type: 'agent', id: rawBudget.responsibilities.controllerAgentId,
+      purpose: 'responsibility', responsibility: 'controllerAgentId'
+    });
+  }
+
+  const uniquePairs = new Set(requirements.map(item => `${item.type}\u0000${item.id}`));
+  for (const row of rawBudget.rows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)
+      || !row.dimensions || typeof row.dimensions !== 'object'
+      || Array.isArray(row.dimensions) || !Array.isArray(row.periodValues)
+      || row.periodValues.length > PERIODS_PER_YEAR) {
+      fail('BUDGET_STORAGE_UNAVAILABLE');
+    }
+    for (const periodValue of row.periodValues) {
+      if (!periodValue || typeof periodValue !== 'object' || Array.isArray(periodValue)
+        || !isReferenceId(periodValue.periodId)) {
+        fail('BUDGET_STORAGE_UNAVAILABLE');
+      }
+    }
+    for (const [key, type] of Object.entries(DIMENSION_TYPES)) {
+      if (!Object.hasOwn(row.dimensions, key)) fail('BUDGET_STORAGE_UNAVAILABLE');
+      const id = row.dimensions[key];
+      if (id === null) continue;
+      if (!isReferenceId(id)) fail('BUDGET_STORAGE_UNAVAILABLE');
+      requirements.push({ type, id, purpose: 'dimension' });
+      uniquePairs.add(`${type}\u0000${id}`);
+      if (uniquePairs.size > MAX_DETAIL_REFERENCE_PAIRS) {
+        fail('BUDGET_STORAGE_UNAVAILABLE');
       }
     }
   }
@@ -333,11 +531,22 @@ function typedSnapshot(record, type, resolvedAt) {
 }
 
 // Each injected resolver returns { available, records }; all returned data stays untrusted here.
-function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clock } = {}) {
+function createBudgetReferenceService({
+  resolvers = {}, canAccessRestricted, clock,
+  storedResolverTimeoutMs = DEFAULT_STORED_RESOLVER_TIMEOUT_MS
+} = {}) {
   const now = typeof clock === 'function' ? clock : () => new Date();
   const restrictedPolicy = typeof canAccessRestricted === 'function'
     ? canAccessRestricted
     : () => false;
+  const storedCache = new Map();
+  let storedContextKey = null;
+  const storedScheduler = createBoundedScheduler(MAX_CONCURRENT_STORED_RESOLUTIONS);
+  const storedTimeoutMs = Number.isInteger(storedResolverTimeoutMs)
+    && storedResolverTimeoutMs > 0
+    && storedResolverTimeoutMs <= DEFAULT_STORED_RESOLVER_TIMEOUT_MS
+    ? storedResolverTimeoutMs
+    : DEFAULT_STORED_RESOLVER_TIMEOUT_MS;
 
   async function resolveBudgetReferences({ budget, tenantId, actorId, operation = OPERATIONS.WRITE }) {
     validateBudgetV2(budget);
@@ -522,12 +731,238 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
     };
   }
 
-  return Object.freeze({ resolveBudgetReferences });
+  async function resolveStoredBudgetReferences({
+    rawBudget, tenantId, actorId, operation, resolvedAt
+  } = {}) {
+    validateContext({ tenantId, actorId, operation });
+    if (operation !== OPERATIONS.READ || !(resolvedAt instanceof Date)
+      || !Number.isFinite(resolvedAt.getTime())) {
+      fail('BUDGET_REQUEST_INVALID');
+    }
+    const at = new Date(resolvedAt.getTime());
+    const resolvedAtIso = at.toISOString();
+    const contextKey = `${tenantId}\u0000${actorId}\u0000${operation}\u0000${resolvedAtIso}`;
+    if (storedContextKey === null) storedContextKey = contextKey;
+    if (storedContextKey !== contextKey) fail('BUDGET_REQUEST_INVALID');
+
+    const requirements = extractStoredRequirements(rawBudget);
+    const uniqueRequirementsByKey = new Map();
+    for (const item of requirements) {
+      const key = `${item.type}\u0000${item.id}`;
+      if (!uniqueRequirementsByKey.has(key)) uniqueRequirementsByKey.set(key, item);
+    }
+
+    const preflightErrors = [];
+    const draftEntries = new Map();
+    const newPendingEntries = [];
+    let capacityExceeded = false;
+    for (const [key, { type, id }] of uniqueRequirementsByKey) {
+      if (!storedCache.has(key)) {
+        if (storedCache.size >= MAX_LIST_REFERENCE_RESOLUTIONS) {
+          capacityExceeded = true;
+          break;
+        }
+        const pendingEntry = Promise.resolve().then(async () => {
+          try {
+            const resolver = resolvers[type];
+            if (typeof resolver !== 'function') fail('BUDGET_REFERENCE_UNAVAILABLE');
+            let result;
+            try {
+              result = await callResolverWithTimeout(storedScheduler, resolver, {
+                id, tenantId, actorId, operation, resolvedAt: resolvedAtIso
+              }, storedTimeoutMs);
+            } catch (_error) {
+              fail('BUDGET_REFERENCE_UNAVAILABLE');
+            }
+            validateResolverResult(result);
+            if (result.records.length === 0) fail('BUDGET_REFERENCE_NOT_FOUND');
+            if (result.records.length > 1) fail('BUDGET_REFERENCE_UNAVAILABLE');
+            const sourceRecord = result.records[0];
+            const baseRecord = baseRecordForStoredCache(sourceRecord);
+            validateBaseRecord(baseRecord);
+            if (baseRecord.id !== id || baseRecord.tenantId !== tenantId
+              || !baseRecord.visible) {
+              fail('BUDGET_REFERENCE_NOT_FOUND');
+            }
+            if (baseRecord.confidentiality === 'restricted') {
+              let allowed = false;
+              try {
+                allowed = restrictedPolicy({
+                  type, record: Object.freeze({ ...baseRecord }),
+                  tenantId, actorId, operation
+                }) === true;
+              } catch (_error) {
+                fail('BUDGET_REFERENCE_UNAVAILABLE');
+              }
+              if (!allowed) fail('BUDGET_REFERENCE_NOT_FOUND');
+            }
+            const cachedRecord = recordForStoredCache(sourceRecord, type, baseRecord);
+            return { record: cachedRecord, errorCode: null };
+          } catch (error) {
+            return {
+              record: null,
+              errorCode: error instanceof BudgetReferenceError
+                ? error.code
+                : 'BUDGET_REFERENCE_UNAVAILABLE'
+            };
+          }
+        });
+        storedCache.set(key, pendingEntry);
+        newPendingEntries.push(pendingEntry);
+      }
+    }
+    if (capacityExceeded) {
+      await Promise.all(newPendingEntries);
+      fail('BUDGET_STORAGE_UNAVAILABLE');
+    }
+    for (const [key] of uniqueRequirementsByKey) {
+      const entry = await storedCache.get(key);
+      draftEntries.set(key, entry);
+      if (entry.errorCode !== null) preflightErrors.push(entry.errorCode);
+    }
+    if (preflightErrors.includes('BUDGET_REFERENCE_UNAVAILABLE')) {
+      fail('BUDGET_REFERENCE_UNAVAILABLE');
+    }
+    if (preflightErrors.includes('BUDGET_REFERENCE_NOT_FOUND')) {
+      fail('BUDGET_REFERENCE_NOT_FOUND');
+    }
+    if (preflightErrors.includes('BUDGET_FISCAL_YEAR_INVALID')) {
+      fail('BUDGET_FISCAL_YEAR_INVALID');
+    }
+
+    function cached(type, id) {
+      const value = draftEntries.get(`${type}\u0000${id}`);
+      if (!value || value.errorCode !== null || !value.record) {
+        fail('BUDGET_REFERENCE_UNAVAILABLE');
+      }
+      return value;
+    }
+
+    const lifecycleErrors = new Set();
+    for (const { type, id, purpose } of requirements) {
+      const { record } = cached(type, id);
+      if (compareUtcTimestamps(record.effectiveFrom, resolvedAtIso) > 0
+        || (record.effectiveTo !== null
+          && compareUtcTimestamps(record.effectiveTo, resolvedAtIso) <= 0)) {
+        lifecycleErrors.add(stateCode(type, purpose));
+        continue;
+      }
+      if (!acceptedLifecycleStatus(record, type, operation, purpose)) {
+        lifecycleErrors.add(stateCode(type, purpose));
+      }
+    }
+    for (const code of [
+      'BUDGET_REFERENCE_STATE_INVALID',
+      'BUDGET_FISCAL_YEAR_INVALID',
+      'BUDGET_RESPONSIBILITY_INVALID'
+    ]) {
+      if (lifecycleErrors.has(code)) fail(code);
+    }
+
+    const entity = cached('entity', rawBudget.identity.entityId);
+    const fiscalYear = cached('fiscalYear', rawBudget.identity.fiscalYearId);
+    validateTypeRecord(fiscalYear.record, 'fiscalYear', 'identity', operation, at);
+
+    const expectedPeriodIds = new Set(fiscalYear.record.periods.map(period => period.periodId));
+    for (const row of rawBudget.rows) {
+      const actualPeriodIds = new Set(row.periodValues.map(period => period.periodId));
+      if (actualPeriodIds.size !== expectedPeriodIds.size
+        || [...expectedPeriodIds].some(id => !actualPeriodIds.has(id))) {
+        fail('BUDGET_FISCAL_YEAR_INVALID');
+      }
+    }
+
+    const owner = cached('agent', rawBudget.responsibilities.budgetOwnerAgentId);
+    validateTypeRecord(
+      { ...owner.record, responsibility: 'budgetOwnerAgentId' },
+      'agent', 'responsibility', operation, at
+    );
+    const controller = rawBudget.responsibilities.controllerAgentId === null
+      ? null
+      : cached('agent', rawBudget.responsibilities.controllerAgentId);
+    if (controller) {
+      validateTypeRecord(
+        { ...controller.record, responsibility: 'controllerAgentId' },
+        'agent', 'responsibility', operation, at
+      );
+    }
+
+    const resolvedRows = rawBudget.rows.map(row => {
+      const records = {};
+      for (const [key, type] of Object.entries(DIMENSION_TYPES)) {
+        records[key] = row.dimensions[key] === null
+          ? null
+          : cached(type, row.dimensions[key]).record;
+      }
+      return { rowId: row.id, records };
+    });
+    for (const { records } of resolvedRows) {
+      if (records.agentId && records.teamId
+        && records.agentId.teamId !== records.teamId.id) {
+        fail('BUDGET_RESPONSIBILITY_INVALID');
+      }
+    }
+    if (fiscalYear.record.entityId !== entity.record.id) {
+      fail('BUDGET_REFERENCE_RELATION_INVALID');
+    }
+    for (const { records } of resolvedRows) {
+      if (records.portfolioId
+        && (!records.functionId || records.portfolioId.functionId !== records.functionId.id)) {
+        fail('BUDGET_REFERENCE_RELATION_INVALID');
+      }
+      if (records.dossierId
+        && (!records.portfolioId || records.dossierId.portfolioId !== records.portfolioId.id)) {
+        fail('BUDGET_REFERENCE_RELATION_INVALID');
+      }
+      if (records.projectId
+        && (!records.dossierId || records.projectId.dossierId !== records.dossierId.id)) {
+        fail('BUDGET_REFERENCE_RELATION_INVALID');
+      }
+      if (records.phaseId
+        && (!records.projectId || records.phaseId.projectId !== records.projectId.id)) {
+        fail('BUDGET_REFERENCE_RELATION_INVALID');
+      }
+    }
+
+    validateBudgetV2(rawBudget);
+
+    function snapshot(type, id) {
+      return typedSnapshot(cached(type, id).record, type, resolvedAtIso);
+    }
+    const rows = rawBudget.rows.map((row, rowIndex) => {
+      const dimensions = {};
+      for (const [key, type] of Object.entries(DIMENSION_TYPES)) {
+        dimensions[key] = row.dimensions[key] === null
+          ? null
+          : snapshot(type, row.dimensions[key]);
+      }
+      return { rowId: resolvedRows[rowIndex].rowId, dimensions };
+    });
+    return {
+      identity: {
+        entityId: snapshot('entity', rawBudget.identity.entityId),
+        fiscalYearId: snapshot('fiscalYear', rawBudget.identity.fiscalYearId)
+      },
+      responsibilities: {
+        budgetOwnerAgentId: snapshot('agent', rawBudget.responsibilities.budgetOwnerAgentId),
+        controllerAgentId: controller
+          ? snapshot('agent', rawBudget.responsibilities.controllerAgentId)
+          : null
+      },
+      rows
+    };
+  }
+
+  return Object.freeze({ resolveBudgetReferences, resolveStoredBudgetReferences });
 }
 
 module.exports = {
   BudgetReferenceError,
   DIMENSION_TYPES,
+  MAX_DETAIL_REFERENCE_PAIRS,
+  MAX_LIST_REFERENCE_RESOLUTIONS,
+  MAX_CONCURRENT_STORED_RESOLUTIONS,
+  DEFAULT_STORED_RESOLVER_TIMEOUT_MS,
   OPERATIONS,
   REFERENCE_TYPES,
   createBudgetReferenceService
