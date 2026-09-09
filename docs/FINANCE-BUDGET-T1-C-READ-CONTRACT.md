@@ -40,8 +40,8 @@ Cette operation candidate :
 
 1. recoit le document Budget brut deja borne par le stockage, sans le declarer valide ;
 2. utilise dans T1-B un extracteur ferme et borne pour enumerer les couples uniques `type + id` lorsqu'ils sont structurellement accessibles ;
-3. appelle les memes interfaces de resolveur injectees avec le meme `resolvedAt` fige pour verifier uniquement qu'elles existent et rendent une reponse disponible, bien formee et non ambigue ; un tableau vide ou contenant un enregistrement reussit ce preflight, tandis que plusieurs enregistrements produisent `BUDGET_REFERENCE_UNAVAILABLE` ;
-4. ne prononce ni visibilite, cycle de vie, exercice, responsabilite ou relation et ne retourne aucun enregistrement ;
+3. appelle les memes interfaces de resolveur injectees avec le meme `resolvedAt` fige pour verifier qu'elles existent et rendent une reponse disponible, bien formee et non ambigue ; un tableau vide reussit ce preflight, plusieurs enregistrements produisent `BUDGET_REFERENCE_UNAVAILABLE`, et un enregistrement unique ne reussit qu'apres les memes validations structurelles `validateBaseRecord` et `validateSourceRecord` que T1-B ;
+4. ne prononce ni visibilite, cycle de vie, exercice, responsabilite ou relation et ne retourne aucun enregistrement ; la validation des champs structurels comme `visible`, `status`, dates, revision source et parents canoniques ne vaut jamais decision sur leur contenu metier ;
 5. retourne seulement un succes interne vide, ou les echecs fermes `BUDGET_REFERENCE_UNAVAILABLE` et `BUDGET_STORAGE_UNAVAILABLE` ;
 6. traite un identifiant ou un chemin impossible a enumerer comme corruption stockee, sans inventer de reference ni appeler une source avec une valeur douteuse.
 
@@ -203,8 +203,9 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 21. refus de tout bloc sans liaison T1-E unique, de toute liaison sans bloc et de toute divergence entre les deux, avec preuve du cas direct `zero bloc + zero liaison` ;
 22. preflight T1-B.1 prouvant la precedence referentielle sur un document corrompu mais extractible, sans retourner de donnee ni contourner T1-A/T1-B ;
 23. preflight reussi lorsqu'une source disponible retourne zero enregistrement, puis traitement de l'absence uniquement par T1-B `READ` en `404` direct ou omission de liste ;
-24. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
-25. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
+24. preflight refuse en `BUDGET_REFERENCE_UNAVAILABLE` un enregistrement unique qui echoue aux validations structurelles de source, avant toute integrite Budget, tout en deferant visibilite, cycle de vie et relations ;
+25. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
+26. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
