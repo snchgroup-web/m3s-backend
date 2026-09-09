@@ -88,15 +88,15 @@ Pour chaque requete future, le serveur devra :
 4. relire `finance:read` depuis le compte actif ;
 5. verifier la disponibilite du stockage indispensable ;
 6. borner les candidats au `tenantId` et a l'`authorUserId` derives du serveur ;
-7. capturer un seul instant UTC pour la requete ;
-8. re-resoudre toutes les references avec l'operation T1-B `READ` ;
+7. capturer un seul instant UTC `requestAt` pour la requete ;
+8. re-resoudre toutes les references avec l'operation T1-B.1 en lui passant explicitement `resolvedAt: requestAt` a chaque appel ;
 9. restituer seulement un brouillon dont le document, les instantanes, les relations et les references sont recevables.
 
 Le responsable budgetaire, le controleur, un agent mentionne ou une permission Finance d'un autre utilisateur ne remplacent jamais l'auteur technique courant. T1-C reste `owner-only`.
 
 La resolution courante sert de garde d'acces, pas de reecriture. Les libelles et instantanes nouvellement resolus ne remplacent jamais ceux de la version stockee pendant un `GET`. Aucun cache de visibilite ne peut survivre a la requete.
 
-Pour une liste, la frontiere HTTP capture `requestAt` avant la premiere resolution et construit un seul service T1-B propre a la requete avec l'horloge injectee `clock: () => new Date(requestAt.getTime())`. Toutes les resolutions de tous les brouillons de cette page utilisent cette meme instance. L'horloge par defaut et la construction d'un service par brouillon sont interdites dans ce parcours. Cette regle reutilise le point d'injection confirme de T1-B sans modifier son interface et garantit un instant UTC identique pendant tout le filtrage.
+Pour une lecture directe comme pour une liste, la frontiere HTTP capture `requestAt` avant la premiere resolution. Chaque appel a `resolveStoredBudgetReferences` recoit explicitement une copie du meme instant avec `resolvedAt: new Date(requestAt.getTime())`. Il est interdit de recalculer cet instant par brouillon, d'utiliser l'horloge par defaut ou de substituer un autre `resolvedAt` pendant le parcours. La liste partage ainsi une seule frontiere temporelle pour tous ses candidats, meme si l'horloge reelle avance pendant le filtrage.
 
 Une reference absente, hors tenant, non visible ou `restricted` sans autorisation Management produit `BUDGET_REFERENCE_NOT_FOUND`. Une reference visible mais dont le cycle de vie ou la periode d'effet est irrecevable produit le code specialise T1-B applicable. Une source absente, ambigue, mal formee ou indisponible produit `BUDGET_REFERENCE_UNAVAILABLE`.
 
@@ -129,7 +129,7 @@ Avant restitution, une future implementation devra verifier :
 
 Un doublon, un document mal forme, un instantane incomplet ou une incoherence interne produit un refus ferme. La lecture ne repare rien et ne retourne pas une version partielle.
 
-Le schema T1-B ne persiste pas `allowedResponsibilities`. T1-C ne peut donc ni prouver ni nier retrospectivement qu'un agent possedait un role donne au `resolvedAt` stocke. Il recontrole seulement l'eligibilite actuelle du responsable et du controleur avec T1-B `READ`. Une preuve historique immuable des roles exigerait un schema d'instantane et un lot separes.
+Le schema T1-B ne persiste pas `allowedResponsibilities`. T1-C ne peut donc ni prouver ni nier retrospectivement qu'un agent possedait un role donne au `resolvedAt` stocke. Il recontrole seulement l'eligibilite actuelle du responsable et du controleur avec T1-B.1 au `requestAt` courant. Une preuve historique immuable des roles exigerait un schema d'instantane et un lot separes.
 
 Avant T1-E, aucun bloc ni liaison de promotion ne peut exister ; toute presence signalee echoue fermee avec `BUDGET_STORAGE_UNAVAILABLE`. T1-E devra injecter sa lecture de liaison et son validateur dans le parcours T1-C avant d'autoriser la premiere promotion. Apres cette integration, l'absence du bloc n'etablit une creation directe que si la recherche tenant-auteur par identifiant V2 confirme aussi l'absence de liaison. Une source de liaison indisponible, un resultat ambigu ou toute divergence bloc-liaison produit `BUDGET_STORAGE_UNAVAILABLE` ; aucun controle partiel n'est admis.
 
@@ -190,8 +190,8 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 5. validation stricte de l'enveloppe, de la version et des instantanes, y compris l'egalite de chaque identifiant entre `budget` et son chemin d'instantane ;
 6. liste limitee aux dix champs de resume, sans contenu financier ;
 7. ordre canonique, pagination apres filtrage et calcul de `hasMore` ;
-8. recontrole T1-B `READ` a chaque requete avec un seul instant UTC ;
-9. liste de plusieurs brouillons proches d'une borne d'effet resolue avec un unique `requestAt` injecte, meme si l'horloge reelle avance pendant le parcours ;
+8. recontrole T1-B.1 a chaque requete avec `resolvedAt` explicitement egal au seul `requestAt` capture ;
+9. liste de plusieurs brouillons proches d'une borne d'effet dont chaque appel T1-B.1 recoit ce meme `requestAt`, meme si l'horloge reelle avance pendant le parcours ;
 10. reference archivee ou cloturee seulement lorsque la visibilite historique l'autorise ;
 11. omission non revelatrice d'un brouillon devenu invisible dans la liste ;
 12. codes fermes en lecture directe pour absence, statut, exercice, responsabilite et relation ;
@@ -223,7 +223,7 @@ Confirmer ou amender `BUDGET-T1-C-001 V0.1` en une decision groupee :
 3. maintenir V1 strictement inchange et invisible depuis V2 ;
 4. interdire toute conversion, promotion, correction ou reecriture implicite en lecture ;
 5. maintenir l'acces `owner-only`, tenant-scoped et derive du compte courant ;
-6. recontroler toutes les references avec T1-B `READ` a chaque restitution ;
+6. recontroler toutes les references avec T1-B.1 au meme `requestAt` a chaque restitution ;
 7. appliquer ordre et pagination apres filtrage de la visibilite courante, sans succes partiel ;
 8. retourner uniquement les dix champs de resume dans la liste et le document stocke valide en lecture directe ;
 9. echouer ferme sur indisponibilite systemique, ambiguite, doublon ou corruption ;
