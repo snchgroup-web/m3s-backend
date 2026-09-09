@@ -42,7 +42,7 @@ Cette operation candidate :
 2. utilise dans T1-B un extracteur ferme et borne pour enumerer les references et les seules relations necessaires lorsqu'elles sont structurellement accessibles ;
 3. resout une seule fois chaque couple unique `type + id` avec les interfaces confirmees et le meme `resolvedAt` fige ;
 4. applique dans l'ordre confirme disponibilite, unicite structurelle, tenant, visibilite et confidentialite, cycle de vie, periode d'effet, exercice, responsabilites et relations ;
-5. traite un tableau vide comme `BUDGET_REFERENCE_NOT_FOUND`, plusieurs enregistrements ou un enregistrement structurellement invalide comme `BUDGET_REFERENCE_UNAVAILABLE`, puis conserve les refus specialises T1-B pour les controles suivants ;
+5. traite un tableau vide comme `BUDGET_REFERENCE_NOT_FOUND`, plusieurs enregistrements comme `BUDGET_REFERENCE_UNAVAILABLE`, et limite ce meme code aux echecs d'un enregistrement unique dans `validateBaseRecord` ou `validateSourceRecord` ; les champs fiscaux et de responsabilite sont controles ensuite par `validateFiscalYear` et `validateTypeRecord` avec leurs codes specialises `BUDGET_FISCAL_YEAR_INVALID` et `BUDGET_RESPONSIBILITY_INVALID` ;
 6. applique seulement apres ces controles le validateur complet T1-A a l'enveloppe Budget ;
 7. ne produit ses instantanes internes qu'apres le succes T1-A, a partir du meme cache resolu, sans rappeler une source ni changer d'instant ;
 8. ne retourne aucun enregistrement brut et ne rend jamais un budget invalide recevable ;
@@ -140,7 +140,7 @@ Les brouillons actuellement lisibles sont ordonnes par `updatedAt DESC`, puis `i
 Une future interface de liste devra donc parcourir des candidats V2 bornes au tenant et a l'auteur, puis verifier leur lisibilite avant de constituer la page. Elle collecte au plus `offset + limit + 1` brouillons lisibles afin de calculer `hasMore`.
 
 - Un candidat absent, V1, hors portee ou rendu invisible est omis sans signaler son existence.
-- Un candidat dont le statut courant interdit la restitution est omis.
+- Un candidat qui produit `BUDGET_REFERENCE_NOT_FOUND`, `BUDGET_REFERENCE_STATE_INVALID`, `BUDGET_FISCAL_YEAR_INVALID`, `BUDGET_RESPONSIBILITY_INVALID` ou `BUDGET_REFERENCE_RELATION_INVALID` est omis : ces codes decrivent un brouillon individuellement non restituable, sans rendre les autres brouillons illisibles.
 - L'indisponibilite ou l'ambiguite d'une source necessaire bloque toute la liste ; aucune page partielle n'est retournee.
 - Une corruption du stockage ou un doublon bloque toute la liste ; aucun resume douteux n'est omis silencieusement.
 - Le parcours technique devra posseder une borne explicite et testee. Si cette borne ne permet pas de determiner la page et `hasMore`, l'operation echoue fermee au lieu de presenter une liste incomplete comme exhaustive.
@@ -206,9 +206,10 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 21. refus de tout bloc sans liaison T1-E unique, de toute liaison sans bloc et de toute divergence entre les deux, avec preuve du cas direct `zero bloc + zero liaison` ;
 22. T1-B.1 prouvant la precedence complete des refus referentiels sur un document dont un champ non referentiel est corrompu mais dont les references restent extractibles ;
 23. T1-B.1 classant zero enregistrement en `BUDGET_REFERENCE_NOT_FOUND`, donc `404` direct ou omission de liste, avant la corruption non referentielle ;
-24. T1-B.1 classant avant T1-A un enregistrement structurellement invalide, invisible, hors cycle de vie, incoherent par responsabilite ou relation, avec le code T1-B exact ;
-25. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
-26. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
+24. T1-B.1 limitant `BUDGET_REFERENCE_UNAVAILABLE` aux echecs de `validateBaseRecord` et `validateSourceRecord`, puis conservant les codes specialises des champs fiscaux, responsabilites et relations ;
+25. liste omettant de facon deterministe les cinq familles de refus propres a un brouillon et bloquant seulement sur indisponibilite systemique ou corruption stockee ;
+26. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
+27. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
