@@ -244,6 +244,31 @@ test('an unextractable reference path fails before every source call', async () 
   ), 0);
 });
 
+test('stored preflight refuses oversized rows before every source call', async () => {
+  const { service, resolvers } = setup();
+  const rawBudget = budget();
+  rawBudget.rows = Array.from({ length: 101 }, (_, index) => ({
+    ...rawBudget.rows[0],
+    id: `ROW-${index + 1}`
+  }));
+
+  await rejects(() => storedCall(service, rawBudget), 'BUDGET_STORAGE_UNAVAILABLE');
+  assert.equal(Object.values(resolvers).reduce(
+    (sum, resolver) => sum + resolver.calls.length, 0
+  ), 0);
+});
+
+test('stored preflight refuses oversized period values before every source call', async () => {
+  const { service, resolvers } = setup();
+  const rawBudget = budget();
+  rawBudget.rows[0].periodValues.push({ periodId: 'P13', value: '' });
+
+  await rejects(() => storedCall(service, rawBudget), 'BUDGET_STORAGE_UNAVAILABLE');
+  assert.equal(Object.values(resolvers).reduce(
+    (sum, resolver) => sum + resolver.calls.length, 0
+  ), 0);
+});
+
 test('fiscal, responsibility and relation failures keep their specialised codes', async () => {
   const fiscal = fixtures();
   fiscal.fiscalYear[0].periods = fiscal.fiscalYear[0].periods.slice(0, 11);

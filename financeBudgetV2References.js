@@ -1,4 +1,8 @@
-const { validateBudgetV2 } = require('./financeBudgetV2Contracts');
+const {
+  MAX_ROWS,
+  PERIODS_PER_YEAR,
+  validateBudgetV2
+} = require('./financeBudgetV2Contracts');
 
 const REFERENCE_ID_PATTERN = /^[\x20-\x7e]{1,128}$/;
 const RFC3339_UTC_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?Z$/;
@@ -367,7 +371,7 @@ function extractStoredRequirements(rawBudget) {
     || !isReferenceId(rawBudget.responsibilities.budgetOwnerAgentId)
     || (rawBudget.responsibilities.controllerAgentId !== null
       && !isReferenceId(rawBudget.responsibilities.controllerAgentId))
-    || !Array.isArray(rawBudget.rows)) {
+    || !Array.isArray(rawBudget.rows) || rawBudget.rows.length > MAX_ROWS) {
     fail('BUDGET_STORAGE_UNAVAILABLE');
   }
 
@@ -390,7 +394,8 @@ function extractStoredRequirements(rawBudget) {
   for (const row of rawBudget.rows) {
     if (!row || typeof row !== 'object' || Array.isArray(row)
       || !row.dimensions || typeof row.dimensions !== 'object'
-      || Array.isArray(row.dimensions) || !Array.isArray(row.periodValues)) {
+      || Array.isArray(row.dimensions) || !Array.isArray(row.periodValues)
+      || row.periodValues.length > PERIODS_PER_YEAR) {
       fail('BUDGET_STORAGE_UNAVAILABLE');
     }
     for (const periodValue of row.periodValues) {
