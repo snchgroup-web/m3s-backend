@@ -149,14 +149,15 @@ Avant T1-E, aucun bloc ni liaison de promotion ne peut exister ; toute presence 
 
 Les brouillons actuellement lisibles sont ordonnes par `updatedAt DESC`, puis `id ASC`. `offset` et `limit` s'appliquent apres les controles de portee, de contrat et de visibilite courante.
 
-Une future interface de liste devra donc parcourir des candidats V2 bornes au tenant et a l'auteur, puis verifier leur lisibilite avant de constituer la page. Elle collecte au plus `offset + limit + 1` brouillons lisibles afin de calculer `hasMore`. La borne normative `MAX_LIST_CANDIDATES` vaut exactement `10051`, soit `offset maximal 10000 + limit maximal 50 + 1`.
+Une future interface de liste devra donc parcourir des candidats V2 bornes au tenant et a l'auteur, puis verifier leur lisibilite avant de constituer la page. Elle collecte au plus `offset + limit + 1` brouillons lisibles afin de calculer `hasMore`. La borne normative `MAX_LIST_CANDIDATES` vaut exactement `10051`, soit `offset maximal 10000 + limit maximal 50 + 1`, mais le parcours reste simultanement soumis aux plafonds plus restrictifs de `4096` resolutions uniques et `64 Mio` de charge serialisee cumulee.
 
 - Un candidat absent, V1, hors portee ou rendu invisible est omis sans signaler son existence.
 - Un candidat qui produit `BUDGET_REFERENCE_NOT_FOUND`, `BUDGET_REFERENCE_STATE_INVALID`, `BUDGET_FISCAL_YEAR_INVALID`, `BUDGET_RESPONSIBILITY_INVALID` ou `BUDGET_REFERENCE_RELATION_INVALID` est omis : ces codes decrivent un brouillon individuellement non restituable, sans rendre les autres brouillons illisibles.
 - L'indisponibilite ou l'ambiguite d'une source necessaire bloque toute la liste ; aucune page partielle n'est retournee.
 - Une corruption du stockage ou un doublon qui demeure le premier resultat observable apres la precedence normative bloque toute la liste ; aucun resume douteux n'est restitue. Une corruption independante masquee par un refus referentiel anterieur propre au brouillon ne remplace pas son omission et n'est pas exposee pendant cette requete.
-- L'atteinte de `MAX_LIST_REFERENCE_RESOLUTIONS = 4096` avant determination de la page bloque toute la liste en `503 BUDGET_STORAGE_UNAVAILABLE` ; le couple suivant n'est jamais resolu.
-- Le stockage retourne au plus `MAX_LIST_CANDIDATES + 1`, donc `10052`, candidats ordonnes : les `10051` premiers peuvent etre resolus et le dernier sert uniquement de sentinelle d'existence, sans resolution. Le parcours s'arrete avec succes des que `offset + limit + 1` brouillons lisibles sont collectes ou lorsque la source est exhaustivement terminee dans cette borne. Si la sentinelle existe et que les `10051` candidats inspectables ne suffisent pas a determiner la page et `hasMore`, toute la liste echoue en `503 BUDGET_STORAGE_UNAVAILABLE`, sans page partielle. Cette borne et ce code sont identiques pour toute implementation.
+- Une fois `MAX_LIST_REFERENCE_RESOLUTIONS = 4096` atteint, le parcours peut encore traiter des candidats dont tous les couples `type + id` sont deja en cache. Seule la tentative de rencontrer un `4097e` couple distinct bloque toute la liste en `503 BUDGET_STORAGE_UNAVAILABLE`, avant tout appel de source.
+- Le stockage fournit les candidats ordonnes par un iterateur ou curseur interne borne, sans materialiser la collection complete. `MAX_LIST_SCAN_BYTES` vaut exactement `67108864` octets, soit `64 Mio`, mesures sur les enveloppes serialisees UTF-8 effectivement parcourues. Avant de charger le candidat qui ferait depasser cette somme, l'adaptateur arrete le parcours et toute la liste echoue en `503 BUDGET_STORAGE_UNAVAILABLE`, sans page partielle. Aucun lot intermediaire ne depasse `50` candidats et aucune enveloppe depassant la borne stockee admise n'est materialisee comme valide.
+- Le stockage fournit au plus `MAX_LIST_CANDIDATES + 1`, donc `10052`, positions candidates par ce parcours borne : les `10051` premieres peuvent etre inspectees et la derniere sert uniquement de sentinelle d'existence, sans resolution ni chargement de son enveloppe. Le parcours s'arrete avec succes des que `offset + limit + 1` brouillons lisibles sont collectes ou lorsque la source est exhaustivement terminee dans les trois bornes. Si la sentinelle existe et que les candidats inspectables ne suffisent pas a determiner la page et `hasMore`, toute la liste echoue en `503 BUDGET_STORAGE_UNAVAILABLE`, sans page partielle. Ces bornes et ce code sont identiques pour toute implementation.
 
 Cette pagination est deterministe pour un jeu stable. Un instantane coherent sous ecritures concurrentes necessiterait un futur contrat par curseur, hors T1-C.
 
@@ -170,7 +171,7 @@ Les echecs conservent l'enveloppe fermee `{ success: false, contractVersion: 2, 
 | `BUDGET_AUTH_REQUIRED` | `401` | identite absente ou invalide |
 | `BUDGET_V2_DISABLED` | `503` | capacite V2 fermee |
 | `BUDGET_ACCESS_DENIED` | `403` | `finance:read` absent |
-| `BUDGET_STORAGE_UNAVAILABLE` | `503` | stockage indispensable indisponible, ambigu ou corrompu ; sentinelle presente apres `10051` candidats sans page determinable ; ou plafond de `4096` resolutions uniques atteint avant determination |
+| `BUDGET_STORAGE_UNAVAILABLE` | `503` | stockage indispensable indisponible, ambigu ou corrompu ; sentinelle presente apres `10051` candidats sans page determinable ; tentative d'un `4097e` couple referentiel distinct ; ou tentative de depasser `67108864` octets parcourus |
 | `BUDGET_DRAFT_NOT_FOUND` | `404` | brouillon absent, V1, hors tenant, hors auteur ou non visible |
 | `BUDGET_REFERENCE_UNAVAILABLE` | `503` | source necessaire absente, ambigue, indisponible ou enregistrement unique refusant `validateBaseRecord` ou `validateSourceRecord` |
 | `BUDGET_REFERENCE_NOT_FOUND` | `404` | reference absente, hors tenant ou non visible en lecture directe |
@@ -202,7 +203,7 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 4. exclusion croisee V1/V2 et absence de conversion implicite ;
 5. validation stricte de l'enveloppe, de la version et des instantanes, y compris l'egalite de chaque identifiant entre `budget` et son chemin d'instantane ;
 6. liste limitee aux dix champs de resume, sans contenu financier ;
-7. ordre canonique, pagination apres filtrage et calcul de `hasMore`, avec cache referentiel commun, `MAX_LIST_REFERENCE_RESOLUTIONS = 4096`, `MAX_LIST_CANDIDATES = 10051` et echec `BUDGET_STORAGE_UNAVAILABLE` si l'une de ces bornes laisse la page indeterminable ;
+7. ordre canonique, pagination apres filtrage et calcul de `hasMore`, avec cache referentiel commun, lots internes de `50`, `MAX_LIST_SCAN_BYTES = 67108864`, `MAX_LIST_REFERENCE_RESOLUTIONS = 4096`, `MAX_LIST_CANDIDATES = 10051` et echec `BUDGET_STORAGE_UNAVAILABLE` si l'une de ces bornes laisse la page indeterminable ;
 8. recontrole T1-B.1 a chaque requete avec `operation: READ` et `resolvedAt` explicitement egal au seul `requestAt` capture, y compris le refus d'un appel omettant l'operation ou utilisant `WRITE` ;
 9. liste de plusieurs brouillons proches d'une borne d'effet dont chaque appel T1-B.1 recoit `operation: READ` et ce meme `requestAt`, meme si l'horloge reelle avance pendant le parcours ;
 10. reference archivee ou cloturee seulement lorsque la visibilite historique l'autorise ;
@@ -226,7 +227,8 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 28. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal ;
 29. pagination inspectant au plus `10051` candidats, ne resolvant jamais la sentinelle `10052`, reussissant si la page est determinable ou la source epuisee et retournant exactement `503 BUDGET_STORAGE_UNAVAILABLE` sinon ;
 30. T1-D capturant un seul `writeAt`, injectant `clock: () => new Date(writeAt.getTime())` dans son service T1-B de requete, appelant `operation: WRITE` et persistant ce meme instant sans `CURRENT_TIMESTAMP()` independant, avec refus T1-C de toute divergence ;
-31. liste partageant un seul cache T1-B.1 entre candidats, ne resolvant chaque couple `type + id` qu'une fois, revalidant les relations par brouillon et refusant le `4097e` couple avant appel de source avec `503 BUDGET_STORAGE_UNAVAILABLE`.
+31. liste partageant un seul cache T1-B.1 entre candidats, ne resolvant chaque couple `type + id` qu'une fois, revalidant les relations par brouillon, continuant sur des cache hits apres `4096` couples et refusant seulement la tentative d'un `4097e` couple avant appel de source ;
+32. stockage parcouru par iterateur ou curseur interne en lots de `50` maximum, sans materialisation globale, avec arret avant depassement de `67108864` octets UTF-8 cumules et `503 BUDGET_STORAGE_UNAVAILABLE` sans page partielle.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
