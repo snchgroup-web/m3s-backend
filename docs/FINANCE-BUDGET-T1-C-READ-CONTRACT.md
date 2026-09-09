@@ -50,6 +50,16 @@ Cette operation candidate :
 
 Une absence ou une invisibilite est donc classee par T1-B.1 avant une corruption independante du titre, d'un montant ou d'un autre champ non referentiel : `404` en lecture directe et omission non revelatrice dans une liste. Si la structure des references elle-meme est inexploitable, `BUDGET_STORAGE_UNAVAILABLE` reste immediat. Cette operation remplace, pour les brouillons stockes seulement, le double parcours `preflight puis READ` ; elle garantit une resolution unique et une precedence stable. Sa specification executable, ses erreurs exactes et ses tests relevent d'une autorisation d'implementation distincte ; le present document ne l'implemente pas.
 
+## Prerequis temporel T1-D candidat
+
+Le futur stockage T1-D devra capturer un unique `writeAt` UTC a la frontiere applicative de chaque creation ou mise a jour. Ce meme instant est passe a T1-B comme `resolvedAt` et persiste par T1-D comme horodatage de la version ; les champs compares ne sont jamais produits par un `CURRENT_TIMESTAMP()` independant de la base.
+
+- A la creation, `resolvedAt`, `createdAt` et `updatedAt` sont strictement egaux a `writeAt`.
+- A la mise a jour, `createdAt` reste immuable et anterieur ou egal a `writeAt`, tandis que `resolvedAt` et `updatedAt` sont strictement egaux a `writeAt`.
+- Une date technique de base distincte peut exister pour son exploitation interne, mais elle n'entre ni dans le contrat restitue ni dans les controles chronologiques T1-C.
+
+Ce prerequis devra etre implemente et teste dans T1-D avant toute lecture T1-C. Il exige une autorisation separee et ne modifie aucun stockage dans le present paquet.
+
 ## Contrat de restitution candidat
 
 Les deux operations futures restent celles de `BUDGET-T1-TECH-001 V0.1` :
@@ -121,7 +131,7 @@ Avant restitution, une future implementation devra verifier :
 - `title` strictement egal a `budget.title` ;
 - `entity` et `year` egaux aux valeurs serveur de l'instantane d'identite stocke ;
 - `scope: "organization"`, `status: "draft"` et `access: "owner-only"` exacts ;
-- `createdAt` et `updatedAt` valides ; pour `version === 1`, `resolvedAt <= createdAt` et `createdAt === updatedAt` ; pour `version > 1`, `createdAt <= resolvedAt <= updatedAt` ;
+- `createdAt` et `updatedAt` valides et issus du meme instant applicatif que les instantanes de leur version ; pour `version === 1`, `resolvedAt === createdAt === updatedAt` ; pour `version > 1`, `createdAt <= resolvedAt` et `resolvedAt === updatedAt` ;
 - aucune contradiction entre les parents soumis, resolus et instantanes ;
 - une correspondance bidirectionnelle, dans la portee tenant-auteur, entre la presence du bloc `promotion` et une unique liaison T1-E persistante vers ce brouillon V2 : ni bloc sans liaison, ni liaison sans bloc, ni liaison multiple ;
 - lorsqu'un bloc `promotion` existe avec sa liaison unique, sa forme fermee, ses types, ses bornes, son rapport, ses empreintes, sa provenance, l'identifiant V2 lie et ses invariants sont valides par le futur validateur pur confirme de T1-E, sans jamais exposer ce bloc ;
@@ -201,7 +211,7 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 16. refus de deux instantanes divergents pour un meme couple `type + id` repete ;
 17. refus d'instantanes portant plusieurs `resolvedAt`, un instant hors periode d'effet ou un statut historiquement incompatible avec les champs persistes, sans inventer un historique des roles ;
 18. refus d'un resume dont `title` diverge de `budget.title`, comme de `entity` ou `year` divergents ;
-19. refus d'une portee, d'un statut, d'un acces ou d'une chronologie serveur incoherents, avec les relations temporelles propres a la version initiale et aux versions mises a jour ;
+19. refus d'une portee, d'un statut, d'un acces ou d'une chronologie serveur incoherents, avec egalite stricte `resolvedAt === createdAt === updatedAt` a la creation, puis `resolvedAt === updatedAt` et `createdAt` immuable a la mise a jour ;
 20. refus d'une enveloppe racine ouverte ou d'un bloc `promotion` incomplet, inconnu ou non validable ;
 21. refus de tout bloc sans liaison T1-E unique, de toute liaison sans bloc et de toute divergence entre les deux, avec preuve du cas direct `zero bloc + zero liaison` ;
 22. T1-B.1 prouvant la precedence complete des refus referentiels sur un document dont un champ non referentiel est corrompu mais dont les references restent extractibles ;
@@ -211,7 +221,8 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 26. liste omettant de facon deterministe les cinq familles de refus propres a un brouillon et bloquant seulement sur indisponibilite systemique ou corruption stockee encore observable ;
 27. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
 28. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal ;
-29. pagination inspectant au plus `10051` candidats, ne resolvant jamais la sentinelle `10052`, reussissant si la page est determinable ou la source epuisee et retournant exactement `503 BUDGET_STORAGE_UNAVAILABLE` sinon.
+29. pagination inspectant au plus `10051` candidats, ne resolvant jamais la sentinelle `10052`, reussissant si la page est determinable ou la source epuisee et retournant exactement `503 BUDGET_STORAGE_UNAVAILABLE` sinon ;
+30. T1-D reutilisant un seul `writeAt` pour les instantanes et les horodatages compares, sans `CURRENT_TIMESTAMP()` independant, et refus T1-C de toute divergence.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
@@ -228,7 +239,8 @@ Confirmer ou amender `BUDGET-T1-C-001 V0.1` en une decision groupee :
 7. appliquer ordre et pagination apres filtrage de la visibilite courante, sans succes partiel ;
 8. retourner uniquement les dix champs de resume dans la liste et le document stocke valide en lecture directe ;
 9. echouer ferme sur indisponibilite systemique, ambiguite, doublon ou corruption ;
-10. exiger une autorisation distincte pour le prerequis pur T1-B.1, puis une autre avant toute implementation T1-C, fusion, recette preview ou activation.
+10. exiger l'horodatage T1-D depuis le meme `writeAt` applicatif que les instantanes, sans horloge de base independante pour les champs compares ;
+11. exiger une autorisation distincte pour les prerequis purs T1-B.1 et T1-D, puis une autre avant toute implementation T1-C, fusion, recette preview ou activation.
 
 La confirmation de ce paquet validera uniquement le cadrage candidat. Elle ne vaudra ni autorisation d'implementation ni autorisation de fusion.
 
