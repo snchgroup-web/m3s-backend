@@ -404,7 +404,7 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
     }
 
     const lifecycleErrors = new Set();
-    for (const { type, id, purpose } of uniqueRequirements) {
+    for (const { type, id, purpose } of requirements) {
       const { record } = cached(type, id);
       if (compareUtcTimestamps(record.effectiveFrom, resolvedAt) > 0
         || (record.effectiveTo !== null

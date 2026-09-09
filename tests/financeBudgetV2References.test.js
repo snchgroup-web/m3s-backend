@@ -236,6 +236,12 @@ test('all lifecycle checks precede fiscal, responsibility and relation validatio
     budget: budget(), tenantId: TENANT, actorId: ACTOR
   }), 'BUDGET_REFERENCE_STATE_INVALID');
 
+  const reusedAgent = fixtures();
+  reusedAgent.agent[0].status = 'inactive';
+  await rejects(() => setup(reusedAgent).service.resolveBudgetReferences({
+    budget: budget(), tenantId: TENANT, actorId: ACTOR
+  }), 'BUDGET_REFERENCE_STATE_INVALID');
+
   const generalBeforeFiscalLifecycle = fixtures();
   generalBeforeFiscalLifecycle.fiscalYear[0].effectiveFrom = '2027-01-01T00:00:00Z';
   generalBeforeFiscalLifecycle.function[0].status = 'inactive';
@@ -272,18 +278,23 @@ test('read accepts explicitly retained archives while writes remain closed', asy
 
 test('read retains archived responsibility agents only under explicit historical visibility', async () => {
   const data = fixtures();
+  const responsibilityOnlyBudget = budget();
+  responsibilityOnlyBudget.rows[0].dimensions.agentId = null;
   Object.assign(data.agent[0], { status: 'archived', historicalVisible: true });
   const { service } = setup(data);
   await rejects(() => service.resolveBudgetReferences({
-    budget: budget(), tenantId: TENANT, actorId: ACTOR, operation: OPERATIONS.WRITE
+    budget: responsibilityOnlyBudget,
+    tenantId: TENANT, actorId: ACTOR, operation: OPERATIONS.WRITE
   }), 'BUDGET_RESPONSIBILITY_INVALID');
   await assert.doesNotReject(() => service.resolveBudgetReferences({
-    budget: budget(), tenantId: TENANT, actorId: ACTOR, operation: OPERATIONS.READ
+    budget: responsibilityOnlyBudget,
+    tenantId: TENANT, actorId: ACTOR, operation: OPERATIONS.READ
   }));
 
   data.agent[0].historicalVisible = false;
   await rejects(() => setup(data).service.resolveBudgetReferences({
-    budget: budget(), tenantId: TENANT, actorId: ACTOR, operation: OPERATIONS.READ
+    budget: responsibilityOnlyBudget,
+    tenantId: TENANT, actorId: ACTOR, operation: OPERATIONS.READ
   }), 'BUDGET_RESPONSIBILITY_INVALID');
 });
 
