@@ -17,6 +17,8 @@ const REFERENCE_TYPES = Object.freeze([
 const OPERATIONS = Object.freeze({ WRITE: 'write', READ: 'read' });
 const MAX_DETAIL_REFERENCE_PAIRS = 804;
 const MAX_LIST_REFERENCE_RESOLUTIONS = 4096;
+const MAX_CONCURRENT_STORED_RESOLUTIONS = 16;
+const DEFAULT_STORED_RESOLVER_TIMEOUT_MS = 5000;
 const CONFIDENTIALITIES = new Set(['public', 'internal', 'restricted']);
 
 const DIMENSION_TYPES = Object.freeze({
@@ -272,7 +274,7 @@ function validateTypeRecord(record, type, purpose, operation, at) {
   }
 }
 
-function recordForStoredCache(record, type) {
+function baseRecordForStoredCache(record) {
   const cached = {
     id: record.id,
     tenantId: record.tenantId,
@@ -287,29 +289,53 @@ function recordForStoredCache(record, type) {
   if (Object.hasOwn(record, 'historicalVisible')) {
     cached.historicalVisible = record.historicalVisible;
   }
+  return cached;
+}
+
+function freezeStoredRecord(record) {
+  if (Array.isArray(record.periods)) {
+    record.periods.forEach(period => Object.freeze(period));
+    Object.freeze(record.periods);
+  }
+  if (Array.isArray(record.allowedResponsibilities)) {
+    Object.freeze(record.allowedResponsibilities);
+  }
+  return Object.freeze(record);
+}
+
+function recordForStoredCache(record, type, baseRecord) {
+  const cached = { ...baseRecord };
+  if (type === 'fiscalYear') cached.entityId = record.entityId;
+  if (type === 'agent') cached.teamId = record.teamId;
+  if (type === 'portfolio') cached.functionId = record.functionId;
+  if (type === 'dossier') cached.portfolioId = record.portfolioId;
+  if (type === 'project') cached.dossierId = record.dossierId;
+  if (type === 'phase') cached.projectId = record.projectId;
+  validateSourceRecord(cached, type);
+
   if (type === 'fiscalYear') {
-    let periods = null;
     const sourcePeriods = record.periods;
-    if (Array.isArray(sourcePeriods)) {
-      try {
-        periods = sourcePeriods.map(period => {
-          if (!hasExactFields(period, PERIOD_KEYS)) {
-            fail('BUDGET_FISCAL_YEAR_INVALID');
-          }
-          return {
-            periodId: period.periodId,
-            ordinal: period.ordinal,
-            startDate: period.startDate,
-            endDate: period.endDate
-          };
-        });
-      } catch (error) {
-        if (error instanceof BudgetReferenceError) throw error;
-        fail('BUDGET_FISCAL_YEAR_INVALID');
-      }
+    if (!Array.isArray(sourcePeriods) || sourcePeriods.length !== PERIODS_PER_YEAR) {
+      fail('BUDGET_FISCAL_YEAR_INVALID');
+    }
+    let periods;
+    try {
+      periods = sourcePeriods.map(period => {
+        if (!hasExactFields(period, PERIOD_KEYS)) {
+          fail('BUDGET_FISCAL_YEAR_INVALID');
+        }
+        return {
+          periodId: period.periodId,
+          ordinal: period.ordinal,
+          startDate: period.startDate,
+          endDate: period.endDate
+        };
+      });
+    } catch (error) {
+      if (error instanceof BudgetReferenceError) throw error;
+      fail('BUDGET_FISCAL_YEAR_INVALID');
     }
     Object.assign(cached, {
-      entityId: record.entityId,
       summaryYear: record.summaryYear,
       startDate: record.startDate,
       endDate: record.endDate,
@@ -319,7 +345,6 @@ function recordForStoredCache(record, type) {
     });
   }
   if (type === 'agent') {
-    cached.teamId = record.teamId;
     try {
       cached.allowedResponsibilities = Array.isArray(record.allowedResponsibilities)
         ? [...record.allowedResponsibilities]
@@ -328,11 +353,50 @@ function recordForStoredCache(record, type) {
       cached.allowedResponsibilities = null;
     }
   }
-  if (type === 'portfolio') cached.functionId = record.functionId;
-  if (type === 'dossier') cached.portfolioId = record.portfolioId;
-  if (type === 'project') cached.dossierId = record.dossierId;
-  if (type === 'phase') cached.projectId = record.projectId;
-  return cached;
+  return freezeStoredRecord(cached);
+}
+
+function createBoundedScheduler(limit) {
+  const queue = [];
+  let active = 0;
+
+  function drain() {
+    while (active < limit && queue.length > 0) {
+      const { task, resolve, reject } = queue.shift();
+      active += 1;
+      Promise.resolve()
+        .then(task)
+        .then(resolve, reject)
+        .finally(() => {
+          active -= 1;
+          drain();
+        });
+    }
+  }
+
+  return task => new Promise((resolve, reject) => {
+    queue.push({ task, resolve, reject });
+    drain();
+  });
+}
+
+async function callResolverWithTimeout(resolver, query, timeoutMs) {
+  const controller = new AbortController();
+  let timeoutId;
+  const timeout = new Promise((resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new BudgetReferenceError('BUDGET_REFERENCE_UNAVAILABLE'));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => resolver({ ...query, signal: controller.signal })),
+      timeout
+    ]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function collectRequirements(budget) {
@@ -461,13 +525,22 @@ function typedSnapshot(record, type, resolvedAt) {
 }
 
 // Each injected resolver returns { available, records }; all returned data stays untrusted here.
-function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clock } = {}) {
+function createBudgetReferenceService({
+  resolvers = {}, canAccessRestricted, clock,
+  storedResolverTimeoutMs = DEFAULT_STORED_RESOLVER_TIMEOUT_MS
+} = {}) {
   const now = typeof clock === 'function' ? clock : () => new Date();
   const restrictedPolicy = typeof canAccessRestricted === 'function'
     ? canAccessRestricted
     : () => false;
   const storedCache = new Map();
   let storedContextKey = null;
+  const storedScheduler = createBoundedScheduler(MAX_CONCURRENT_STORED_RESOLUTIONS);
+  const storedTimeoutMs = Number.isInteger(storedResolverTimeoutMs)
+    && storedResolverTimeoutMs > 0
+    && storedResolverTimeoutMs <= DEFAULT_STORED_RESOLVER_TIMEOUT_MS
+    ? storedResolverTimeoutMs
+    : DEFAULT_STORED_RESOLVER_TIMEOUT_MS;
 
   async function resolveBudgetReferences({ budget, tenantId, actorId, operation = OPERATIONS.WRITE }) {
     validateBudgetV2(budget);
@@ -675,44 +748,49 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
 
     const preflightErrors = [];
     const draftEntries = new Map();
+    const newPendingEntries = [];
+    let capacityExceeded = false;
     for (const [key, { type, id }] of uniqueRequirementsByKey) {
       if (!storedCache.has(key)) {
         if (storedCache.size >= MAX_LIST_REFERENCE_RESOLUTIONS) {
-          fail('BUDGET_STORAGE_UNAVAILABLE');
+          capacityExceeded = true;
+          break;
         }
-        const pendingEntry = Promise.resolve().then(async () => {
+        const pendingEntry = storedScheduler(async () => {
           try {
             const resolver = resolvers[type];
             if (typeof resolver !== 'function') fail('BUDGET_REFERENCE_UNAVAILABLE');
             let result;
             try {
-              result = await resolver({
+              result = await callResolverWithTimeout(resolver, {
                 id, tenantId, actorId, operation, resolvedAt: resolvedAtIso
-              });
+              }, storedTimeoutMs);
             } catch (_error) {
               fail('BUDGET_REFERENCE_UNAVAILABLE');
             }
             validateResolverResult(result);
             if (result.records.length === 0) fail('BUDGET_REFERENCE_NOT_FOUND');
             if (result.records.length > 1) fail('BUDGET_REFERENCE_UNAVAILABLE');
-            const cachedRecord = recordForStoredCache(result.records[0], type);
-            validateBaseRecord(cachedRecord);
-            if (cachedRecord.id !== id || cachedRecord.tenantId !== tenantId
-              || !cachedRecord.visible) {
+            const sourceRecord = result.records[0];
+            const baseRecord = baseRecordForStoredCache(sourceRecord);
+            validateBaseRecord(baseRecord);
+            if (baseRecord.id !== id || baseRecord.tenantId !== tenantId
+              || !baseRecord.visible) {
               fail('BUDGET_REFERENCE_NOT_FOUND');
             }
-            if (cachedRecord.confidentiality === 'restricted') {
+            if (baseRecord.confidentiality === 'restricted') {
               let allowed = false;
               try {
                 allowed = restrictedPolicy({
-                  type, record: cachedRecord, tenantId, actorId, operation
+                  type, record: Object.freeze({ ...baseRecord }),
+                  tenantId, actorId, operation
                 }) === true;
               } catch (_error) {
                 fail('BUDGET_REFERENCE_UNAVAILABLE');
               }
               if (!allowed) fail('BUDGET_REFERENCE_NOT_FOUND');
             }
-            validateSourceRecord(cachedRecord, type);
+            const cachedRecord = recordForStoredCache(sourceRecord, type, baseRecord);
             return { record: cachedRecord, errorCode: null };
           } catch (error) {
             return {
@@ -724,7 +802,14 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
           }
         });
         storedCache.set(key, pendingEntry);
+        newPendingEntries.push(pendingEntry);
       }
+    }
+    if (capacityExceeded) {
+      await Promise.all(newPendingEntries);
+      fail('BUDGET_STORAGE_UNAVAILABLE');
+    }
+    for (const [key] of uniqueRequirementsByKey) {
       const entry = await storedCache.get(key);
       draftEntries.set(key, entry);
       if (entry.errorCode !== null) preflightErrors.push(entry.errorCode);
@@ -870,6 +955,8 @@ module.exports = {
   DIMENSION_TYPES,
   MAX_DETAIL_REFERENCE_PAIRS,
   MAX_LIST_REFERENCE_RESOLUTIONS,
+  MAX_CONCURRENT_STORED_RESOLUTIONS,
+  DEFAULT_STORED_RESOLVER_TIMEOUT_MS,
   OPERATIONS,
   REFERENCE_TYPES,
   createBudgetReferenceService

@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 
 const {
   BudgetReferenceError,
+  DEFAULT_STORED_RESOLVER_TIMEOUT_MS,
+  MAX_CONCURRENT_STORED_RESOLUTIONS,
   MAX_DETAIL_REFERENCE_PAIRS,
   MAX_LIST_REFERENCE_RESOLUTIONS,
   OPERATIONS,
@@ -82,11 +84,11 @@ function budget() {
   };
 }
 
-function setup(data = fixtures()) {
+function setup(data = fixtures(), options = {}) {
   const resolvers = Object.fromEntries(Object.entries(data).map(([type, records]) => [
     type, createFakeBudgetReferenceResolver(records)
   ]));
-  return { resolvers, service: createBudgetReferenceService({ resolvers }) };
+  return { resolvers, service: createBudgetReferenceService({ resolvers, ...options }) };
 }
 
 async function rejects(run, code) {
@@ -180,6 +182,24 @@ test('concurrent stored drafts share one in-flight resolution per pair', async (
   assert.equal(entityCalls.length, 1);
 });
 
+test('a stored resolver timeout fails closed and receives an abort signal', async () => {
+  const data = fixtures();
+  let receivedSignal;
+  const entityResolver = query => {
+    receivedSignal = query.signal;
+    return new Promise(() => {});
+  };
+  const resolvers = Object.fromEntries(Object.entries(data).map(([type, records]) => [
+    type, type === 'entity' ? entityResolver : createFakeBudgetReferenceResolver(records)
+  ]));
+  const service = createBudgetReferenceService({ resolvers, storedResolverTimeoutMs: 10 });
+
+  await rejects(() => storedCall(service), 'BUDGET_REFERENCE_UNAVAILABLE');
+  assert.ok(receivedSignal instanceof AbortSignal);
+  assert.equal(receivedSignal.aborted, true);
+  assert.equal(DEFAULT_STORED_RESOLVER_TIMEOUT_MS, 5000);
+});
+
 test('mutating one returned snapshot cannot contaminate the shared cache', async () => {
   const { service, resolvers } = setup();
   const first = await storedCall(service);
@@ -213,6 +233,50 @@ test('non-clonable source metadata is ignored and later mutation cannot contamin
 
   assert.equal(second.identity.entityId.labelSnapshot, 'Reference ORG-2SG');
   assert.equal(sharedEntityResolver.calls.length, 1);
+});
+
+test('restricted policy receives an immutable view detached from the stored cache', async () => {
+  const data = fixtures();
+  data.entity[0].confidentiality = 'restricted';
+  let policyRecord;
+  const { service, resolvers } = setup(data, {
+    canAccessRestricted({ record }) {
+      policyRecord = record;
+      record.labelSnapshot = 'Policy mutation';
+      return true;
+    }
+  });
+
+  const first = await storedCall(service);
+  policyRecord.labelSnapshot = 'Delayed mutation';
+  const second = await storedCall(service);
+
+  assert.equal(Object.isFrozen(policyRecord), true);
+  assert.equal(first.identity.entityId.labelSnapshot, 'Reference ORG-2SG');
+  assert.equal(second.identity.entityId.labelSnapshot, 'Reference ORG-2SG');
+  assert.equal(resolvers.entity.calls.length, 1);
+});
+
+test('restricted stored references remain hidden without an explicit grant', async () => {
+  const data = fixtures();
+  data.entity[0].confidentiality = 'restricted';
+
+  await rejects(() => storedCall(setup(data).service), 'BUDGET_REFERENCE_NOT_FOUND');
+});
+
+test('stored reads retain explicitly visible historical references', async () => {
+  const data = fixtures();
+  data.agent.forEach(record => Object.assign(record, {
+    status: 'archived', historicalVisible: true
+  }));
+  Object.assign(data.project[0], { status: 'completed', historicalVisible: true });
+  Object.assign(data.phase[0], { status: 'closed', historicalVisible: true });
+
+  const result = await storedCall(setup(data).service);
+
+  assert.equal(result.responsibilities.budgetOwnerAgentId.statusSnapshot, 'archived');
+  assert.equal(result.rows[0].dimensions.projectId.statusSnapshot, 'completed');
+  assert.equal(result.rows[0].dimensions.phaseId.statusSnapshot, 'closed');
 });
 
 test('reference refusal precedes an independent stored budget corruption', async () => {
@@ -290,6 +354,24 @@ test('fiscal period metadata is closed before canonical projection', async () =>
   await rejects(() => storedCall(setup(data).service), 'BUDGET_FISCAL_YEAR_INVALID');
 });
 
+test('generic source failure precedes malformed fiscal periods', async () => {
+  const data = fixtures();
+  data.fiscalYear[0].sourceRevision = '';
+  data.fiscalYear[0].periods[0].unexpected = 'metadata';
+
+  await rejects(() => storedCall(setup(data).service), 'BUDGET_REFERENCE_UNAVAILABLE');
+});
+
+test('fiscal period count is rejected before projection', async () => {
+  const data = fixtures();
+  data.fiscalYear[0].periods = Array.from({ length: 1000 }, (_, index) => ({
+    periodId: `P-${index}`, ordinal: index + 1,
+    startDate: '2026-01-01', endDate: '2026-01-31'
+  }));
+
+  await rejects(() => storedCall(setup(data).service), 'BUDGET_FISCAL_YEAR_INVALID');
+});
+
 test('missing references still precede projected fiscal shape errors', async () => {
   const data = fixtures();
   data.entity = [];
@@ -332,6 +414,23 @@ test('path-dependent responsibility checks are repeated for cached records', asy
   assert.equal(resolvers.agent.calls.length, 1);
 });
 
+test('every stored parent relation and the agent-team relation fail independently', async () => {
+  const cases = [
+    ['fiscalYear', record => { record.entityId = 'ORG-OTHER'; }, 'BUDGET_REFERENCE_RELATION_INVALID'],
+    ['portfolio', record => { record.functionId = 'other-function'; }, 'BUDGET_REFERENCE_RELATION_INVALID'],
+    ['dossier', record => { record.portfolioId = 'other-portfolio'; }, 'BUDGET_REFERENCE_RELATION_INVALID'],
+    ['project', record => { record.dossierId = 'other-dossier'; }, 'BUDGET_REFERENCE_RELATION_INVALID'],
+    ['phase', record => { record.projectId = 'other-project'; }, 'BUDGET_REFERENCE_RELATION_INVALID'],
+    ['agent', record => { record.teamId = 'TSN'; }, 'BUDGET_RESPONSIBILITY_INVALID']
+  ];
+
+  for (const [type, mutate, expectedCode] of cases) {
+    const data = fixtures();
+    mutate(data[type][0]);
+    await rejects(() => storedCall(setup(data).service), expectedCode);
+  }
+});
+
 function largeBudget(batch, rowCount = 100) {
   const source = {
     title: `Budget ${batch}`,
@@ -359,7 +458,7 @@ function largeBudget(batch, rowCount = 100) {
   return source;
 }
 
-function dynamicService() {
+function dynamicService({ beforeReturn, serviceOptions = {} } = {}) {
   const calls = [];
   const resolvers = Object.fromEntries([
     'entity', 'fiscalYear', 'function', 'team', 'agent', 'country',
@@ -385,10 +484,39 @@ function dynamicService() {
     if (type === 'dossier') overrides.portfolioId = `portfolio-${batch}-${index}`;
     if (type === 'project') overrides.dossierId = `dossier-${batch}-${index}`;
     if (type === 'phase') overrides.projectId = `project-${batch}-${index}`;
+    if (beforeReturn) await beforeReturn({ type, query });
     return { available: true, records: [base(query.id, overrides)] };
   }]));
-  return { calls, service: createBudgetReferenceService({ resolvers }) };
+  return {
+    calls,
+    service: createBudgetReferenceService({ resolvers, ...serviceOptions })
+  };
 }
+
+test('stored source work is concurrent but never exceeds the fixed ceiling', async () => {
+  let active = 0;
+  let maximumActive = 0;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const { service } = dynamicService({
+    beforeReturn: async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await gate;
+      active -= 1;
+    },
+    serviceOptions: { storedResolverTimeoutMs: 1000 }
+  });
+
+  const pending = storedCall(service, largeBudget('parallel', 2));
+  for (let attempt = 0; attempt < 20
+    && maximumActive < MAX_CONCURRENT_STORED_RESOLUTIONS; attempt += 1) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  release();
+  await pending;
+  assert.equal(maximumActive, MAX_CONCURRENT_STORED_RESOLUTIONS);
+});
 
 test('the 805th distinct pair in one draft is refused before source access', async () => {
   assert.equal(MAX_DETAIL_REFERENCE_PAIRS, 804);
