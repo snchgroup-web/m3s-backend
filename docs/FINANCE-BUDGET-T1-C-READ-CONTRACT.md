@@ -96,7 +96,7 @@ Avant restitution, une future implementation devra verifier :
 - `title` strictement egal a `budget.title` ;
 - `entity` et `year` egaux aux valeurs serveur de l'instantane d'identite stocke ;
 - `scope: "organization"`, `status: "draft"` et `access: "owner-only"` exacts ;
-- `createdAt` et `updatedAt` valides, avec `createdAt <= updatedAt` et le `resolvedAt` commun non posterieur a `updatedAt` ;
+- `createdAt` et `updatedAt` valides ; pour `version === 1`, `resolvedAt <= createdAt` et `createdAt === updatedAt` ; pour `version > 1`, `createdAt <= resolvedAt <= updatedAt` ;
 - aucune contradiction entre les parents soumis, resolus et instantanes ;
 - l'absence totale de `promotion` pour un brouillon cree directement ; lorsqu'un bloc `promotion` existe, sa forme fermee, ses types, ses bornes, son rapport, ses empreintes, sa provenance et ses invariants sont valides par le futur validateur pur confirme de T1-E, sans jamais exposer ce bloc ;
 - des dates et champs de resume valides sans les recalculer depuis un libelle client.
@@ -173,7 +173,7 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 16. refus de deux instantanes divergents pour un meme couple `type + id` repete ;
 17. refus d'instantanes portant plusieurs `resolvedAt`, un instant hors periode d'effet ou un statut historiquement incompatible avec les champs persistes, sans inventer un historique des roles ;
 18. refus d'un resume dont `title` diverge de `budget.title`, comme de `entity` ou `year` divergents ;
-19. refus d'une portee, d'un statut, d'un acces ou d'une chronologie serveur incoherents ;
+19. refus d'une portee, d'un statut, d'un acces ou d'une chronologie serveur incoherents, avec les relations temporelles propres a la version initiale et aux versions mises a jour ;
 20. refus d'une enveloppe racine ouverte ou d'un bloc `promotion` incomplet, inconnu ou non validable ;
 21. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
