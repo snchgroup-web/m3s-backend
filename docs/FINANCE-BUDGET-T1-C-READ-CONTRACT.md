@@ -83,6 +83,7 @@ Avant restitution, une future implementation devra verifier :
 - un seul enregistrement V2 correspondant au tenant, a l'auteur et a l'identifiant ;
 - `contractVersion: 2` exact ;
 - `version` entiere de `1` a `1000000`, la valeur terminale restant lisible ;
+- une enveloppe racine fermee contenant exactement `contractVersion`, `budget`, `referenceSnapshots` et, seulement pour un brouillon issu d'une promotion, `promotion` ;
 - une enveloppe `budget` valide selon T1-A ;
 - un bloc `referenceSnapshots` ferme, complet et sans entree orpheline ;
 - une correspondance exacte entre chaque `row.id` et chaque `rowId` d'instantane ;
@@ -91,15 +92,18 @@ Avant restitution, une future implementation devra verifier :
 - pour chaque couple `type de reference + id` repete dans le budget, des instantanes stockes strictement identiques sur tous leurs champs canoniques ;
 - un unique `resolvedAt` commun a tous les instantanes non nuls de la version stockee ;
 - chaque `resolvedAt` inclus dans la periode d'effet semi-ouverte `[effectiveFrom, effectiveTo)` de son instantane, avec `effectiveTo: null` pour une reference non expirante ;
-- chaque `statusSnapshot` recevable pour une operation T1-B `WRITE` du type et du role correspondants a ce `resolvedAt`, y compris les regles propres a l'exercice et aux responsabilites ;
+- chaque `statusSnapshot` et chaque calendrier d'exercice mecaniquement recevables pour une operation T1-B `WRITE` a ce `resolvedAt` d'apres les champs effectivement persistes ; pour un agent de responsabilite, ce controle historique couvre le cycle de vie et la periode d'effet, mais ne pretend pas reconstituer ses anciens roles autorises ;
 - `title` strictement egal a `budget.title` ;
 - `entity` et `year` egaux aux valeurs serveur de l'instantane d'identite stocke ;
 - `scope: "organization"`, `status: "draft"` et `access: "owner-only"` exacts ;
 - `createdAt` et `updatedAt` valides, avec `createdAt <= updatedAt` et le `resolvedAt` commun non posterieur a `updatedAt` ;
 - aucune contradiction entre les parents soumis, resolus et instantanes ;
+- l'absence totale de `promotion` pour un brouillon cree directement ; lorsqu'un bloc `promotion` existe, sa forme fermee, ses types, ses bornes, son rapport, ses empreintes, sa provenance et ses invariants sont valides par le futur validateur pur confirme de T1-E, sans jamais exposer ce bloc ;
 - des dates et champs de resume valides sans les recalculer depuis un libelle client.
 
 Un doublon, un document mal forme, un instantane incomplet ou une incoherence interne produit un refus ferme. La lecture ne repare rien et ne retourne pas une version partielle.
+
+Le schema T1-B ne persiste pas `allowedResponsibilities`. T1-C ne peut donc ni prouver ni nier retrospectivement qu'un agent possedait un role donne au `resolvedAt` stocke. Il recontrole seulement l'eligibilite actuelle du responsable et du controleur avec T1-B `READ`. Une preuve historique immuable des roles exigerait un schema d'instantane et un lot separes. Tant que T1-E et son validateur de provenance ne sont pas livres, tout document portant un bloc `promotion` echoue ferme avec `BUDGET_STORAGE_UNAVAILABLE` ; aucun controle partiel de ce bloc n'est admis.
 
 ## Liste, ordre et pagination
 
@@ -167,10 +171,11 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 14. version `1000000` lisible et versions hors borne refusees ;
 15. refus d'une ligne dont les periodes divergent du calendrier de l'exercice instantane ;
 16. refus de deux instantanes divergents pour un meme couple `type + id` repete ;
-17. refus d'instantanes portant plusieurs `resolvedAt`, un instant hors periode d'effet ou un statut irrecevable lors de l'ecriture ;
+17. refus d'instantanes portant plusieurs `resolvedAt`, un instant hors periode d'effet ou un statut historiquement incompatible avec les champs persistes, sans inventer un historique des roles ;
 18. refus d'un resume dont `title` diverge de `budget.title`, comme de `entity` ou `year` divergents ;
 19. refus d'une portee, d'un statut, d'un acces ou d'une chronologie serveur incoherents ;
-20. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
+20. refus d'une enveloppe racine ouverte ou d'un bloc `promotion` incomplet, inconnu ou non validable ;
+21. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
