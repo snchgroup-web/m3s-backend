@@ -142,7 +142,7 @@ Les echecs conservent l'enveloppe fermee `{ success: false, contractVersion: 2, 
 | `BUDGET_RESPONSIBILITY_INVALID` | `422` | responsabilite visible mais non recevable |
 | `BUDGET_REFERENCE_RELATION_INVALID` | `422` | relation parent-enfant contradictoire apres validation individuelle |
 
-La precedence est : syntaxe, authentification, capacite, permission, stockage, existence et portee, integrite V2, disponibilite des referentiels, visibilite, cycle de vie, exercice, responsabilites, relations. Pour une liste, les cas volontairement omis ci-dessus ne sont pas des reponses d'erreur individuelles ; toute indisponibilite systemique reste bloquante.
+La precedence conserve exactement celle de `BUDGET-T1-TECH-001 V0.1` : syntaxe, authentification, capacite, permission, disponibilite du stockage, existence et portee du brouillon, disponibilite des referentiels, resolution et visibilite, cycle de vie et periode d'effet, exercice, responsabilites, relations, puis version et autres controles d'integrite stockee applicables a la lecture. Une corruption detectee ne remplace donc pas un `BUDGET_REFERENCE_UNAVAILABLE` deja etabli. Si le document est trop mal forme pour identifier le jeu de references a interroger, `BUDGET_STORAGE_UNAVAILABLE` s'applique immediatement, puisqu'aucune disponibilite referentielle propre a ce document ne peut etre determinee. Pour une liste, les cas volontairement omis ci-dessus ne sont pas des reponses d'erreur individuelles ; toute indisponibilite systemique reste bloquante.
 
 ## Non-effets obligatoires
 
