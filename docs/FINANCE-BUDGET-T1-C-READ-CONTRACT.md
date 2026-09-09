@@ -86,6 +86,8 @@ Avant restitution, une future implementation devra verifier :
 - une enveloppe `budget` valide selon T1-A ;
 - un bloc `referenceSnapshots` ferme, complet et sans entree orpheline ;
 - une correspondance exacte entre chaque `row.id` et chaque `rowId` d'instantane ;
+- pour chaque chemin d'identite, de responsabilite ou de dimension, un `snapshot.id` non nul strictement egal a l'identifiant porte par `budget` au meme chemin, et `null` des deux cotes lorsqu'une dimension est absente ;
+- `title` strictement egal a `budget.title` ;
 - `entity` et `year` egaux aux valeurs serveur de l'instantane d'identite stocke ;
 - aucune contradiction entre les parents soumis, resolus et instantanes ;
 - des dates et champs de resume valides sans les recalculer depuis un libelle client.
@@ -146,7 +148,7 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 2. authentification, permission courante, capacite fermee et `no-store` ;
 3. isolement tenant et auteur sans fuite d'existence ;
 4. exclusion croisee V1/V2 et absence de conversion implicite ;
-5. validation stricte de l'enveloppe, de la version et des instantanes ;
+5. validation stricte de l'enveloppe, de la version et des instantanes, y compris l'egalite de chaque identifiant entre `budget` et son chemin d'instantane ;
 6. liste limitee aux dix champs de resume, sans contenu financier ;
 7. ordre canonique, pagination apres filtrage et calcul de `hasMore` ;
 8. recontrole T1-B `READ` a chaque requete avec un seul instant UTC ;
@@ -156,7 +158,8 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 12. codes fermes en lecture directe pour absence, statut, exercice, responsabilite et relation ;
 13. indisponibilite, ambiguite, doublon ou corruption sans succes partiel ;
 14. version `1000000` lisible et versions hors borne refusees ;
-15. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
+15. refus d'un resume dont `title` diverge de `budget.title`, comme de `entity` ou `year` divergents ;
+16. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
