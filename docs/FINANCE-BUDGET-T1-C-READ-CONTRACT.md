@@ -89,8 +89,13 @@ Avant restitution, une future implementation devra verifier :
 - pour chaque chemin d'identite, de responsabilite ou de dimension, un `snapshot.id` non nul strictement egal a l'identifiant porte par `budget` au meme chemin, et `null` des deux cotes lorsqu'une dimension est absente ;
 - pour chaque ligne, un ensemble de `periodValues[].periodId` strictement egal a celui des `periods[].periodId` de l'exercice instantane, sans manque, doublon ou periode etrangere ;
 - pour chaque couple `type de reference + id` repete dans le budget, des instantanes stockes strictement identiques sur tous leurs champs canoniques ;
+- un unique `resolvedAt` commun a tous les instantanes non nuls de la version stockee ;
+- chaque `resolvedAt` inclus dans la periode d'effet semi-ouverte `[effectiveFrom, effectiveTo)` de son instantane, avec `effectiveTo: null` pour une reference non expirante ;
+- chaque `statusSnapshot` recevable pour une operation T1-B `WRITE` du type et du role correspondants a ce `resolvedAt`, y compris les regles propres a l'exercice et aux responsabilites ;
 - `title` strictement egal a `budget.title` ;
 - `entity` et `year` egaux aux valeurs serveur de l'instantane d'identite stocke ;
+- `scope: "organization"`, `status: "draft"` et `access: "owner-only"` exacts ;
+- `createdAt` et `updatedAt` valides, avec `createdAt <= updatedAt` et le `resolvedAt` commun non posterieur a `updatedAt` ;
 - aucune contradiction entre les parents soumis, resolus et instantanes ;
 - des dates et champs de resume valides sans les recalculer depuis un libelle client.
 
@@ -162,8 +167,10 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 14. version `1000000` lisible et versions hors borne refusees ;
 15. refus d'une ligne dont les periodes divergent du calendrier de l'exercice instantane ;
 16. refus de deux instantanes divergents pour un meme couple `type + id` repete ;
-17. refus d'un resume dont `title` diverge de `budget.title`, comme de `entity` ou `year` divergents ;
-18. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
+17. refus d'instantanes portant plusieurs `resolvedAt`, un instant hors periode d'effet ou un statut irrecevable lors de l'ecriture ;
+18. refus d'un resume dont `title` diverge de `budget.title`, comme de `entity` ou `year` divergents ;
+19. refus d'une portee, d'un statut, d'un acces ou d'une chronologie serveur incoherents ;
+20. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
