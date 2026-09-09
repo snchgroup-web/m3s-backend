@@ -87,6 +87,8 @@ Avant restitution, une future implementation devra verifier :
 - un bloc `referenceSnapshots` ferme, complet et sans entree orpheline ;
 - une correspondance exacte entre chaque `row.id` et chaque `rowId` d'instantane ;
 - pour chaque chemin d'identite, de responsabilite ou de dimension, un `snapshot.id` non nul strictement egal a l'identifiant porte par `budget` au meme chemin, et `null` des deux cotes lorsqu'une dimension est absente ;
+- pour chaque ligne, un ensemble de `periodValues[].periodId` strictement egal a celui des `periods[].periodId` de l'exercice instantane, sans manque, doublon ou periode etrangere ;
+- pour chaque couple `type de reference + id` repete dans le budget, des instantanes stockes strictement identiques sur tous leurs champs canoniques ;
 - `title` strictement egal a `budget.title` ;
 - `entity` et `year` egaux aux valeurs serveur de l'instantane d'identite stocke ;
 - aucune contradiction entre les parents soumis, resolus et instantanes ;
@@ -158,8 +160,10 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 12. codes fermes en lecture directe pour absence, statut, exercice, responsabilite et relation ;
 13. indisponibilite, ambiguite, doublon ou corruption sans succes partiel ;
 14. version `1000000` lisible et versions hors borne refusees ;
-15. refus d'un resume dont `title` diverge de `budget.title`, comme de `entity` ou `year` divergents ;
-16. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
+15. refus d'une ligne dont les periodes divergent du calendrier de l'exercice instantane ;
+16. refus de deux instantanes divergents pour un meme couple `type + id` repete ;
+17. refus d'un resume dont `title` diverge de `budget.title`, comme de `entity` ou `year` divergents ;
+18. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
