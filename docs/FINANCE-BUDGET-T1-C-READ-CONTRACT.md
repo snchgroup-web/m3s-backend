@@ -52,7 +52,7 @@ Une absence ou une invisibilite est donc classee par T1-B.1 avant une corruption
 
 ## Contrat temporel partage T1-C / T1-D candidat
 
-Le futur stockage T1-D devra capturer un unique `writeAt` UTC a la frontiere applicative de chaque creation ou mise a jour. Ce meme instant est passe a T1-B comme `resolvedAt` et persiste par T1-D comme horodatage de la version ; les champs compares ne sont jamais produits par un `CURRENT_TIMESTAMP()` independant de la base.
+Le futur stockage T1-D devra capturer un unique `writeAt` UTC a la frontiere applicative de chaque creation ou mise a jour. Il construit pour cette requete un seul service T1-B dont l'horloge injectee retourne `new Date(writeAt.getTime())`, puis appelle `resolveBudgetReferences` avec `operation: WRITE`. T1-D persiste exactement ce meme `writeAt` comme horodatage de la version ; les champs compares ne sont jamais produits par un `CURRENT_TIMESTAMP()` independant de la base. L'horloge par defaut, un service partage entre requetes ou une seconde lecture de l'heure sont interdits dans ce parcours.
 
 - A la creation, `resolvedAt`, `createdAt` et `updatedAt` sont strictement egaux a `writeAt`.
 - A la mise a jour, `createdAt` reste immuable et anterieur ou egal a `writeAt`, tandis que `resolvedAt` et `updatedAt` sont strictement egaux a `writeAt`.
@@ -222,7 +222,7 @@ La future implementation ne pourra etre proposee qu'avec des tests isoles couvra
 27. `NO-GO` de T1-C lorsque T1-B.1 est absent, incomplet ou non confirme ;
 28. preuve qu'aucune lecture ne modifie document, instantanes, compteur ou journal ;
 29. pagination inspectant au plus `10051` candidats, ne resolvant jamais la sentinelle `10052`, reussissant si la page est determinable ou la source epuisee et retournant exactement `503 BUDGET_STORAGE_UNAVAILABLE` sinon ;
-30. T1-D reutilisant un seul `writeAt` pour les instantanes et les horodatages compares, sans `CURRENT_TIMESTAMP()` independant, et refus T1-C de toute divergence.
+30. T1-D capturant un seul `writeAt`, injectant `clock: () => new Date(writeAt.getTime())` dans son service T1-B de requete, appelant `operation: WRITE` et persistant ce meme instant sans `CURRENT_TIMESTAMP()` independant, avec refus T1-C de toute divergence.
 
 Ces tests utiliseront seulement des interfaces pures et des doubles fictifs tant qu'aucun stockage reel n'est autorise.
 
