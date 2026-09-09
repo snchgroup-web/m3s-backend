@@ -98,7 +98,7 @@ La resolution courante sert de garde d'acces, pas de reecriture. Les libelles et
 
 Pour une lecture directe comme pour une liste, la frontiere HTTP capture `requestAt` avant la premiere resolution. Chaque appel a `resolveStoredBudgetReferences` recoit explicitement `operation: READ` et une copie du meme instant avec `resolvedAt: new Date(requestAt.getTime())`. Il est interdit d'omettre l'operation, de la remplacer par `WRITE`, de recalculer cet instant par brouillon, d'utiliser l'horloge par defaut ou de substituer un autre `resolvedAt` pendant le parcours. La liste partage ainsi les memes regles de lecture et une seule frontiere temporelle pour tous ses candidats, meme si l'horloge reelle avance pendant le filtrage.
 
-Une reference absente, hors tenant, non visible ou `restricted` sans autorisation Management produit `BUDGET_REFERENCE_NOT_FOUND`. Une reference visible mais dont le cycle de vie ou la periode d'effet est irrecevable produit le code specialise T1-B applicable. Une source absente, ambigue, mal formee ou indisponible produit `BUDGET_REFERENCE_UNAVAILABLE`.
+Une reference absente, hors tenant, non visible ou `restricted` sans autorisation Management produit `BUDGET_REFERENCE_NOT_FOUND`. Une reference visible mais dont le cycle de vie ou la periode d'effet est irrecevable produit le code specialise T1-B applicable. Une source absente, ambigue, indisponible ou dont l'enregistrement unique echoue a `validateBaseRecord` ou `validateSourceRecord` produit `BUDGET_REFERENCE_UNAVAILABLE`. Un defaut fiscal, de responsabilite ou de relation detecte apres ces controles conserve son code specialise.
 
 ## Integrite du brouillon lu
 
@@ -159,7 +159,7 @@ Les echecs conservent l'enveloppe fermee `{ success: false, contractVersion: 2, 
 | `BUDGET_ACCESS_DENIED` | `403` | `finance:read` absent |
 | `BUDGET_STORAGE_UNAVAILABLE` | `503` | stockage indispensable indisponible, ambigu ou corrompu, ou sentinelle presente apres `10051` candidats sans page et `hasMore` determinables |
 | `BUDGET_DRAFT_NOT_FOUND` | `404` | brouillon absent, V1, hors tenant, hors auteur ou non visible |
-| `BUDGET_REFERENCE_UNAVAILABLE` | `503` | source necessaire absente, ambigue ou mal formee |
+| `BUDGET_REFERENCE_UNAVAILABLE` | `503` | source necessaire absente, ambigue, indisponible ou enregistrement unique refusant `validateBaseRecord` ou `validateSourceRecord` |
 | `BUDGET_REFERENCE_NOT_FOUND` | `404` | reference absente, hors tenant ou non visible en lecture directe |
 | `BUDGET_REFERENCE_STATE_INVALID` | `422` | cycle de vie ou periode d'effet irrecevable |
 | `BUDGET_FISCAL_YEAR_INVALID` | `422` | exercice visible mais structure ou calendrier invalide |
