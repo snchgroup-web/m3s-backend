@@ -69,7 +69,7 @@ Les deux operations futures restent celles de `BUDGET-T1-TECH-001 V0.1` :
 | `GET /api/finance/budget-drafts-v2` | `limit` entier `1..50`, defaut `20`; `offset` entier `0..10000`, defaut `0`; aucun autre parametre | `200`, `{ success: true, contractVersion: 2, data: summary[], hasMore }` |
 | `GET /api/finance/budget-drafts-v2/:id` | UUID conforme a `ID_PATTERN`; aucun parametre de requete | `200`, `{ success: true, contractVersion: 2, data: { ...summary, budget, referenceSnapshots } }` |
 
-Chaque succes porte `Cache-Control: no-store`. `summary` contient exactement :
+Chaque reponse porte `Cache-Control: no-store`, y compris les succes, les erreurs d'authentification ou d'autorisation, les absences, les erreurs de reference, les corruptions et les indisponibilites. `summary` contient exactement :
 
 ```text
 id, version, title, entity, year, createdAt, updatedAt, scope, status, access
