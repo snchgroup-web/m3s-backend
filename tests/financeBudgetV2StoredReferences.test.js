@@ -258,6 +258,42 @@ test('fiscal, responsibility and relation failures keep their specialised codes'
   await rejects(() => storedCall(setup(relation).service), 'BUDGET_REFERENCE_RELATION_INVALID');
 });
 
+test('fiscal period metadata is closed before canonical projection', async () => {
+  const data = fixtures();
+  data.fiscalYear[0].periods[0].unexpected = 'metadata';
+
+  await rejects(() => storedCall(setup(data).service), 'BUDGET_FISCAL_YEAR_INVALID');
+});
+
+test('missing references still precede projected fiscal shape errors', async () => {
+  const data = fixtures();
+  data.entity = [];
+  data.fiscalYear[0].periods[0].unexpected = 'metadata';
+
+  await rejects(() => storedCall(setup(data).service), 'BUDGET_REFERENCE_NOT_FOUND');
+});
+
+test('scope checks use the exact projected record retained in cache', async () => {
+  const data = fixtures();
+  let idReads = 0;
+  const source = base('unused');
+  Object.defineProperty(source, 'id', {
+    enumerable: true,
+    get() {
+      idReads += 1;
+      return idReads === 1 ? 'ORG-OTHER' : 'ORG-2SG';
+    }
+  });
+  const entityResolver = async () => ({ available: true, records: [source] });
+  const resolvers = Object.fromEntries(Object.entries(data).map(([type, records]) => [
+    type, type === 'entity' ? entityResolver : createFakeBudgetReferenceResolver(records)
+  ]));
+  const service = createBudgetReferenceService({ resolvers });
+
+  await rejects(() => storedCall(service), 'BUDGET_REFERENCE_NOT_FOUND');
+  assert.equal(idReads, 1);
+});
+
 test('path-dependent responsibility checks are repeated for cached records', async () => {
   const data = fixtures();
   data.agent = [base('cheikh', {

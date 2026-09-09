@@ -285,20 +285,23 @@ function recordForStoredCache(record, type) {
   }
   if (type === 'fiscalYear') {
     let periods = null;
-    if (Array.isArray(record.periods)) {
+    const sourcePeriods = record.periods;
+    if (Array.isArray(sourcePeriods)) {
       try {
-        periods = record.periods.map(period => (
-          period && typeof period === 'object' && !Array.isArray(period)
-            ? {
-              periodId: period.periodId,
-              ordinal: period.ordinal,
-              startDate: period.startDate,
-              endDate: period.endDate
-            }
-            : null
-        ));
-      } catch (_error) {
-        periods = null;
+        periods = sourcePeriods.map(period => {
+          if (!hasExactFields(period, PERIOD_KEYS)) {
+            fail('BUDGET_FISCAL_YEAR_INVALID');
+          }
+          return {
+            periodId: period.periodId,
+            ordinal: period.ordinal,
+            startDate: period.startDate,
+            endDate: period.endDate
+          };
+        });
+      } catch (error) {
+        if (error instanceof BudgetReferenceError) throw error;
+        fail('BUDGET_FISCAL_YEAR_INVALID');
       }
     }
     Object.assign(cached, {
@@ -687,25 +690,23 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
             validateResolverResult(result);
             if (result.records.length === 0) fail('BUDGET_REFERENCE_NOT_FOUND');
             if (result.records.length > 1) fail('BUDGET_REFERENCE_UNAVAILABLE');
-            const record = result.records[0];
-            validateBaseRecord(record);
-            if (record.id !== id || record.tenantId !== tenantId || !record.visible) {
+            const cachedRecord = recordForStoredCache(result.records[0], type);
+            validateBaseRecord(cachedRecord);
+            if (cachedRecord.id !== id || cachedRecord.tenantId !== tenantId
+              || !cachedRecord.visible) {
               fail('BUDGET_REFERENCE_NOT_FOUND');
             }
-            if (record.confidentiality === 'restricted') {
+            if (cachedRecord.confidentiality === 'restricted') {
               let allowed = false;
               try {
                 allowed = restrictedPolicy({
-                  type, record, tenantId, actorId, operation
+                  type, record: cachedRecord, tenantId, actorId, operation
                 }) === true;
               } catch (_error) {
                 fail('BUDGET_REFERENCE_UNAVAILABLE');
               }
               if (!allowed) fail('BUDGET_REFERENCE_NOT_FOUND');
             }
-            validateSourceRecord(record, type);
-            const cachedRecord = recordForStoredCache(record, type);
-            validateBaseRecord(cachedRecord);
             validateSourceRecord(cachedRecord, type);
             return { record: cachedRecord, errorCode: null };
           } catch (error) {
@@ -728,6 +729,9 @@ function createBudgetReferenceService({ resolvers = {}, canAccessRestricted, clo
     }
     if (preflightErrors.includes('BUDGET_REFERENCE_NOT_FOUND')) {
       fail('BUDGET_REFERENCE_NOT_FOUND');
+    }
+    if (preflightErrors.includes('BUDGET_FISCAL_YEAR_INVALID')) {
+      fail('BUDGET_FISCAL_YEAR_INVALID');
     }
 
     function cached(type, id) {
