@@ -2,7 +2,7 @@
 
 Date de preparation : 10-09-2026.
 
-Statut : acte candidat de decision groupee. Il prepare la porte P0 de la recette PostgreSQL ephemere E4 sans autoriser ni executer une action. L'etat reste `NO-GO` tant que Cheikh n'a pas prononce une decision complete et datee.
+Statut : acte confirme et livre. La decision datee ouvre uniquement la future fenetre du 11-09-2026 de 14:00 a 22:00 Europe/Zurich ; aucune action n'est executee avant cette fenetre.
 
 ## Finalite
 
@@ -29,15 +29,15 @@ Ces parametres ne valent ni commande, ni souscription, ni consentement contractu
 
 ## Sept autorisations a prononcer ensemble
 
-| ID | Autorisation requise | Valeur candidate | Etat initial |
+| ID | Autorisation requise | Valeur confirmee | Etat acquis |
 | --- | --- | --- | --- |
-| `P0-A01` | date et fenetre | date a renseigner, huit heures maximum | `NON AUTORISE` |
-| `P0-A02` | depense | plafond total de 35 USD, sans depassement ni renouvellement non borne | `NON AUTORISE` |
-| `P0-A03` | compte et conditions | Cheikh ouvre ou utilise le compte et accepte lui-meme les conditions applicables | `NON AUTORISE` |
-| `P0-A04` | outils clients | `psql`, `pg_dump` et `pg_restore` seulement, sans moteur local ni service resident | `NON AUTORISE` |
-| `P0-A05` | cibles et roles | deux branches neuves et trois roles ephemeres distincts | `NON AUTORISE` |
-| `P0-A06` | execution | phases P1 a P7 et trente-six controles, strictement dans l'ordre | `NON AUTORISE` |
-| `P0-A07` | responsabilites | Cheikh pour authentification, conditions et paiement ; Codex pour controle, execution bornee et nettoyage | `NON AUTORISE` |
+| `P0-A01` | date et fenetre | 11-09-2026 de 14:00 a 22:00 Europe/Zurich | `AUTORISE 11-09-2026` |
+| `P0-A02` | depense | plafond total de 35 USD, sans depassement ni renouvellement non borne | `AUTORISE 11-09-2026` |
+| `P0-A03` | compte et conditions | Cheikh ouvre ou utilise le compte et accepte lui-meme les conditions applicables | `AUTORISE 11-09-2026` |
+| `P0-A04` | outils clients | `psql`, `pg_dump` et `pg_restore` seulement, sans moteur local ni service resident | `AUTORISE 11-09-2026` |
+| `P0-A05` | cibles et roles | deux branches neuves et trois roles ephemeres distincts | `AUTORISE 11-09-2026` |
+| `P0-A06` | execution | phases P1 a P7 et trente-six controles, strictement dans l'ordre | `AUTORISE 11-09-2026` |
+| `P0-A07` | responsabilites | Cheikh pour authentification, conditions et paiement ; Codex pour controle, execution bornee et nettoyage | `AUTORISE 11-09-2026` |
 
 Une valeur manquante, ambigue ou differente du paquet confirme maintient `NO-GO`.
 
@@ -81,10 +81,12 @@ La decision pourra etre prononcee en une fois avec la formule suivante, apres re
 
 La confirmation du document seul n'autorise pas l'execution. La formule doit comporter une date effective et l'autorisation explicite d'executer E4.
 
+Le kit de conduite et de preuve correspondant est prepare dans `FINANCE-BUDGET-T1-D-B-3-B-E4-OPERATOR-KIT.md` (`BUDGET-T1-D-B-3-B-E4-KIT-001 V0.1`). Il ne remplace pas les controles du cadrage et son eventuelle fusion reste documentaire.
+
 ## Verdict candidat
 
-- **Paquet P0 :** `PRET A REVOIR`.
-- **Autorisations operationnelles :** sept sur sept encore fermees.
-- **Execution E4 :** `NO-GO`.
+- **Paquet P0 :** confirme et livre.
+- **Autorisations operationnelles :** bornees a la fenetre du 11-09-2026, 14:00-22:00 Europe/Zurich.
+- **Execution E4 :** autorisee dans cette fenetre uniquement, encore `NON EXECUTE`.
 - **Compte, depense, secret, cible ou outil cree :** aucun.
-- **Prochaine decision :** confirmer ou amender ce paquet documentaire ; une decision d'execution distincte restera ensuite necessaire.
+- **Prochaine action :** ouvrir P0 a 14:00, revalider toutes les bornes puis executer ou prononcer `STOP`.

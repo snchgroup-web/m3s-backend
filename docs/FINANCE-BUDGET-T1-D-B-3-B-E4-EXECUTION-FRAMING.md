@@ -37,6 +37,8 @@ Une autorisation incomplete produit `NO-GO` avant toute action.
 
 La porte de decision groupee correspondante est preparee dans `FINANCE-BUDGET-T1-D-B-3-B-E4-P0-AUTHORIZATION.md` (`BUDGET-T1-D-B-3-B-E4-P0-001 V0.1`). Sa confirmation documentaire ne vaudra pas autorisation d'executer E4.
 
+Le kit operateur et le registre de preuves sont prepares dans `FINANCE-BUDGET-T1-D-B-3-B-E4-OPERATOR-KIT.md` (`BUDGET-T1-D-B-3-B-E4-KIT-001 V0.1`). Il conserve les trente-six controles et la procedure de nettoyage P7 sans executer une action.
+
 ## Sequence d'execution candidate
 
 | Phase | Objet | Sortie obligatoire | Porte de passage |
@@ -179,5 +181,5 @@ Apres P4, `STOP` controle puis passage direct a P7 si :
 - **Controles :** trente-six, soit dix controles E4 et vingt-six controles `3-B`.
 - **Execution autorisee :** non.
 - **Compte, depense, secret ou cible cree :** aucun.
-- **E4 :** fermee en attente d'une autorisation d'execution distincte, complete et datee.
-- **Etat operationnel :** `NO-GO` maintenu.
+- **E4 :** autorisee uniquement le 11-09-2026 de 14:00 a 22:00 Europe/Zurich.
+- **Etat operationnel actuel :** `NON EXECUTE` jusqu'a l'ouverture et la revalidation de P0 dans cette fenetre.
