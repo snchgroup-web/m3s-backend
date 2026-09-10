@@ -59,6 +59,8 @@ T1-D-B.3-B exige une instance PostgreSQL ephemere complete avec outils clients c
 
 T1-D-B.3-B reste ferme tant qu'un environnement ephemere adapte n'est pas choisi et explicitement autorise.
 
+Le cadrage detaille candidat de cette porte est porte par `FINANCE-BUDGET-T1-D-B-3-B-POSTGRES-RECIPE-FRAMING.md` (`BUDGET-T1-D-B-3-B-001 V0.1`).
+
 Les deux portes sont cumulatives. La reussite de 3-A seule ne permet pas de prononcer le `GO technique candidat` de T1-D-B.3.
 
 ## Constat d'environnement au 09-09-2026
