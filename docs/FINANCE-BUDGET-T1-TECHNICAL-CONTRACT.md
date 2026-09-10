@@ -349,6 +349,8 @@ Les messages publics restent generiques et sans identifiant sensible. Les journa
 
 Chaque lot possede sa revue, ses tests et sa decision separee. La capacite V2 reste fermee jusqu'a un GO distinct des controles d'infrastructure et de production.
 
+Le cadrage detaille candidat de `T1-E` est porte par `FINANCE-BUDGET-T1-E-PROMOTION-CONTRACT.md` (`BUDGET-T1-E-001 V0.1`). Il reste ferme jusqu'au verdict E4 et ne vaut aucune autorisation d'implementation.
+
 ## Criteres de recette candidate
 
 1. Les tests V1 actuels restent inchanges et reussissent.
