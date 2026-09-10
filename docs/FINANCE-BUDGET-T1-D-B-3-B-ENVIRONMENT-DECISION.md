@@ -74,6 +74,8 @@ Cette recommandation ne choisit aucun fournisseur. Une cible externe reste ferme
 
 Les portes sont sequentielles. La confirmation de E0 n'autorise pas E1 ; E1 n'autorise ni compte, essai gratuit, secret, cible ou execution.
 
+La recherche officielle candidate de la porte E1 est portee par `FINANCE-BUDGET-T1-D-B-3-B-E1-PROVIDER-RESEARCH.md` (`BUDGET-T1-D-B-3-B-E1-001 V0.1`).
+
 ## Criteres de comparaison d'un futur fournisseur
 
 Une future recherche autorisee devra comparer uniquement des informations officielles et datees :
