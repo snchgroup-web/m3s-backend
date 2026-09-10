@@ -78,6 +78,8 @@ La recherche officielle candidate de la porte E1 est portee par `FINANCE-BUDGET-
 
 La decision de liste courte E2 est portee par `FINANCE-BUDGET-T1-D-B-3-B-E2-SHORTLIST-DECISION.md` (`BUDGET-T1-D-B-3-B-E2-001 V0.1`). Elle maintient E3 et E4 fermees.
 
+Le paquet candidat de selection E3 est porte par `FINANCE-BUDGET-T1-D-B-3-B-E3-SELECTION-PACKAGE.md` (`BUDGET-T1-D-B-3-B-E3-001 V0.1`). Sa preparation ne prononce aucune selection et maintient E3 et E4 fermees.
+
 ## Criteres de comparaison d'un futur fournisseur
 
 Une future recherche autorisee devra comparer uniquement des informations officielles et datees :
