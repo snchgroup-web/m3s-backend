@@ -80,6 +80,8 @@ La decision de liste courte E2 est portee par `FINANCE-BUDGET-T1-D-B-3-B-E2-SHOR
 
 Le paquet candidat de selection E3 est porte par `FINANCE-BUDGET-T1-D-B-3-B-E3-SELECTION-PACKAGE.md` (`BUDGET-T1-D-B-3-B-E3-001 V0.1`). Sa preparation ne prononce aucune selection et maintient E3 et E4 fermees.
 
+Les quatre preuves candidates de fermeture E3 sont regroupees dans `FINANCE-BUDGET-T1-D-B-3-B-E3-CLOSURE-EVIDENCE.md` (`BUDGET-T1-D-B-3-B-E3-EVD-001 V0.1`). Leur collecte ne ferme aucune condition automatiquement et maintient E4 fermee.
+
 ## Criteres de comparaison d'un futur fournisseur
 
 Une future recherche autorisee devra comparer uniquement des informations officielles et datees :
