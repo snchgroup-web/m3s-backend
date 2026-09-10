@@ -2,7 +2,7 @@
 
 Date de preparation : 10-09-2026.
 
-Statut : candidat documentaire a confirmer ou amender. Ce paquet recommande une categorie d'environnement pour une future recette `T1-D-B.3-B`. Il ne selectionne aucun fournisseur, produit, compte, region ou offre et n'autorise aucune recherche externe, installation, creation de cible, connexion, secret, IAM, migration ou execution.
+Statut actualise : classement E0 confirme, recherche E1 livree et liste courte E2 confirmee. E3 et E4 restent fermees. Ce paquet ne selectionne aucun fournisseur, produit, compte, region ou offre et n'autorise aucune installation, creation de cible, connexion, secret, IAM, migration ou execution.
 
 ## Objet de la decision
 
@@ -66,15 +66,17 @@ Cette recommandation ne choisit aucun fournisseur. Une cible externe reste ferme
 
 | Porte | Decision humaine | Sortie attendue | Etat V0.1 |
 | --- | --- | --- | --- |
-| E0 | confirmer ou amender le classement A/B/C | categorie prioritaire candidate | ouverte a validation |
-| E1 | autoriser une recherche externe bornee | criteres et sources officielles seulement | fermee |
-| E2 | confirmer une liste courte | deux fournisseurs candidats au maximum, sans creation de compte | fermee |
+| E0 | confirmer ou amender le classement A/B/C | categorie prioritaire candidate | confirmee |
+| E1 | autoriser une recherche externe bornee | criteres et sources officielles seulement | executee et livree |
+| E2 | confirmer une liste courte | deux fournisseurs candidats au maximum, sans creation de compte | confirmee |
 | E3 | selectionner un fournisseur et une offre | cout, region, duree, reseau, secrets et responsable | fermee |
 | E4 | autoriser le paquet d'execution | cible exacte et vingt-six controles | fermee |
 
 Les portes sont sequentielles. La confirmation de E0 n'autorise pas E1 ; E1 n'autorise ni compte, essai gratuit, secret, cible ou execution.
 
 La recherche officielle candidate de la porte E1 est portee par `FINANCE-BUDGET-T1-D-B-3-B-E1-PROVIDER-RESEARCH.md` (`BUDGET-T1-D-B-3-B-E1-001 V0.1`).
+
+La decision de liste courte E2 est portee par `FINANCE-BUDGET-T1-D-B-3-B-E2-SHORTLIST-DECISION.md` (`BUDGET-T1-D-B-3-B-E2-001 V0.1`). Elle maintient E3 et E4 fermees.
 
 ## Criteres de comparaison d'un futur fournisseur
 

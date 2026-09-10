@@ -2,7 +2,7 @@
 
 Date de recherche : 10-09-2026.
 
-Statut : candidat documentaire a confirmer ou amender. Cette recherche E1 compare exactement deux fournisseurs a partir de sources officielles : Supabase et Neon. Elle ne selectionne aucun fournisseur, ne cree aucun compte ou essai, ne declenche aucune depense et n'autorise ni secret, cible, installation, connexion, IAM, migration ou execution.
+Statut actualise : recherche E1 confirmee et livree ; liste courte E2 confirmee dans `BUDGET-T1-D-B-3-B-E2-001 V0.1`. Cette recherche compare exactement deux fournisseurs a partir de sources officielles : Supabase et Neon. Elle ne selectionne aucun fournisseur, ne cree aucun compte ou essai, ne declenche aucune depense et n'autorise ni secret, cible, installation, connexion, IAM, migration ou execution.
 
 ## Autorisation bornee
 
@@ -12,7 +12,7 @@ E1 autorise uniquement :
 2. la comparaison de deux fournisseurs au maximum pour l'option C ;
 3. la formulation d'une recommandation candidate pour E2.
 
-E2, E3 et E4 restent fermes. La presente recherche ne vaut ni liste courte confirmee, ni choix d'offre, ni autorisation d'executer `T1-D-B.3-B`.
+La recherche E1 ne valait initialement ni liste courte confirmee, ni choix d'offre, ni autorisation d'executer `T1-D-B.3-B`. La liste courte a depuis ete confirmee par la decision E2 ; E3 et E4 restent fermes.
 
 ## Methode
 
@@ -114,7 +114,7 @@ La cible future doit fournir un PostgreSQL serveur complet et permettre :
 | 1 | Supabase | admis sous reserves | confirmer CIDR fixe, dump borne, roles, region, cout et nettoyage |
 | 2 | Neon | ajourne en premiere intention | resoudre la porte reseau sans adopter un cout disproportionne |
 
-Ce classement ne selectionne ni fournisseur ni offre. E2 doit seulement confirmer ou amender la liste courte et les reserves.
+Ce classement ne selectionne ni fournisseur ni offre. Il a ete confirme avec ses reserves par `BUDGET-T1-D-B-3-B-E2-001 V0.1`.
 
 ## Questions a fermer avant E3
 
@@ -153,6 +153,6 @@ Ce classement ne selectionne ni fournisseur ni offre. E2 doit seulement confirme
 - **Recherche externe bornee :** terminee, deux fournisseurs exactement.
 - **Fournisseur prioritaire candidat :** Supabase, sous reserves.
 - **Fournisseur secondaire candidat :** Neon, ajourne par la porte reseau.
-- **Liste courte E2 :** candidate, non confirmee.
+- **Liste courte E2 :** confirmee par `BUDGET-T1-D-B-3-B-E2-001 V0.1` ; Supabase prioritaire sous reserves, Neon secondaire ajourne par la porte reseau.
 - **Compte, essai, depense, secret, cible ou execution :** aucun.
 - **Etat operationnel :** `NO-GO` maintenu.
