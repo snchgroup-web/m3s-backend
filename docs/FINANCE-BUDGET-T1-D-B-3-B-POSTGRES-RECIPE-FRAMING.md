@@ -155,6 +155,8 @@ Apres demarrage, tout ecart d'isolation, de contrainte, d'audit, de sauvegarde o
 
 ## Paquet de decision avant execution
 
+La recommandation candidate de categorie d'environnement est portee par `FINANCE-BUDGET-T1-D-B-3-B-ENVIRONMENT-DECISION.md` (`BUDGET-T1-D-B-3-B-ENV-001 V0.1`).
+
 Une prochaine decision humaine devra renseigner ensemble :
 
 1. l'option A, B ou C retenue ;
