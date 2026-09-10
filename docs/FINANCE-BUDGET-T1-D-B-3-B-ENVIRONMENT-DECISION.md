@@ -82,6 +82,8 @@ Le paquet candidat de selection E3 est porte par `FINANCE-BUDGET-T1-D-B-3-B-E3-S
 
 Les quatre preuves candidates de fermeture E3 sont regroupees dans `FINANCE-BUDGET-T1-D-B-3-B-E3-CLOSURE-EVIDENCE.md` (`BUDGET-T1-D-B-3-B-E3-EVD-001 V0.1`). Leur collecte ne ferme aucune condition automatiquement et maintient E4 fermee.
 
+La decision candidate de selection est portee par `FINANCE-BUDGET-T1-D-B-3-B-E3-SELECTION-DECISION.md` (`BUDGET-T1-D-B-3-B-E3-DEC-001 V0.1`). Sa preparation ne prononce aucune selection et maintient E4 fermee.
+
 ## Criteres de comparaison d'un futur fournisseur
 
 Une future recherche autorisee devra comparer uniquement des informations officielles et datees :
