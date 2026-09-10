@@ -2,9 +2,11 @@
 
 Date de preparation : 10-09-2026.
 
-Statut : paquet E3 candidat a confirmer ou amender. Il propose un fournisseur, une offre, un perimetre, un cout plafond et des conditions de securite pour une future recette PostgreSQL ephemere. Il ne prononce aucune selection et n'autorise ni E3, E4, compte, essai, depense, secret, cible, installation, connexion, IAM, migration ou execution.
+Statut actualise : paquet E3 confirme et livre ; valeurs probatoires acceptees comme candidates. La selection n'est pas encore prononcee et E4 reste fermee. Ce paquet n'autorise aucun compte, essai, cout engage, secret, cible, installation, connexion, IAM, migration ou execution.
 
 Les preuves candidates de fermeture des quatre conditions sont regroupees dans `FINANCE-BUDGET-T1-D-B-3-B-E3-CLOSURE-EVIDENCE.md` (`BUDGET-T1-D-B-3-B-E3-EVD-001 V0.1`). Elles proposent une route via laptop client leger, pooler de session IPv4, CIDR `/32` ephemere, region Zurich et plafond de 35 USD, sans prononcer de selection.
+
+La proposition de decision groupee est portee par `FINANCE-BUDGET-T1-D-B-3-B-E3-SELECTION-DECISION.md` (`BUDGET-T1-D-B-3-B-E3-DEC-001 V0.1`). Elle permet de prononcer la selection separement sans ouvrir E4.
 
 ## Proposition groupee E3
 

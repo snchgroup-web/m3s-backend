@@ -2,7 +2,7 @@
 
 Date de collecte : 10-09-2026.
 
-Statut : paquet probatoire candidat a confirmer ou amender. Il prepare ensemble les quatre preuves demandees pour E3 sans les fermer automatiquement. Il ne selectionne aucun fournisseur ou offre et n'autorise ni E4, compte, essai, depense, secret, cible, installation, connexion, IAM, migration ou execution.
+Statut actualise : paquet probatoire confirme et livre ; ses valeurs sont acceptees comme candidates. Leur acceptation ne prononce aucune selection de fournisseur ou d'offre et n'autorise ni E4, compte, essai, depense, secret, cible, installation, connexion, IAM, migration ou execution.
 
 ## Perimetre de la collecte
 
