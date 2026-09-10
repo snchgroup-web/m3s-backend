@@ -2,7 +2,7 @@
 
 Date de preparation : 10-09-2026.
 
-Statut : candidat documentaire a confirmer ou amender. Ce document compare des environnements et definit une matrice de recette. Il n'installe aucun outil, ne cree aucune cible, ne lance aucune commande, n'ouvre aucun acces et n'autorise ni donnee reelle, route HTTP, IAM reel, preview ou activation Budget.
+Statut actualise : cadrage initial confirme et complete par les decisions E0 a E3. L'option C et Supabase Pro sont selectionnes uniquement pour instruire E4, qui reste fermee. Ce document n'installe aucun outil, ne cree aucune cible, ne lance aucune commande et n'ouvre aucun acces.
 
 ## Decision recue
 
@@ -53,7 +53,7 @@ Echelle : 1 = defavorable, 3 = moyen, 5 = favorable. Les notes orientent l'arbit
 - L'option A offre la meilleure reproductibilite locale, mais le moteur de conteneurs est absent et la charge du poste doit etre recontrolee.
 - L'option B limite les dependances cloud, mais son installation et son nettoyage sont plus intrusifs.
 - L'option C preserve les ressources du poste, mais ouvre des decisions supplementaires de fournisseur, secret, IAM, cout et sortie de donnees, meme fictives.
-- Aucun fournisseur, produit, region ou offre commerciale n'est retenu dans cette version.
+- La version initiale ne retenait aucun fournisseur. La decision E3 ulterieure retient Supabase Pro et Zurich `eu-central-2` uniquement pour instruire E4, sans ouverture operationnelle.
 
 ## Portes de recette
 
@@ -156,6 +156,8 @@ Apres demarrage, tout ecart d'isolation, de contrainte, d'audit, de sauvegarde o
 ## Paquet de decision avant execution
 
 La recommandation candidate de categorie d'environnement est portee par `FINANCE-BUDGET-T1-D-B-3-B-ENVIRONMENT-DECISION.md` (`BUDGET-T1-D-B-3-B-ENV-001 V0.1`).
+
+Le cadrage consolide de l'execution est porte par `FINANCE-BUDGET-T1-D-B-3-B-E4-EXECUTION-FRAMING.md` (`BUDGET-T1-D-B-3-B-E4-001 V0.1`). Il regroupe les vingt-six controles `3-B` et dix controles E4 sans les executer.
 
 Une prochaine decision humaine devra renseigner ensemble :
 

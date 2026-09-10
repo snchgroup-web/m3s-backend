@@ -2,7 +2,7 @@
 
 Date de preparation : 10-09-2026.
 
-Statut actualise : classement E0 confirme, recherche E1 livree et liste courte E2 confirmee. E3 et E4 restent fermees. Ce paquet ne selectionne aucun fournisseur, produit, compte, region ou offre et n'autorise aucune installation, creation de cible, connexion, secret, IAM, migration ou execution.
+Statut actualise : E0, E1 et E2 livres ; selection E3 prononcee pour Supabase Pro et Zurich `eu-central-2`. E4 reste fermee. Ce paquet n'autorise aucune installation, creation de cible, connexion, secret, IAM, migration ou execution.
 
 ## Objet de la decision
 
@@ -14,7 +14,7 @@ La decision doit retenir une categorie d'environnement suffisamment fidele a Pos
 - la conservation des contraintes, revisions, donnees et audits fictifs ;
 - la fermeture et le nettoyage complet des ressources.
 
-Cette decision ne vaut ni choix de fournisseur ni autorisation d'executer les vingt-six controles de `BUDGET-T1-D-B-3-B-001 V0.1`.
+La decision E0 initiale ne valait ni choix de fournisseur ni autorisation d'executer les vingt-six controles de `BUDGET-T1-D-B-3-B-001 V0.1`. Le fournisseur a depuis ete selectionne en E3, sans ouvrir E4.
 
 ## Faits disponibles
 
@@ -60,7 +60,7 @@ L'option C est recommandee comme categorie a instruire en premier, sous conditio
 9. compatibilite prouvee avec `psql`, `pg_dump` et `pg_restore` ;
 10. responsable humain nomme pour la creation, le controle et le nettoyage.
 
-Cette recommandation ne choisit aucun fournisseur. Une cible externe reste fermee tant que les portes ci-dessous ne sont pas franchies.
+Cette recommandation E0 ne choisissait aucun fournisseur. La selection E3 ulterieure retient Supabase Pro, mais toute cible externe reste fermee tant qu'E4 n'est pas explicitement autorisee.
 
 ## Portes de decision separees
 
@@ -69,20 +69,22 @@ Cette recommandation ne choisit aucun fournisseur. Une cible externe reste ferme
 | E0 | confirmer ou amender le classement A/B/C | categorie prioritaire candidate | confirmee |
 | E1 | autoriser une recherche externe bornee | criteres et sources officielles seulement | executee et livree |
 | E2 | confirmer une liste courte | deux fournisseurs candidats au maximum, sans creation de compte | confirmee |
-| E3 | selectionner un fournisseur et une offre | cout, region, duree, reseau, secrets et responsable | fermee |
-| E4 | autoriser le paquet d'execution | cible exacte et vingt-six controles | fermee |
+| E3 | selectionner un fournisseur et une offre | cout, region, duree, reseau, secrets et responsable | confirmee et livree |
+| E4 | autoriser le paquet d'execution | cible exacte et trente-six controles consolides | fermee, cadrage candidat prepare |
 
 Les portes sont sequentielles. La confirmation de E0 n'autorise pas E1 ; E1 n'autorise ni compte, essai gratuit, secret, cible ou execution.
 
 La recherche officielle candidate de la porte E1 est portee par `FINANCE-BUDGET-T1-D-B-3-B-E1-PROVIDER-RESEARCH.md` (`BUDGET-T1-D-B-3-B-E1-001 V0.1`).
 
-La decision de liste courte E2 est portee par `FINANCE-BUDGET-T1-D-B-3-B-E2-SHORTLIST-DECISION.md` (`BUDGET-T1-D-B-3-B-E2-001 V0.1`). Elle maintient E3 et E4 fermees.
+La decision de liste courte E2 est portee par `FINANCE-BUDGET-T1-D-B-3-B-E2-SHORTLIST-DECISION.md` (`BUDGET-T1-D-B-3-B-E2-001 V0.1`). Elle maintenait alors E3 et E4 fermees.
 
-Le paquet candidat de selection E3 est porte par `FINANCE-BUDGET-T1-D-B-3-B-E3-SELECTION-PACKAGE.md` (`BUDGET-T1-D-B-3-B-E3-001 V0.1`). Sa preparation ne prononce aucune selection et maintient E3 et E4 fermees.
+Le paquet candidat de selection E3 est porte par `FINANCE-BUDGET-T1-D-B-3-B-E3-SELECTION-PACKAGE.md` (`BUDGET-T1-D-B-3-B-E3-001 V0.1`). Sa preparation ne prononcait aucune selection ; la decision E3 est maintenant acquise et E4 reste fermee.
 
-Les quatre preuves candidates de fermeture E3 sont regroupees dans `FINANCE-BUDGET-T1-D-B-3-B-E3-CLOSURE-EVIDENCE.md` (`BUDGET-T1-D-B-3-B-E3-EVD-001 V0.1`). Leur collecte ne ferme aucune condition automatiquement et maintient E4 fermee.
+Les quatre preuves candidates de fermeture E3 sont regroupees dans `FINANCE-BUDGET-T1-D-B-3-B-E3-CLOSURE-EVIDENCE.md` (`BUDGET-T1-D-B-3-B-E3-EVD-001 V0.1`). Leurs valeurs ont ete confirmees avant la selection E3 et E4 reste fermee.
 
-La decision candidate de selection est portee par `FINANCE-BUDGET-T1-D-B-3-B-E3-SELECTION-DECISION.md` (`BUDGET-T1-D-B-3-B-E3-DEC-001 V0.1`). Sa preparation ne prononce aucune selection et maintient E4 fermee.
+La decision de selection est portee par `FINANCE-BUDGET-T1-D-B-3-B-E3-SELECTION-DECISION.md` (`BUDGET-T1-D-B-3-B-E3-DEC-001 V0.1`). Elle est prononcee et livree, sans ouvrir E4.
+
+Le cadrage candidat E4 est porte par `FINANCE-BUDGET-T1-D-B-3-B-E4-EXECUTION-FRAMING.md` (`BUDGET-T1-D-B-3-B-E4-001 V0.1`). Il maintient toute execution fermee.
 
 ## Criteres de comparaison d'un futur fournisseur
 
