@@ -2,7 +2,9 @@
 
 Date de preparation : 10-09-2026.
 
-Statut : proposition de decision E3 a prononcer explicitement. Elle rassemble les valeurs candidates deja confirmees mais ne selectionne encore aucun fournisseur ou offre. Elle n'autorise ni E4, compte, essai, depense, secret, cible, installation, connexion, IAM, migration ou execution.
+Statut actualise : decision E3 prononcee et livree ; Supabase Pro est selectionne uniquement pour instruire une future E4. E4 reste fermee. Aucun compte, essai, abonnement, paiement, secret, cible, installation, connexion, IAM, migration ou execution n'est autorise.
+
+Le cadrage candidat E4 est porte par `FINANCE-BUDGET-T1-D-B-3-B-E4-EXECUTION-FRAMING.md` (`BUDGET-T1-D-B-3-B-E4-001 V0.1`). Sa preparation n'ouvre aucune operation.
 
 ## Fondements acquis
 
@@ -29,9 +31,9 @@ Statut : proposition de decision E3 a prononcer explicitement. Elle rassemble le
 | plafond | 35 USD au total | aucune depense sans autorisation E4 distincte |
 | repli | option A, conteneur local ephemere | reste ferme et non installe |
 
-## Effet limite d'une future decision E3
+## Effet limite de la decision E3
 
-Si cette selection est prononcee :
+La selection prononcee produit les effets suivants :
 
 1. Supabase Pro devient le fournisseur et l'offre retenus pour instruire E4 ;
 2. les valeurs du tableau deviennent les seules bornes admissibles ;
@@ -71,7 +73,7 @@ Ces controles completent les vingt-six controles de `BUDGET-T1-D-B-3-B-001 V0.1`
 
 ## Etats des portes
 
-| Porte | Etat avant decision | Etat si la selection est prononcee |
+| Porte | Etat avant decision | Etat actuel |
 | --- | --- | --- |
 | E2 | confirmee et livree | inchangee |
 | E3 | fermee en attente de decision | selection acquise et porte fermee |
@@ -89,8 +91,8 @@ Ces controles completent les vingt-six controles de `BUDGET-T1-D-B-3-B-001 V0.1`
 
 ## Verdict candidat
 
-- **Decision E3 :** prete a etre prononcee en une fois.
-- **Selection actuellement prononcee :** aucune.
+- **Decision E3 :** prononcee et livree.
+- **Selection actuellement prononcee :** Supabase Pro et les bornes du tableau, uniquement pour instruire E4.
 - **Valeurs candidates :** confirmees.
 - **E4 :** fermee.
 - **Etat operationnel :** `NO-GO` maintenu.
