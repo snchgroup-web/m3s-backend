@@ -105,6 +105,8 @@ Si P7 ne peut pas etre acheve, le rapport doit le signaler immediatement et dema
 
 Le verdict technique ne vaut ni activation Budget ni autorisation d'une etape ulterieure.
 
+Apres un verdict E4 recevable, le prochain cadrage candidat est `FINANCE-BUDGET-T1-E-PROMOTION-CONTRACT.md` (`BUDGET-T1-E-001 V0.1`). E4 ne l'ouvre pas automatiquement.
+
 ## Verdict du kit V0.1
 
 - **Kit operateur :** `PRET A REVOIR`.
