@@ -2,7 +2,7 @@
 
 Date de preparation : 10-09-2026.
 
-Statut : cadrage candidat a confirmer ou amender. Il organise une future recette E4 en huit phases et trente-six controles, sans l'autoriser ni l'executer. Aucun compte, essai, abonnement, paiement, secret, cible, installation, connexion, IAM, migration ou commande PostgreSQL n'est cree ou lance par ce document.
+Statut : cadrage confirme et livre. Il organise une future recette E4 en huit phases et trente-six controles, sans l'autoriser ni l'executer. Aucun compte, essai, abonnement, paiement, secret, cible, installation, connexion, IAM, migration ou commande PostgreSQL n'est cree ou lance par ce document.
 
 ## Configuration E3 acquise
 
@@ -34,6 +34,8 @@ La confirmation du present cadrage autorisera seulement sa fusion documentaire. 
 7. les responsables presents pour le paiement, le controle et le nettoyage.
 
 Une autorisation incomplete produit `NO-GO` avant toute action.
+
+La porte de decision groupee correspondante est preparee dans `FINANCE-BUDGET-T1-D-B-3-B-E4-P0-AUTHORIZATION.md` (`BUDGET-T1-D-B-3-B-E4-P0-001 V0.1`). Sa confirmation documentaire ne vaudra pas autorisation d'executer E4.
 
 ## Sequence d'execution candidate
 
@@ -177,5 +179,5 @@ Apres P4, `STOP` controle puis passage direct a P7 si :
 - **Controles :** trente-six, soit dix controles E4 et vingt-six controles `3-B`.
 - **Execution autorisee :** non.
 - **Compte, depense, secret ou cible cree :** aucun.
-- **E4 :** fermee en attente d'une autorisation distincte.
+- **E4 :** fermee en attente d'une autorisation d'execution distincte, complete et datee.
 - **Etat operationnel :** `NO-GO` maintenu.
