@@ -60,7 +60,7 @@ La regle 2SG d'absence d'accessibilite publique n'est pas amendee par cette deci
 | E3 | fermee | aucune selection de fournisseur, offre, region ou cout |
 | E4 | fermee | aucune creation de compte, cible, secret ou execution |
 
-La prochaine decision humaine pourra uniquement autoriser la preparation d'un paquet candidat E3. Elle ne devra pas etre interpretee comme une selection, une depense ou une autorisation d'executer.
+Le paquet candidat E3 est desormais prepare dans `BUDGET-T1-D-B-3-B-E3-001 V0.1`. Cette preparation ne doit pas etre interpretee comme une selection, une depense ou une autorisation d'executer.
 
 ## Tracabilite
 
