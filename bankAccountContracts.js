@@ -1,3 +1,5 @@
+const { types: { isProxy } } = require('node:util');
+
 const MAX_ID_LENGTH = 128;
 const MAX_LABEL_LENGTH = 120;
 const MAX_MASKED_IDENTIFIER_LENGTH = 34;
@@ -107,7 +109,7 @@ class BankAccountContractError extends Error {
 const fail = () => { throw new BankAccountContractError(); };
 
 function isPlainRecord(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || isProxy(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
