@@ -186,7 +186,12 @@ test('currency follows the frozen SIX ISO 4217 list and is never inferred', () =
 });
 
 test('masked identifiers expose no more than four trailing characters', () => {
-  const valid = ['********', '********1234', '******************************AB12'];
+  const valid = [
+    '********',
+    '********1234',
+    '******************************AB12',
+    '*'.repeat(MAX_MASKED_IDENTIFIER_LENGTH)
+  ];
   for (const maskedIdentifier of valid) {
     const candidate = summary();
     candidate.maskedIdentifier = maskedIdentifier;
