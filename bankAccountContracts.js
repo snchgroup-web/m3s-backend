@@ -178,7 +178,7 @@ function validateDates(summary) {
     && summary.verifiedAt === null) fail();
 }
 
-function validateBankAccountSummaryV1(summary) {
+function assertBankAccountSummaryV1(summary) {
   if (!hasExactFields(summary, SUMMARY_KEYS)
     || typeof summary.bankAccountId !== 'string'
     || !UUID_PATTERN.test(summary.bankAccountId)
@@ -206,6 +206,14 @@ function validateBankAccountSummaryV1(summary) {
   }
   validateDates(summary);
   return summary;
+}
+
+function validateBankAccountSummaryV1(summary) {
+  try {
+    return assertBankAccountSummaryV1(summary);
+  } catch (_error) {
+    fail();
+  }
 }
 
 function projectReferenceSnapshot(reference) {

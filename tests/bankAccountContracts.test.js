@@ -288,6 +288,11 @@ test('projection rejects invalid or hostile source shapes with a generic error',
   const revocable = Proxy.revocable({}, {});
   revocable.revoke();
   assert.throws(
+    () => validateBankAccountSummaryV1(revocable.proxy),
+    error => error instanceof BankAccountContractError
+      && error.code === 'BANK_ACCOUNT_REFERENCE_INVALID'
+  );
+  assert.throws(
     () => projectBankAccountSummaryV1(revocable.proxy),
     error => error instanceof BankAccountContractError
       && error.code === 'BANK_ACCOUNT_REFERENCE_INVALID'
