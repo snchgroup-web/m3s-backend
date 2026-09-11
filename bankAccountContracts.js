@@ -101,8 +101,10 @@ const INSTITUTION_KEYS = Object.freeze([
 class BankAccountContractError extends Error {
   constructor() {
     super('Invalid bank account summary contract');
-    this.name = 'BankAccountContractError';
-    this.code = 'BANK_ACCOUNT_REFERENCE_INVALID';
+    Object.defineProperties(this, {
+      name: { value: 'BankAccountContractError', configurable: true },
+      code: { value: 'BANK_ACCOUNT_REFERENCE_INVALID', enumerable: true }
+    });
   }
 }
 

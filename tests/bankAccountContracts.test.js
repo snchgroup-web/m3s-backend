@@ -394,3 +394,26 @@ test('projection rejects invalid or hostile source shapes with a generic error',
   );
   assert.equal(substitutionReads, 0);
 });
+
+test('generic errors keep their own code under prototype pollution', () => {
+  const previousCode = Object.getOwnPropertyDescriptor(Object.prototype, 'code');
+  Object.defineProperty(Object.prototype, 'code', {
+    value: 'ATTACKER_CODE',
+    writable: false,
+    configurable: true
+  });
+  try {
+    assert.throws(
+      () => validateBankAccountSummaryV1(null),
+      error => error instanceof BankAccountContractError
+        && Object.hasOwn(error, 'code')
+        && error.code === 'BANK_ACCOUNT_REFERENCE_INVALID'
+    );
+  } finally {
+    if (previousCode) {
+      Object.defineProperty(Object.prototype, 'code', previousCode);
+    } else {
+      delete Object.prototype.code;
+    }
+  }
+});
