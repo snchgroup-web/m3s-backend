@@ -11,7 +11,7 @@ const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const MASKED_IDENTIFIER_PATTERN = /^\*{4,34}[A-Za-z0-9]{0,4}$/;
-const UNSAFE_TEXT_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+const UNSAFE_TEXT_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
 
 // SIX ISO 4217 List One, published 2026-01-01.
 const ISO_4217_PUBLICATION_DATE = '2026-01-01';

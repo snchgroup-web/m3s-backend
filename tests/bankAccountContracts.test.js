@@ -135,6 +135,8 @@ test('labels support normalized Unicode but reject whitespace and control charac
     value => { value.internalLabel = ''; },
     value => { value.internalLabel = ' Compte'; },
     value => { value.internalLabel = 'Compte\ncache'; },
+    value => { value.internalLabel = 'Compte\u2028cache'; },
+    value => { value.internalLabel = 'Compte\u2029cache'; },
     value => { value.internalLabel = 'x'.repeat(121); },
     value => { value.holderEntity.labelSnapshot = 'e\u0301'; },
     value => { value.financialInstitution.labelSnapshot = 'Banque\u202Etest'; }
