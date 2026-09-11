@@ -736,7 +736,7 @@ function createBankAccountReadService(options) {
     const pageItems = Object.freeze(resolvedCandidates.slice(0, request.limit));
     const hasMore = resolvedCandidates.length > request.limit;
     const total = completeVisibleWindow
-      ? qualifyTotal(envelope.provenTotal, envelope, request, pageItems.length)
+      ? qualifyTotal(envelope.provenTotal, envelope, request, resolvedCandidates.length)
       : Object.freeze({ totalCount: null, totalStatus: 'unavailable' });
     const nextCursor = hasMore
       ? await encodeCursor(

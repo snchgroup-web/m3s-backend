@@ -647,6 +647,14 @@ test('23 - raw, contradictory or under-counted totals are ignored without invali
     assert.equal(page.totalCount, null);
     assert.equal(page.totalStatus, 'unavailable');
   }
+  const visibleSentinel = await list(createSetup({
+    accounts: [summary(1), summary(2)],
+    provenTotal: provenTotal(1)
+  }), { limit: 1 });
+  assert.equal(visibleSentinel.pageCount, 1);
+  assert.equal(visibleSentinel.hasMore, true);
+  assert.equal(visibleSentinel.totalCount, null);
+  assert.equal(visibleSentinel.totalStatus, 'unavailable');
 });
 
 test('24 - list output is detached and deeply frozen', async () => {
