@@ -79,7 +79,7 @@ const AFTER_KEYS = Object.freeze([
 const CURSOR_PAYLOAD_KEYS = Object.freeze([
   'cursorVersion', 'tenantId', 'actorId', 'operation', 'normalizedFilters',
   'limit', 'sortVersion', 'listRevision', 'afterInternalLabelOrder',
-  'afterBankAccountId', 'issuedAt', 'expiresAt'
+  'afterBankAccountId', 'authorizedCount', 'issuedAt', 'expiresAt'
 ]);
 const PROVEN_TOTAL_KEYS = Object.freeze([
   'tenantId', 'actorId', 'filters', 'listRevision', 'sourceRevision', 'scope', 'count'
@@ -118,7 +118,7 @@ function safeKnownErrorCode(error, ErrorType, allowedCodes) {
 }
 
 function isPlainRecord(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || isProxy(value)) return false;
+  if (!value || typeof value !== 'object' || isProxy(value) || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
@@ -167,7 +167,7 @@ function isCanonicalInstant(value) {
 }
 
 function validateAccessSet(value) {
-  if (!Array.isArray(value) || isProxy(value) || value.length > MAX_CONTEXT_VALUES) return null;
+  if (isProxy(value) || !Array.isArray(value) || value.length > MAX_CONTEXT_VALUES) return null;
   const copy = [];
   const seen = new Set();
   for (let index = 0; index < value.length; index += 1) {
@@ -318,7 +318,7 @@ function compareHandles(left, right) {
 }
 
 function readArrayValues(value, maximum) {
-  if (!Array.isArray(value) || isProxy(value) || value.length > maximum) return null;
+  if (isProxy(value) || !Array.isArray(value) || value.length > maximum) return null;
   const keys = Reflect.ownKeys(value);
   if (keys.some(key => {
     if (key === 'length') return false;
@@ -415,6 +415,9 @@ function validateCursorPayload(value, request) {
     || !isDisplayText(fields.afterInternalLabelOrder)
     || typeof fields.afterBankAccountId !== 'string'
     || !UUID_PATTERN.test(fields.afterBankAccountId)
+    || !Number.isSafeInteger(fields.authorizedCount)
+    || fields.authorizedCount < 1
+    || fields.authorizedCount > MAX_TOTAL_COUNT
     || expiresAtMs <= issuedAtMs
     || expiresAtMs - issuedAtMs > MAX_CURSOR_AGE_MS
     || issuedAtMs > requestAtMs
@@ -422,6 +425,7 @@ function validateCursorPayload(value, request) {
 
   return Object.freeze({
     listRevision: fields.listRevision,
+    authorizedCount: fields.authorizedCount,
     after: Object.freeze({
       internalLabelOrder: fields.afterInternalLabelOrder,
       bankAccountId: fields.afterBankAccountId,
@@ -431,7 +435,9 @@ function validateCursorPayload(value, request) {
 }
 
 async function decodeCursor(cursorDecode, request) {
-  if (request.cursor === null) return Object.freeze({ listRevision: null, after: null });
+  if (request.cursor === null) {
+    return Object.freeze({ listRevision: null, authorizedCount: 0, after: null });
+  }
   try {
     const payload = await cursorDecode(request.cursor);
     return validateCursorPayload(payload, request);
@@ -451,7 +457,7 @@ function validCursorToken(value) {
     && CURSOR_PATTERN.test(value);
 }
 
-async function encodeCursor(cursorEncode, request, envelope, lastHandle) {
+async function encodeCursor(cursorEncode, request, envelope, lastHandle, authorizedCount) {
   const payload = Object.freeze({
     cursorVersion: CURSOR_VERSION,
     tenantId: request.context.tenantId,
@@ -463,6 +469,7 @@ async function encodeCursor(cursorEncode, request, envelope, lastHandle) {
     listRevision: envelope.listRevision,
     afterInternalLabelOrder: lastHandle.internalLabelOrder,
     afterBankAccountId: lastHandle.bankAccountId,
+    authorizedCount,
     issuedAt: request.context.requestAt,
     expiresAt: addMinutes(request.context.requestAt, MAX_CURSOR_AGE_MS)
   });
@@ -651,7 +658,7 @@ async function resolveHandles(
   return Object.freeze(results.filter(Boolean));
 }
 
-function qualifyTotal(value, envelope, request, pageCount) {
+function qualifyTotal(value, envelope, request, cursorState, visibleWindowCount, pageCount) {
   if (value === null) return Object.freeze({ totalCount: null, totalStatus: 'unavailable' });
   const fields = readClosedFields(value, PROVEN_TOTAL_KEYS);
   if (!fields) return Object.freeze({ totalCount: null, totalStatus: 'unavailable' });
@@ -661,6 +668,8 @@ function qualifyTotal(value, envelope, request, pageCount) {
   } catch (_error) {
     return Object.freeze({ totalCount: null, totalStatus: 'unavailable' });
   }
+  const cumulativeVisibleWindowCount = cursorState.authorizedCount + visibleWindowCount;
+  const cumulativePageCount = cursorState.authorizedCount + pageCount;
   if (fields.tenantId !== request.context.tenantId
     || fields.actorId !== request.context.actorId
     || !sameFilters(filters, request.filters)
@@ -670,7 +679,9 @@ function qualifyTotal(value, envelope, request, pageCount) {
     || !Number.isSafeInteger(fields.count)
     || fields.count < 0
     || fields.count > MAX_TOTAL_COUNT
-    || fields.count < pageCount) {
+    || (envelope.hasMore
+      ? fields.count < cumulativeVisibleWindowCount
+      : fields.count !== cumulativePageCount)) {
     return Object.freeze({ totalCount: null, totalStatus: 'unavailable' });
   }
   return Object.freeze({ totalCount: fields.count, totalStatus: 'proven' });
@@ -736,14 +747,22 @@ function createBankAccountReadService(options) {
     const pageItems = Object.freeze(resolvedCandidates.slice(0, request.limit));
     const hasMore = resolvedCandidates.length > request.limit;
     const total = completeVisibleWindow
-      ? qualifyTotal(envelope.provenTotal, envelope, request, resolvedCandidates.length)
+      ? qualifyTotal(
+        envelope.provenTotal,
+        envelope,
+        request,
+        cursorState,
+        resolvedCandidates.length,
+        pageItems.length
+      )
       : Object.freeze({ totalCount: null, totalStatus: 'unavailable' });
     const nextCursor = hasMore
       ? await encodeCursor(
         factory.cursorEncode,
         request,
         envelope,
-        candidateHandles[request.limit - 1]
+        candidateHandles[request.limit - 1],
+        cursorState.authorizedCount + pageItems.length
       )
       : null;
     return Object.freeze({

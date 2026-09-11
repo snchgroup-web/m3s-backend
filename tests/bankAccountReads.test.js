@@ -249,11 +249,14 @@ test('2 - open, inherited, accessor, proxy and symbol request shapes are rejecte
   Object.defineProperty(accessor, 'context', { enumerable: true, get: context });
   const symbol = { context: context() };
   symbol[Symbol('hidden')] = true;
+  const revokedRequest = Proxy.revocable({ context: context() }, {});
+  revokedRequest.revoke();
   const candidates = [
     { context: context(), unknown: true },
     Object.create({ context: context() }),
     accessor,
     new Proxy({ context: context() }, {}),
+    revokedRequest.proxy,
     symbol
   ];
   for (const candidate of candidates) {
@@ -279,6 +282,33 @@ test('3 - permission and capability gates run before cursor and list resolution'
     assert.equal(setup.listResolver.calls.length, 0);
     assert.equal(setup.cursorBundle.decodeCalls.length, 0);
   }
+});
+
+test('3b - revoked access arrays and list records fail closed without raw TypeError', async () => {
+  const revokedPermissions = Proxy.revocable(['finance:read'], {});
+  revokedPermissions.revoke();
+  const denied = createSetup();
+  await assert.rejects(
+    list(denied, { context: context({ permissions: revokedPermissions.proxy }) }),
+    expectReadCode('BANK_ACCOUNT_REQUEST_INVALID')
+  );
+  assert.equal(denied.listResolver.calls.length, 0);
+
+  const revokedRecords = Proxy.revocable([], {});
+  revokedRecords.revoke();
+  const hostileSource = createSetup({
+    listResolver: async () => ({
+      available: true,
+      listRevision: LIST_REVISION,
+      records: revokedRecords.proxy,
+      hasMore: false,
+      provenTotal: null
+    })
+  });
+  await assert.rejects(
+    list(hostileSource),
+    expectReadCode('BANK_ACCOUNT_LIST_INVALID')
+  );
 });
 
 test('4 - the six exact filters are normalized and passed as a frozen closed object', async () => {
@@ -616,6 +646,32 @@ test('20 - pageCount, hasMore and nextCursor remain distinct across bounded page
   assert.equal(second.pageCount, 1);
   assert.equal(second.hasMore, false);
   assert.equal(second.nextCursor, null);
+});
+
+test('20b - proven totals reconcile cumulatively and exactly when pagination is exhausted', async () => {
+  const accounts = [summary(1), summary(2), summary(3)];
+  const setup = createSetup({ accounts, provenTotal: provenTotal(3) });
+  const first = await list(setup, { limit: 1 });
+  assert.equal(first.totalCount, 3);
+  assert.equal(setup.cursorBundle.encodeCalls[0].authorizedCount, 1);
+
+  const second = await list(setup, { limit: 1, cursor: first.nextCursor });
+  assert.equal(second.totalCount, 3);
+  assert.equal(setup.cursorBundle.encodeCalls[1].authorizedCount, 2);
+
+  const third = await list(setup, { limit: 1, cursor: second.nextCursor });
+  assert.equal(third.totalCount, 3);
+  assert.equal(third.totalStatus, 'proven');
+  assert.equal(third.hasMore, false);
+
+  const contradictoryExhausted = createSetup({
+    accounts: [],
+    records: [],
+    provenTotal: provenTotal(1)
+  });
+  const empty = await list(contradictoryExhausted);
+  assert.equal(empty.totalCount, null);
+  assert.equal(empty.totalStatus, 'unavailable');
 });
 
 test('21 - missing total proof produces null and unavailable rather than zero', async () => {
