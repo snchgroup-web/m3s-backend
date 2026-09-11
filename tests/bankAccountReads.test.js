@@ -272,7 +272,10 @@ test('3 - permission and capability gates run before cursor and list resolution'
     context({ capabilities: [] })
   ]) {
     const setup = createSetup();
-    await assert.rejects(list(setup, { context: deniedContext }), expectReadCode('BANK_ACCOUNT_ACCESS_DENIED'));
+    await assert.rejects(
+      list(setup, { context: deniedContext, cursor: 'invalid cursor' }),
+      expectReadCode('BANK_ACCOUNT_ACCESS_DENIED')
+    );
     assert.equal(setup.listResolver.calls.length, 0);
     assert.equal(setup.cursorBundle.decodeCalls.length, 0);
   }
@@ -369,15 +372,23 @@ test('11 - an account that becomes absent or invisible is omitted without diagno
   const absent = createSetup({
     accounts: [],
     records: [handle(first)],
-    references: absentReferences
+    references: absentReferences,
+    provenTotal: provenTotal(1)
   });
-  assert.equal((await list(absent)).pageCount, 0);
+  const absentPage = await list(absent);
+  assert.equal(absentPage.pageCount, 0);
+  assert.equal(absentPage.totalCount, null);
+  assert.equal(absentPage.totalStatus, 'unavailable');
 
   const invisible = createSetup({
     accounts: [first],
-    referenceOptions: { invisibleIds: new Set([first.bankAccountId]) }
+    referenceOptions: { invisibleIds: new Set([first.bankAccountId]) },
+    provenTotal: provenTotal(1)
   });
-  assert.equal((await list(invisible)).pageCount, 0);
+  const invisiblePage = await list(invisible);
+  assert.equal(invisiblePage.pageCount, 0);
+  assert.equal(invisiblePage.totalCount, null);
+  assert.equal(invisiblePage.totalStatus, 'unavailable');
 });
 
 test('12 - a denied C3 account is omitted with the same external semantics', async () => {
@@ -439,6 +450,12 @@ test('15 - timed-out non-cooperative resolutions retain the four shared service 
     resolutionTimeoutMs: 10
   });
   await assert.rejects(list(setup, { limit: 8 }), expectReadCode('BANK_ACCOUNT_LIST_UNAVAILABLE'));
+  assert.equal(active, 4);
+  assert.equal(calls.length, 4);
+  await assert.rejects(
+    setup.service.readBankAccountSummary({ bankAccountId: uuid(1), context: context() }),
+    expectReadCode('BANK_ACCOUNT_REFERENCE_UNAVAILABLE')
+  );
   assert.equal(active, 4);
   assert.equal(calls.length, 4);
   await assert.rejects(list(setup, { limit: 8 }), expectReadCode('BANK_ACCOUNT_LIST_UNAVAILABLE'));
@@ -505,6 +522,21 @@ test('18 - expired, tampered and list-revision-divergent cursors are refused', a
   await assert.rejects(
     list(changedRevision, { limit: 1, cursor }),
     expectReadCode('BANK_ACCOUNT_CURSOR_INVALID')
+  );
+  const stagnant = createSetup({
+    accounts,
+    cursorBundle: setup.cursorBundle,
+    makeListResult: () => ({
+      available: true,
+      listRevision: LIST_REVISION,
+      records: [handle(accounts[0])],
+      hasMore: true,
+      provenTotal: null
+    })
+  });
+  await assert.rejects(
+    list(stagnant, { limit: 1, cursor }),
+    expectReadCode('BANK_ACCOUNT_LIST_INVALID')
   );
 });
 

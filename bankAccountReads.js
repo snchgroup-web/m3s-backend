@@ -231,6 +231,8 @@ function normalizeFilters(value) {
 function validateListRequest(input) {
   const fields = readClosedFields(input, LIST_REQUEST_KEYS, ['context']);
   if (!fields) fail('BANK_ACCOUNT_REQUEST_INVALID');
+  const context = validateContext(fields.context);
+  requireReadAccess(context);
   const limit = Object.hasOwn(fields, 'limit') ? fields.limit : DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
     fail('BANK_ACCOUNT_REQUEST_INVALID');
@@ -242,7 +244,7 @@ function validateListRequest(input) {
     || cursor.length > MAX_CURSOR_LENGTH
     || !CURSOR_PATTERN.test(cursor))) fail('BANK_ACCOUNT_CURSOR_INVALID');
   return Object.freeze({
-    context: validateContext(fields.context),
+    context,
     filters,
     cursor,
     limit
@@ -539,30 +541,30 @@ function createBoundedScheduler(limit) {
     });
     return Object.freeze({
       promise,
-      cancel() {
+      cancel(errorCode) {
         if (entry.started || entry.cancelled) return false;
         entry.cancelled = true;
         const index = queue.indexOf(entry);
         if (index >= 0) queue.splice(index, 1);
-        entry.reject(new BankAccountReadError('BANK_ACCOUNT_LIST_UNAVAILABLE'));
+        entry.reject(new BankAccountReadError(errorCode));
         return true;
       }
     });
   };
 }
 
-async function callReferenceWithTimeout(schedule, resolver, request, timeoutMs) {
+async function callReferenceWithTimeout(schedule, resolver, request, timeoutMs, timeoutCode) {
   let timedOut = false;
   const scheduledResolution = schedule(() => {
-    if (timedOut) throw new BankAccountReadError('BANK_ACCOUNT_LIST_UNAVAILABLE');
+    if (timedOut) throw new BankAccountReadError(timeoutCode);
     return resolver(request);
   });
   let timeoutId;
   const timeoutPromise = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
       timedOut = true;
-      scheduledResolution.cancel();
-      reject(new BankAccountReadError('BANK_ACCOUNT_LIST_UNAVAILABLE'));
+      scheduledResolution.cancel(timeoutCode);
+      reject(new BankAccountReadError(timeoutCode));
     }, timeoutMs);
   });
   try {
@@ -588,7 +590,8 @@ async function resolveHandles(
       resolutionScheduler,
       resolveReadableBankAccountSummary,
       Object.freeze({ bankAccountId: handle.bankAccountId, context: request.context }),
-      timeoutMs
+      timeoutMs,
+      'BANK_ACCOUNT_LIST_UNAVAILABLE'
     );
   }
 
@@ -657,7 +660,13 @@ function createBankAccountReadService(options) {
     const request = validateReadRequest(input);
     let result;
     try {
-      result = await factory.resolveReadableBankAccountSummary(request);
+      result = await callReferenceWithTimeout(
+        resolutionScheduler,
+        factory.resolveReadableBankAccountSummary,
+        request,
+        factory.resolutionTimeoutMs,
+        'BANK_ACCOUNT_REFERENCE_UNAVAILABLE'
+      );
     } catch (error) {
       throw sanitizeReferenceError(error);
     }
@@ -666,7 +675,6 @@ function createBankAccountReadService(options) {
 
   async function listBankAccountSummaries(input) {
     const request = validateListRequest(input);
-    requireReadAccess(request.context);
     const cursorState = await decodeCursor(factory.cursorDecode, request);
     const candidateLimit = request.limit + 1;
     const envelope = await callListResolver(
@@ -686,6 +694,11 @@ function createBankAccountReadService(options) {
     );
     if (cursorState.listRevision !== null
       && cursorState.listRevision !== envelope.listRevision) fail('BANK_ACCOUNT_CURSOR_INVALID');
+    if (cursorState.after !== null
+      && envelope.records.length > 0
+      && compareHandles(envelope.records[0], cursorState.after) <= 0) {
+      fail('BANK_ACCOUNT_LIST_INVALID');
+    }
 
     const sourceHasExtra = envelope.records.length > request.limit;
     const hasMore = envelope.hasMore || sourceHasExtra;
@@ -697,7 +710,9 @@ function createBankAccountReadService(options) {
       resolutionScheduler,
       factory.resolutionTimeoutMs
     );
-    const total = qualifyTotal(envelope.provenTotal, envelope, request, items.length);
+    const total = items.length === selectedHandles.length
+      ? qualifyTotal(envelope.provenTotal, envelope, request, items.length)
+      : Object.freeze({ totalCount: null, totalStatus: 'unavailable' });
     const nextCursor = hasMore
       ? await encodeCursor(
         factory.cursorEncode,
