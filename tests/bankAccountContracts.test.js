@@ -7,6 +7,8 @@ const {
   ACCOUNT_TYPES,
   BankAccountContractError,
   INSTITUTION_TYPES,
+  ISO_4217_CODES,
+  ISO_4217_PUBLICATION_DATE,
   MAX_MASKED_IDENTIFIER_LENGTH,
   MAX_RECORD_VERSION,
   projectBankAccountSummaryV1,
@@ -144,13 +146,16 @@ test('enumerations are immutable and reject wallets, cards, cash and transfer se
   rejects(value => { value.financialInstitution.institutionType = 'wallet'; });
 });
 
-test('currency is an explicit uppercase ISO-style code and is never inferred', () => {
-  for (const currency of ['CHF', 'XOF', 'EUR']) {
+test('currency follows the frozen SIX ISO 4217 list and is never inferred', () => {
+  assert.equal(ISO_4217_PUBLICATION_DATE, '2026-01-01');
+  assert.equal(ISO_4217_CODES.length, 178);
+  assert.equal(Object.isFrozen(ISO_4217_CODES), true);
+  for (const currency of ['CHF', 'XOF', 'EUR', 'CHE', 'CHW', 'XAD']) {
     const candidate = summary();
     candidate.currency = currency;
     assert.doesNotThrow(() => validateBankAccountSummaryV1(candidate));
   }
-  for (const currency of ['CFA', 'chf', 'EU', 'EURO', '', null]) {
+  for (const currency of ['BGN', 'CFA', 'chf', 'EU', 'EURO', '', null]) {
     rejects(value => { value.currency = currency; });
   }
 });
@@ -276,6 +281,14 @@ test('projection rejects invalid or hostile source shapes with a generic error',
   source.holderEntity = null;
   assert.throws(
     () => projectBankAccountSummaryV1(source),
+    error => error instanceof BankAccountContractError
+      && error.code === 'BANK_ACCOUNT_REFERENCE_INVALID'
+  );
+
+  const revocable = Proxy.revocable({}, {});
+  revocable.revoke();
+  assert.throws(
+    () => projectBankAccountSummaryV1(revocable.proxy),
     error => error instanceof BankAccountContractError
       && error.code === 'BANK_ACCOUNT_REFERENCE_INVALID'
   );

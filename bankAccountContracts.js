@@ -10,7 +10,43 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const MASKED_IDENTIFIER_PATTERN = /^\*{4,30}[A-Za-z0-9]{0,4}$/;
 const UNSAFE_TEXT_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
-const ISO_4217_CURRENCIES = new Set(Intl.supportedValuesOf('currency'));
+
+// SIX ISO 4217 List One, published 2026-01-01.
+const ISO_4217_PUBLICATION_DATE = '2026-01-01';
+const ISO_4217_CODES = Object.freeze([
+  'AED', 'AFN', 'ALL', 'AMD', 'AOA', 'ARS', 'AUD', 'AWG', 'AZN',
+  'BAM', 'BBD', 'BDT', 'BHD', 'BIF', 'BMD', 'BND', 'BOB', 'BOV',
+  'BRL', 'BSD', 'BTN', 'BWP', 'BYN', 'BZD',
+  'CAD', 'CDF', 'CHE', 'CHF', 'CHW', 'CLF', 'CLP', 'CNY', 'COP',
+  'COU', 'CRC', 'CUP', 'CVE', 'CZK',
+  'DJF', 'DKK', 'DOP', 'DZD',
+  'EGP', 'ERN', 'ETB', 'EUR',
+  'FJD', 'FKP',
+  'GBP', 'GEL', 'GHS', 'GIP', 'GMD', 'GNF', 'GTQ', 'GYD',
+  'HKD', 'HNL', 'HTG', 'HUF',
+  'IDR', 'ILS', 'INR', 'IQD', 'IRR', 'ISK',
+  'JMD', 'JOD', 'JPY',
+  'KES', 'KGS', 'KHR', 'KMF', 'KPW', 'KRW', 'KWD', 'KYD', 'KZT',
+  'LAK', 'LBP', 'LKR', 'LRD', 'LSL', 'LYD',
+  'MAD', 'MDL', 'MGA', 'MKD', 'MMK', 'MNT', 'MOP', 'MRU', 'MUR',
+  'MVR', 'MWK', 'MXN', 'MXV', 'MYR', 'MZN',
+  'NAD', 'NGN', 'NIO', 'NOK', 'NPR', 'NZD',
+  'OMR',
+  'PAB', 'PEN', 'PGK', 'PHP', 'PKR', 'PLN', 'PYG',
+  'QAR',
+  'RON', 'RSD', 'RUB', 'RWF',
+  'SAR', 'SBD', 'SCR', 'SDG', 'SEK', 'SGD', 'SHP', 'SLE', 'SOS',
+  'SRD', 'SSP', 'STN', 'SVC', 'SYP', 'SZL',
+  'THB', 'TJS', 'TMT', 'TND', 'TOP', 'TRY', 'TTD', 'TWD', 'TZS',
+  'UAH', 'UGX', 'USD', 'USN', 'UYI', 'UYU', 'UYW', 'UZS',
+  'VED', 'VES', 'VND', 'VUV',
+  'WST',
+  'XAD', 'XAF', 'XAG', 'XAU', 'XBA', 'XBB', 'XBC', 'XBD', 'XCD',
+  'XCG', 'XDR', 'XOF', 'XPD', 'XPF', 'XPT', 'XSU', 'XTS', 'XUA', 'XXX',
+  'YER',
+  'ZAR', 'ZMW', 'ZWG'
+]);
+const ISO_4217_CURRENCIES = new Set(ISO_4217_CODES);
 
 const ACCOUNT_TYPES = Object.freeze([
   'OPERATING_CURRENT',
@@ -198,9 +234,9 @@ function deepFreezeSummary(summary) {
 }
 
 function projectBankAccountSummaryV1(record) {
-  if (!isPlainRecord(record)) fail();
   let summary;
   try {
+    if (!isPlainRecord(record)) fail();
     summary = {
       bankAccountId: record.bankAccountId,
       tenantId: record.tenantId,
@@ -234,6 +270,8 @@ module.exports = {
   ACCOUNT_TYPES,
   BankAccountContractError,
   INSTITUTION_TYPES,
+  ISO_4217_CODES,
+  ISO_4217_PUBLICATION_DATE,
   MAX_ID_LENGTH,
   MAX_LABEL_LENGTH,
   MAX_MASKED_IDENTIFIER_LENGTH,
