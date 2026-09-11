@@ -538,6 +538,26 @@ test('18 - expired, tampered and list-revision-divergent cursors are refused', a
     list(stagnant, { limit: 1, cursor }),
     expectReadCode('BANK_ACCOUNT_LIST_INVALID')
   );
+  const hostileInstant = {
+    [Symbol.toPrimitive]() {
+      throw new Error('IBAN CH04 SECRET Banque privee');
+    }
+  };
+  const hostileCursorBundle = {
+    codec: Object.freeze({
+      async encode() { return 'unused.cursor'; },
+      async decode() { return { ...payload, issuedAt: hostileInstant }; }
+    }),
+    encodeCalls: [],
+    decodeCalls: []
+  };
+  const hostile = createSetup({ accounts, cursorBundle: hostileCursorBundle });
+  await assert.rejects(list(hostile, { limit: 1, cursor: 'hostile.cursor' }), error => {
+    assert.equal(expectReadCode('BANK_ACCOUNT_CURSOR_INVALID')(error), true);
+    assert.equal(error.message.includes('Banque'), false);
+    assert.equal(error.stack.includes('CH04'), false);
+    return true;
+  });
 });
 
 test('19 - missing or open cursor codecs are rejected with no fallback encoding', () => {

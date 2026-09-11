@@ -395,6 +395,9 @@ function validateCursorPayload(value, request) {
   } catch (_error) {
     fail('BANK_ACCOUNT_CURSOR_INVALID');
   }
+  if (!isCanonicalInstant(fields.issuedAt) || !isCanonicalInstant(fields.expiresAt)) {
+    fail('BANK_ACCOUNT_CURSOR_INVALID');
+  }
   const issuedAtMs = Date.parse(fields.issuedAt);
   const expiresAtMs = Date.parse(fields.expiresAt);
   const requestAtMs = Date.parse(request.context.requestAt);
@@ -409,8 +412,6 @@ function validateCursorPayload(value, request) {
     || !isDisplayText(fields.afterInternalLabelOrder)
     || typeof fields.afterBankAccountId !== 'string'
     || !UUID_PATTERN.test(fields.afterBankAccountId)
-    || !isCanonicalInstant(fields.issuedAt)
-    || !isCanonicalInstant(fields.expiresAt)
     || expiresAtMs <= issuedAtMs
     || expiresAtMs - issuedAtMs > MAX_CURSOR_AGE_MS
     || issuedAtMs > requestAtMs
@@ -428,13 +429,12 @@ function validateCursorPayload(value, request) {
 
 async function decodeCursor(cursorDecode, request) {
   if (request.cursor === null) return Object.freeze({ listRevision: null, after: null });
-  let payload;
   try {
-    payload = await cursorDecode(request.cursor);
+    const payload = await cursorDecode(request.cursor);
+    return validateCursorPayload(payload, request);
   } catch (_error) {
     fail('BANK_ACCOUNT_CURSOR_INVALID');
   }
-  return validateCursorPayload(payload, request);
 }
 
 function addMinutes(instant, milliseconds) {
