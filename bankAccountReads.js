@@ -722,7 +722,6 @@ function createBankAccountReadService(options) {
     }
 
     const sourceHasExtra = envelope.records.length > request.limit;
-    const hasMore = envelope.hasMore || sourceHasExtra;
     const selectedHandles = Object.freeze(envelope.records.slice(0, request.limit));
     const items = await resolveHandles(
       selectedHandles,
@@ -731,7 +730,9 @@ function createBankAccountReadService(options) {
       resolutionScheduler,
       factory.resolutionTimeoutMs
     );
-    const total = items.length === selectedHandles.length
+    const completeVisiblePage = items.length === selectedHandles.length;
+    const hasMore = completeVisiblePage && (envelope.hasMore || sourceHasExtra);
+    const total = completeVisiblePage
       ? qualifyTotal(envelope.provenTotal, envelope, request, items.length)
       : Object.freeze({ totalCount: null, totalStatus: 'unavailable' });
     const nextCursor = hasMore

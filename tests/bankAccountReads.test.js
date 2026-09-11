@@ -392,14 +392,21 @@ test('11 - an account that becomes absent or invisible is omitted without diagno
 });
 
 test('12 - a denied C3 account is omitted with the same external semantics', async () => {
-  const restricted = summary(1, { classification: 'C3' });
+  const restricted = [
+    summary(1, { classification: 'C3' }),
+    summary(2, { classification: 'C3' })
+  ];
   const setup = createSetup({
-    accounts: [restricted],
+    accounts: restricted,
     referenceOptions: { allowC3: false }
   });
-  const page = await list(setup, { filters: { classification: 'C3' } });
+  const page = await list(setup, { filters: { classification: 'C3' }, limit: 1 });
   assert.equal(page.pageCount, 0);
   assert.equal(page.totalCount, null);
+  assert.equal(page.totalStatus, 'unavailable');
+  assert.equal(page.hasMore, false);
+  assert.equal(page.nextCursor, null);
+  assert.equal(setup.cursorBundle.encodeCalls.length, 0);
 });
 
 test('13 - one unavailable account source refuses the whole page instead of returning a partial result', async () => {
@@ -582,6 +589,13 @@ test('20 - pageCount, hasMore and nextCursor remain distinct across bounded page
     { pageCount: first.pageCount, hasMore: first.hasMore, cursor: typeof first.nextCursor },
     { pageCount: 1, hasMore: true, cursor: 'string' }
   );
+  const decodedFragments = first.nextCursor
+    .split('.')
+    .map(fragment => Buffer.from(fragment, 'base64url').toString('utf8'))
+    .join('');
+  assert.equal(first.nextCursor.includes(uuid(1)), false);
+  assert.equal(decodedFragments.includes(uuid(1)), false);
+  assert.equal(decodedFragments.includes('bankAccountId'), false);
   const second = await list(setup, { limit: 1, cursor: first.nextCursor });
   assert.equal(second.items[0].bankAccountId, uuid(2));
   assert.equal(second.pageCount, 1);
