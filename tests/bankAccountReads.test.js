@@ -582,15 +582,42 @@ test('24 - list output is detached and deeply frozen', async () => {
 });
 
 test('25 - source failures expose bounded generic errors without banking details', async () => {
-  const listResolver = async () => { throw new Error('IBAN CH00 SECRET Banque privee'); };
-  const setup = createSetup({ listResolver });
-  await assert.rejects(list(setup), error => {
-    assert.equal(error.code, 'BANK_ACCOUNT_LIST_UNAVAILABLE');
-    assert.equal(error.message, 'Bank account read request could not be completed');
-    assert.equal(JSON.stringify(error).includes('CH00'), false);
-    assert.equal(error.stack.includes('CH00'), false);
-    return true;
-  });
+  const leakedReadError = new BankAccountReadError('BANK_ACCOUNT_LIST_INVALID');
+  leakedReadError.secret = 'IBAN CH00 SECRET Banque privee';
+  const leakedReferenceError = new BankAccountReferenceError('BANK_ACCOUNT_REFERENCE_INVALID');
+  leakedReferenceError.secret = 'IBAN CH01 SECRET Banque privee';
+  for (const { setup, invoke, code } of [
+    {
+      setup: createSetup({ listResolver: async () => { throw leakedReadError; } }),
+      invoke: candidate => list(candidate),
+      code: 'BANK_ACCOUNT_LIST_INVALID'
+    },
+    {
+      setup: createSetup({
+        references: {
+          referencePolicyService: Object.freeze({
+            async resolveReadableBankAccountSummary() { throw leakedReferenceError; }
+          }),
+          calls: [],
+          getMaxActive: () => 0
+        }
+      }),
+      invoke: candidate => candidate.service.readBankAccountSummary({
+        bankAccountId: uuid(1),
+        context: context()
+      }),
+      code: 'BANK_ACCOUNT_REFERENCE_INVALID'
+    }
+  ]) {
+    await assert.rejects(invoke(setup), error => {
+      assert.equal(error.code, code);
+      assert.equal(Object.hasOwn(error, 'secret'), false);
+      assert.equal(error.message.includes('Banque'), false);
+      assert.equal(JSON.stringify(error).includes('CH0'), false);
+      assert.equal(error.stack.includes('CH0'), false);
+      return true;
+    });
+  }
 });
 
 test('26 - the pure service exposes only read and list and uses only injected doubles', async () => {

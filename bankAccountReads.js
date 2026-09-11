@@ -30,6 +30,24 @@ const CURSOR_VERSION = 1;
 const SORT_VERSION = 'INTERNAL_LABEL_ACCOUNT_ID_V1';
 const TOTAL_SCOPE = 'authorized_filtered';
 
+const REFERENCE_ERROR_CODES = new Set([
+  'BANK_ACCOUNT_REQUEST_INVALID',
+  'BANK_ACCOUNT_REFERENCE_INVALID',
+  'BANK_ACCOUNT_REFERENCE_UNAVAILABLE',
+  'BANK_ACCOUNT_ACCESS_DENIED',
+  'BANK_ACCOUNT_RELATION_INVALID'
+]);
+const READ_ERROR_CODES = new Set([
+  'BANK_ACCOUNT_REQUEST_INVALID',
+  'BANK_ACCOUNT_ACCESS_DENIED',
+  'BANK_ACCOUNT_CURSOR_INVALID',
+  'BANK_ACCOUNT_LIST_UNAVAILABLE',
+  'BANK_ACCOUNT_LIST_INVALID',
+  'BANK_ACCOUNT_REFERENCE_INVALID',
+  'BANK_ACCOUNT_REFERENCE_UNAVAILABLE',
+  'BANK_ACCOUNT_RELATION_INVALID'
+]);
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REFERENCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const ACCESS_VALUE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -452,7 +470,9 @@ async function callListResolver(listResolver, queryFields, timeoutMs, candidateL
     const result = await Promise.race([sourcePromise, timeoutPromise]);
     return validateListEnvelope(result, candidateLimit, pageLimit);
   } catch (error) {
-    if (error instanceof BankAccountReadError) throw error;
+    if (error instanceof BankAccountReadError && READ_ERROR_CODES.has(error.code)) {
+      throw new BankAccountReadError(error.code);
+    }
     fail('BANK_ACCOUNT_LIST_UNAVAILABLE');
   } finally {
     clearTimeout(timeoutId);
@@ -472,7 +492,12 @@ function matchesFilters(summary, filters) {
 }
 
 function sanitizeReferenceError(error) {
-  if (error instanceof BankAccountReferenceError || error instanceof BankAccountReadError) return error;
+  if (error instanceof BankAccountReferenceError && REFERENCE_ERROR_CODES.has(error.code)) {
+    return new BankAccountReferenceError(error.code);
+  }
+  if (error instanceof BankAccountReadError && READ_ERROR_CODES.has(error.code)) {
+    return new BankAccountReadError(error.code);
+  }
   return new BankAccountReadError('BANK_ACCOUNT_REFERENCE_UNAVAILABLE');
 }
 
