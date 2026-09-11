@@ -136,7 +136,8 @@ function validateDates(summary) {
   if (summary.effectiveFrom !== null && summary.effectiveTo !== null
     && summary.effectiveTo < summary.effectiveFrom) fail();
   if (summary.verifiedAt !== null && !isIsoInstant(summary.verifiedAt)) fail();
-  if (summary.status === 'candidate' && summary.verifiedAt !== null) fail();
+  if (['candidate', 'verification_pending'].includes(summary.status)
+    && summary.verifiedAt !== null) fail();
   if (['active', 'suspended', 'closed'].includes(summary.status)
     && summary.verifiedAt === null) fail();
 }

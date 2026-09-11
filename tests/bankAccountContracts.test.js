@@ -187,6 +187,10 @@ test('status, verification and effectivity dates remain coherent', () => {
 
   const mutations = [
     value => { value.status = 'candidate'; value.verifiedAt = '2026-09-11T17:00:00Z'; },
+    value => {
+      value.status = 'verification_pending';
+      value.verifiedAt = '2026-09-11T17:00:00Z';
+    },
     value => { value.status = 'active'; value.verifiedAt = null; },
     value => { value.status = 'suspended'; value.verifiedAt = null; },
     value => { value.status = 'closed'; value.verifiedAt = null; },
