@@ -218,12 +218,14 @@ function validateAccountEnvelope(value) {
   if (!envelope || typeof envelope.visible !== 'boolean') {
     fail('BANK_ACCOUNT_REFERENCE_INVALID');
   }
+  let summary;
   try {
     validateBankAccountSummaryV1(envelope.summary);
+    summary = projectBankAccountSummaryV1(envelope.summary);
   } catch (_error) {
     fail('BANK_ACCOUNT_REFERENCE_INVALID');
   }
-  return envelope;
+  return Object.freeze({ summary, visible: envelope.visible });
 }
 
 function relationMatchesSnapshot(record, snapshot, summary, date, isInstitution) {

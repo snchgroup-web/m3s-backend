@@ -445,6 +445,34 @@ test('resolver queries are exact frozen copies and inputs and source records are
   ]);
 });
 
+test('the validated account is detached before an asynchronous C3 policy can yield', async () => {
+  const source = summary({ classification: 'C3' });
+  const accountResolver = async () => {
+    setTimeout(() => {
+      source.internalLabel = 'Source modifiee apres resolution';
+      source.tenantId = 'tenant-attacker';
+    }, 0);
+    return { available: true, records: [{ summary: source, visible: true }] };
+  };
+  const setup = createSetup({
+    summary: source,
+    accountResolver,
+    entityResolver: createFakeBankAccountResolver([
+      relation(source.holderEntity, { classification: 'C3' })
+    ]),
+    institutionResolver: createFakeBankAccountResolver([
+      institutionRelation({ classification: 'C3' })
+    ]),
+    canReadRestricted: () => new Promise(resolvePolicy => {
+      setTimeout(() => resolvePolicy(true), 10);
+    })
+  });
+  const result = await resolve(setup);
+  assert.equal(result.internalLabel, 'Compte fictif masque');
+  assert.equal(result.tenantId, 'tenant-fictional');
+  assert.equal(source.tenantId, 'tenant-attacker');
+});
+
 test('no raw resolver field or sensitive account value reaches the result', async () => {
   const raw = summary();
   raw.secret = 'DO-NOT-EXPOSE';
