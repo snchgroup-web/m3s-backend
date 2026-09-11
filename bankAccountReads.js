@@ -101,6 +101,22 @@ class BankAccountReadError extends Error {
 
 const fail = code => { throw new BankAccountReadError(code); };
 
+function safeKnownErrorCode(error, ErrorType, allowedCodes) {
+  try {
+    if (error === null
+      || (typeof error !== 'object' && typeof error !== 'function')
+      || isProxy(error)
+      || !(error instanceof ErrorType)) return null;
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code');
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return null;
+    return typeof descriptor.value === 'string' && allowedCodes.has(descriptor.value)
+      ? descriptor.value
+      : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
 function isPlainRecord(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || isProxy(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -472,9 +488,8 @@ async function callListResolver(listResolver, queryFields, timeoutMs, candidateL
     const result = await Promise.race([sourcePromise, timeoutPromise]);
     return validateListEnvelope(result, candidateLimit, pageLimit);
   } catch (error) {
-    if (error instanceof BankAccountReadError && READ_ERROR_CODES.has(error.code)) {
-      throw new BankAccountReadError(error.code);
-    }
+    const code = safeKnownErrorCode(error, BankAccountReadError, READ_ERROR_CODES);
+    if (code !== null) throw new BankAccountReadError(code);
     fail('BANK_ACCOUNT_LIST_UNAVAILABLE');
   } finally {
     clearTimeout(timeoutId);
@@ -494,12 +509,14 @@ function matchesFilters(summary, filters) {
 }
 
 function sanitizeReferenceError(error) {
-  if (error instanceof BankAccountReferenceError && REFERENCE_ERROR_CODES.has(error.code)) {
-    return new BankAccountReferenceError(error.code);
-  }
-  if (error instanceof BankAccountReadError && READ_ERROR_CODES.has(error.code)) {
-    return new BankAccountReadError(error.code);
-  }
+  const referenceCode = safeKnownErrorCode(
+    error,
+    BankAccountReferenceError,
+    REFERENCE_ERROR_CODES
+  );
+  if (referenceCode !== null) return new BankAccountReferenceError(referenceCode);
+  const readCode = safeKnownErrorCode(error, BankAccountReadError, READ_ERROR_CODES);
+  if (readCode !== null) return new BankAccountReadError(readCode);
   return new BankAccountReadError('BANK_ACCOUNT_REFERENCE_UNAVAILABLE');
 }
 
@@ -611,8 +628,12 @@ async function resolveHandles(
         }
         if (matchesFilters(summary, request.filters)) results[index] = summary;
       } catch (error) {
-        if (error instanceof BankAccountReferenceError
-          && error.code === 'BANK_ACCOUNT_ACCESS_DENIED') {
+        const referenceCode = safeKnownErrorCode(
+          error,
+          BankAccountReferenceError,
+          REFERENCE_ERROR_CODES
+        );
+        if (referenceCode === 'BANK_ACCOUNT_ACCESS_DENIED') {
           results[index] = null;
           continue;
         }

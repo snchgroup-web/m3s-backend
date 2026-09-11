@@ -618,6 +618,22 @@ test('25 - source failures expose bounded generic errors without banking details
   leakedReadError.secret = 'IBAN CH00 SECRET Banque privee';
   const leakedReferenceError = new BankAccountReferenceError('BANK_ACCOUNT_REFERENCE_INVALID');
   leakedReferenceError.secret = 'IBAN CH01 SECRET Banque privee';
+  function proxiedError(error, secret) {
+    return new Proxy(error, {
+      get(target, property, receiver) {
+        if (property === 'code') throw new Error(secret);
+        return Reflect.get(target, property, receiver);
+      }
+    });
+  }
+  const proxiedReadError = proxiedError(
+    new BankAccountReadError('BANK_ACCOUNT_LIST_INVALID'),
+    'IBAN CH02 SECRET Banque privee'
+  );
+  const proxiedReferenceError = proxiedError(
+    new BankAccountReferenceError('BANK_ACCOUNT_ACCESS_DENIED'),
+    'IBAN CH03 SECRET Banque privee'
+  );
   for (const { setup, invoke, code } of [
     {
       setup: createSetup({ listResolver: async () => { throw leakedReadError; } }),
@@ -639,6 +655,24 @@ test('25 - source failures expose bounded generic errors without banking details
         context: context()
       }),
       code: 'BANK_ACCOUNT_REFERENCE_INVALID'
+    },
+    {
+      setup: createSetup({ listResolver: async () => { throw proxiedReadError; } }),
+      invoke: candidate => list(candidate),
+      code: 'BANK_ACCOUNT_LIST_UNAVAILABLE'
+    },
+    {
+      setup: createSetup({
+        references: {
+          referencePolicyService: Object.freeze({
+            async resolveReadableBankAccountSummary() { throw proxiedReferenceError; }
+          }),
+          calls: [],
+          getMaxActive: () => 0
+        }
+      }),
+      invoke: candidate => list(candidate),
+      code: 'BANK_ACCOUNT_REFERENCE_UNAVAILABLE'
     }
   ]) {
     await assert.rejects(invoke(setup), error => {
