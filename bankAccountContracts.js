@@ -112,15 +112,19 @@ function isPlainRecord(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
-function hasExactFields(value, keys) {
+function hasRequiredDataFields(value, keys) {
   if (!isPlainRecord(value)) return false;
+  return keys.every(key => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor?.enumerable === true && Object.hasOwn(descriptor, 'value');
+  });
+}
+
+function hasExactFields(value, keys) {
+  if (!hasRequiredDataFields(value, keys)) return false;
   const ownKeys = Reflect.ownKeys(value);
   return ownKeys.length === keys.length
-    && ownKeys.every(key => typeof key === 'string' && keys.includes(key))
-    && keys.every(key => {
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      return descriptor?.enumerable === true && Object.hasOwn(descriptor, 'value');
-    });
+    && ownKeys.every(key => typeof key === 'string' && keys.includes(key));
 }
 
 function isReferenceId(value) {
@@ -221,6 +225,7 @@ function validateBankAccountSummaryV1(summary) {
 }
 
 function projectReferenceSnapshot(reference) {
+  if (!hasRequiredDataFields(reference, REFERENCE_KEYS)) fail();
   return {
     id: reference.id,
     labelSnapshot: reference.labelSnapshot,
@@ -229,6 +234,7 @@ function projectReferenceSnapshot(reference) {
 }
 
 function projectInstitutionSnapshot(institution) {
+  if (!hasRequiredDataFields(institution, INSTITUTION_KEYS)) fail();
   return {
     id: institution.id,
     labelSnapshot: institution.labelSnapshot,
@@ -248,7 +254,7 @@ function deepFreezeSummary(summary) {
 function projectBankAccountSummaryV1(record) {
   let summary;
   try {
-    if (!isPlainRecord(record)) fail();
+    if (!hasRequiredDataFields(record, SUMMARY_KEYS)) fail();
     summary = {
       bankAccountId: record.bankAccountId,
       tenantId: record.tenantId,

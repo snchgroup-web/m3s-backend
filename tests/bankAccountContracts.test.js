@@ -327,4 +327,23 @@ test('projection rejects invalid or hostile source shapes with a generic error',
     error => error instanceof BankAccountContractError
       && error.code === 'BANK_ACCOUNT_REFERENCE_INVALID'
   );
+
+  let inheritedReads = 0;
+  const inheritedTarget = summary();
+  delete inheritedTarget.tenantId;
+  const inheritedSource = new Proxy(inheritedTarget, {
+    get(target, property, receiver) {
+      if (property === 'tenantId') {
+        inheritedReads += 1;
+        return 'tenant-attacker';
+      }
+      return Reflect.get(target, property, receiver);
+    }
+  });
+  assert.throws(
+    () => projectBankAccountSummaryV1(inheritedSource),
+    error => error instanceof BankAccountContractError
+      && error.code === 'BANK_ACCOUNT_REFERENCE_INVALID'
+  );
+  assert.equal(inheritedReads, 0);
 });
