@@ -114,12 +114,19 @@ function isPlainRecord(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
-function hasRequiredDataFields(value, keys) {
+function readRequiredDataFields(value, keys) {
   if (!isPlainRecord(value)) return false;
-  return keys.every(key => {
+  const fields = {};
+  for (const key of keys) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    return descriptor?.enumerable === true && Object.hasOwn(descriptor, 'value');
-  });
+    if (descriptor?.enumerable !== true || !Object.hasOwn(descriptor, 'value')) return false;
+    fields[key] = descriptor.value;
+  }
+  return fields;
+}
+
+function hasRequiredDataFields(value, keys) {
+  return Boolean(readRequiredDataFields(value, keys));
 }
 
 function hasExactFields(value, keys) {
@@ -227,22 +234,24 @@ function validateBankAccountSummaryV1(summary) {
 }
 
 function projectReferenceSnapshot(reference) {
-  if (!hasRequiredDataFields(reference, REFERENCE_KEYS)) fail();
+  const fields = readRequiredDataFields(reference, REFERENCE_KEYS);
+  if (!fields) fail();
   return {
-    id: reference.id,
-    labelSnapshot: reference.labelSnapshot,
-    sourceRevision: reference.sourceRevision
+    id: fields.id,
+    labelSnapshot: fields.labelSnapshot,
+    sourceRevision: fields.sourceRevision
   };
 }
 
 function projectInstitutionSnapshot(institution) {
-  if (!hasRequiredDataFields(institution, INSTITUTION_KEYS)) fail();
+  const fields = readRequiredDataFields(institution, INSTITUTION_KEYS);
+  if (!fields) fail();
   return {
-    id: institution.id,
-    labelSnapshot: institution.labelSnapshot,
-    countryId: institution.countryId,
-    institutionType: institution.institutionType,
-    sourceRevision: institution.sourceRevision
+    id: fields.id,
+    labelSnapshot: fields.labelSnapshot,
+    countryId: fields.countryId,
+    institutionType: fields.institutionType,
+    sourceRevision: fields.sourceRevision
   };
 }
 
@@ -256,26 +265,27 @@ function deepFreezeSummary(summary) {
 function projectBankAccountSummaryV1(record) {
   let summary;
   try {
-    if (!hasRequiredDataFields(record, SUMMARY_KEYS)) fail();
+    const fields = readRequiredDataFields(record, SUMMARY_KEYS);
+    if (!fields) fail();
     summary = {
-      bankAccountId: record.bankAccountId,
-      tenantId: record.tenantId,
-      holderEntity: projectReferenceSnapshot(record.holderEntity),
-      financialInstitution: projectInstitutionSnapshot(record.financialInstitution),
-      internalLabel: record.internalLabel,
-      accountType: record.accountType,
-      currency: record.currency,
-      status: record.status,
-      maskedIdentifier: record.maskedIdentifier,
-      classification: record.classification,
-      businessOwnerAgent: record.businessOwnerAgent === null
+      bankAccountId: fields.bankAccountId,
+      tenantId: fields.tenantId,
+      holderEntity: projectReferenceSnapshot(fields.holderEntity),
+      financialInstitution: projectInstitutionSnapshot(fields.financialInstitution),
+      internalLabel: fields.internalLabel,
+      accountType: fields.accountType,
+      currency: fields.currency,
+      status: fields.status,
+      maskedIdentifier: fields.maskedIdentifier,
+      classification: fields.classification,
+      businessOwnerAgent: fields.businessOwnerAgent === null
         ? null
-        : projectReferenceSnapshot(record.businessOwnerAgent),
-      effectiveFrom: record.effectiveFrom,
-      effectiveTo: record.effectiveTo,
-      sourceRevision: record.sourceRevision,
-      verifiedAt: record.verifiedAt,
-      recordVersion: record.recordVersion
+        : projectReferenceSnapshot(fields.businessOwnerAgent),
+      effectiveFrom: fields.effectiveFrom,
+      effectiveTo: fields.effectiveTo,
+      sourceRevision: fields.sourceRevision,
+      verifiedAt: fields.verifiedAt,
+      recordVersion: fields.recordVersion
     };
   } catch (_error) {
     fail();

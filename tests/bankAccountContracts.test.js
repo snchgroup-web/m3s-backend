@@ -315,6 +315,26 @@ test('projection rejects invalid or hostile source shapes with a generic error',
       && error.code === 'BANK_ACCOUNT_REFERENCE_INVALID'
   );
 
+  const previousTenantId = Object.getOwnPropertyDescriptor(Object.prototype, 'tenantId');
+  const pollutedSource = summary();
+  delete pollutedSource.tenantId;
+  Object.defineProperty(Object.prototype, 'tenantId', {
+    value: 'tenant-attacker',
+    configurable: true
+  });
+  try {
+    assert.throws(
+      () => projectBankAccountSummaryV1(pollutedSource),
+      BankAccountContractError
+    );
+  } finally {
+    if (previousTenantId) {
+      Object.defineProperty(Object.prototype, 'tenantId', previousTenantId);
+    } else {
+      delete Object.prototype.tenantId;
+    }
+  }
+
   const revocable = Proxy.revocable({}, {});
   revocable.revoke();
   assert.throws(
