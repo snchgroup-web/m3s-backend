@@ -316,6 +316,7 @@ test('projection rejects invalid or hostile source shapes with a generic error',
   );
 
   const previousTenantId = Object.getOwnPropertyDescriptor(Object.prototype, 'tenantId');
+  const completeSource = summary();
   const pollutedSource = summary();
   delete pollutedSource.tenantId;
   Object.defineProperty(Object.prototype, 'tenantId', {
@@ -323,6 +324,10 @@ test('projection rejects invalid or hostile source shapes with a generic error',
     configurable: true
   });
   try {
+    assert.equal(
+      projectBankAccountSummaryV1(completeSource).tenantId,
+      'tenant-fictional'
+    );
     assert.throws(
       () => projectBankAccountSummaryV1(pollutedSource),
       BankAccountContractError

@@ -116,7 +116,7 @@ function isPlainRecord(value) {
 
 function readRequiredDataFields(value, keys) {
   if (!isPlainRecord(value)) return false;
-  const fields = {};
+  const fields = Object.create(null);
   for (const key of keys) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor?.enumerable !== true || !Object.hasOwn(descriptor, 'value')) return false;
