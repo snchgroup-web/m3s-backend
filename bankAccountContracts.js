@@ -120,7 +120,7 @@ function readRequiredDataFields(value, keys) {
   for (const key of keys) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor?.enumerable !== true || !Object.hasOwn(descriptor, 'value')) return false;
-    fields[key] = descriptor.value;
+    Object.defineProperty(fields, key, { value: descriptor.value, enumerable: true });
   }
   return fields;
 }
