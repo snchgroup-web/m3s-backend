@@ -370,6 +370,9 @@ function validateListEnvelope(value, candidateLimit, pageLimit) {
   const records = validateHandles(fields.records, candidateLimit);
   if (records.length > pageLimit && fields.hasMore !== true) fail('BANK_ACCOUNT_LIST_INVALID');
   if (fields.hasMore === true && records.length === 0) fail('BANK_ACCOUNT_LIST_INVALID');
+  if (fields.hasMore === true && records.length !== candidateLimit) {
+    fail('BANK_ACCOUNT_LIST_INVALID');
+  }
   return Object.freeze({
     listRevision: fields.listRevision,
     records,
@@ -721,29 +724,28 @@ function createBankAccountReadService(options) {
       fail('BANK_ACCOUNT_LIST_INVALID');
     }
 
-    const sourceHasExtra = envelope.records.length > request.limit;
-    const selectedHandles = Object.freeze(envelope.records.slice(0, request.limit));
-    const items = await resolveHandles(
-      selectedHandles,
+    const candidateHandles = envelope.records;
+    const resolvedCandidates = await resolveHandles(
+      candidateHandles,
       request,
       factory.resolveReadableBankAccountSummary,
       resolutionScheduler,
       factory.resolutionTimeoutMs
     );
-    const completeVisiblePage = items.length === selectedHandles.length;
-    const hasMore = completeVisiblePage && (envelope.hasMore || sourceHasExtra);
-    const total = completeVisiblePage
-      ? qualifyTotal(envelope.provenTotal, envelope, request, items.length)
+    const completeVisibleWindow = resolvedCandidates.length === candidateHandles.length;
+    const pageItems = Object.freeze(resolvedCandidates.slice(0, request.limit));
+    const hasMore = resolvedCandidates.length > request.limit;
+    const total = completeVisibleWindow
+      ? qualifyTotal(envelope.provenTotal, envelope, request, pageItems.length)
       : Object.freeze({ totalCount: null, totalStatus: 'unavailable' });
     const nextCursor = hasMore
       ? await encodeCursor(
         factory.cursorEncode,
         request,
         envelope,
-        selectedHandles.at(-1)
+        candidateHandles[request.limit - 1]
       )
       : null;
-    const pageItems = Object.freeze([...items]);
     return Object.freeze({
       items: pageItems,
       pageCount: pageItems.length,

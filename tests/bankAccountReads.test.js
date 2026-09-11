@@ -333,7 +333,7 @@ test('7 - one list call examines at most 51 handles and exposes at most 50 items
   const page = await list(setup, { limit: 50 });
   assert.equal(setup.listResolver.calls.length, 1);
   assert.equal(setup.listResolver.calls[0].snapshot.candidateLimit, 51);
-  assert.equal(setup.references.calls.length, 50);
+  assert.equal(setup.references.calls.length, 51);
   assert.equal(page.pageCount, 50);
   assert.equal(page.hasMore, true);
 });
@@ -391,7 +391,7 @@ test('11 - an account that becomes absent or invisible is omitted without diagno
   assert.equal(invisiblePage.totalStatus, 'unavailable');
 });
 
-test('12 - a denied C3 account is omitted with the same external semantics', async () => {
+test('12 - denied accounts and a hidden sentinel close pagination without disclosure', async () => {
   const restricted = [
     summary(1, { classification: 'C3' }),
     summary(2, { classification: 'C3' })
@@ -407,6 +407,21 @@ test('12 - a denied C3 account is omitted with the same external semantics', asy
   assert.equal(page.hasMore, false);
   assert.equal(page.nextCursor, null);
   assert.equal(setup.cursorBundle.encodeCalls.length, 0);
+
+  const mixedAccounts = [summary(1), summary(2)];
+  const hiddenSentinel = createSetup({
+    accounts: mixedAccounts,
+    referenceOptions: { invisibleIds: new Set([uuid(2)]) },
+    provenTotal: provenTotal(2)
+  });
+  const mixedPage = await list(hiddenSentinel, { limit: 1 });
+  assert.equal(mixedPage.pageCount, 1);
+  assert.equal(mixedPage.items[0].bankAccountId, uuid(1));
+  assert.equal(mixedPage.hasMore, false);
+  assert.equal(mixedPage.nextCursor, null);
+  assert.equal(mixedPage.totalCount, null);
+  assert.equal(hiddenSentinel.references.calls.length, 2);
+  assert.equal(hiddenSentinel.cursorBundle.encodeCalls.length, 0);
 });
 
 test('13 - one unavailable account source refuses the whole page instead of returning a partial result', async () => {
