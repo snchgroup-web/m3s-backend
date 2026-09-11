@@ -116,7 +116,11 @@ function hasExactFields(value, keys) {
   if (!isPlainRecord(value)) return false;
   const ownKeys = Reflect.ownKeys(value);
   return ownKeys.length === keys.length
-    && ownKeys.every(key => typeof key === 'string' && keys.includes(key));
+    && ownKeys.every(key => typeof key === 'string' && keys.includes(key))
+    && keys.every(key => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      return descriptor?.enumerable === true && Object.hasOwn(descriptor, 'value');
+    });
 }
 
 function isReferenceId(value) {

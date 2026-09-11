@@ -86,6 +86,31 @@ test('root and nested objects reject missing, unknown, inherited and symbol fiel
     () => validateBankAccountSummaryV1([]),
     BankAccountContractError
   );
+
+  const nonEnumerable = summary();
+  Object.defineProperty(nonEnumerable, 'tenantId', {
+    value: nonEnumerable.tenantId,
+    enumerable: false
+  });
+  assert.throws(
+    () => validateBankAccountSummaryV1(nonEnumerable),
+    BankAccountContractError
+  );
+
+  let getterReads = 0;
+  const accessor = summary();
+  Object.defineProperty(accessor, 'tenantId', {
+    enumerable: true,
+    get() {
+      getterReads += 1;
+      return 'tenant-fictional';
+    }
+  });
+  assert.throws(
+    () => validateBankAccountSummaryV1(accessor),
+    BankAccountContractError
+  );
+  assert.equal(getterReads, 0);
 });
 
 test('identifiers are bounded safe references and the account id is a UUID', () => {
