@@ -152,7 +152,8 @@ function account({
   holderEntityId = null, holderRevision = null,
   institutionId = null, institutionRevision = null,
   ownerAgentId = null, ownerRevision = null,
-  accountType = 'OPERATING_CURRENT'
+  accountType = 'OPERATING_CURRENT',
+  effectiveFrom = '2026-01-01', effectiveTo = null
 }) {
   const marker = id.slice(-2).toUpperCase();
   const lowerTenant = tenant.endsWith('-A') ? 'a' : 'b';
@@ -176,8 +177,8 @@ function account({
     visible,
     masked_identifier: `********${marker}`,
     classification,
-    effective_from: '2026-01-01',
-    effective_to: null,
+    effective_from: effectiveFrom,
+    effective_to: effectiveTo,
     source_revision: `source-${lowerTenant}-rev-1`,
     verified_at: ['active', 'suspended', 'closed'].includes(status)
       ? '2026-01-02T10:00:00.000Z' : null,
@@ -189,7 +190,7 @@ function account({
 
 function relationFixture({
   kind, referenceId, sourceRevision, active = true, visible = true,
-  effectiveFrom = '2026-01-01', effectiveTo = null
+  classification = 'C2', effectiveFrom = '2026-01-01', effectiveTo = null
 }) {
   const institution = kind === 'financial_institution';
   return {
@@ -200,7 +201,7 @@ function relationFixture({
     label_snapshot: `Relation fictive ${referenceId}`,
     active,
     visible,
-    classification: 'C2',
+    classification,
     effective_from: effectiveFrom,
     effective_to: effectiveTo,
     country_id: institution ? 'CH' : null,
@@ -310,6 +311,9 @@ function buildSyntheticCorpus(schemaFingerprint) {
   const deniedInstitutionInvisible = uuid('d6');
   const deniedOwnerFuture = uuid('d7');
   const deniedHolderExpired = uuid('d8');
+  const deniedAccountFuture = uuid('d9');
+  const deniedAccountExpired = uuid('da');
+  const deniedRelationClassification = uuid('db');
   const currentA1 = account({
     tenant: TENANTS[0], id: a1, version: 2, label: '\uE000'
   });
@@ -360,6 +364,19 @@ function buildSyntheticCorpus(schemaFingerprint) {
       account({
         tenant: TENANTS[0], id: deniedHolderExpired, label: 'Titulaire expire',
         holderEntityId: 'HOLDER-D8', holderRevision: 'holder-a-d8-rev-1'
+      }),
+      account({
+        tenant: TENANTS[0], id: deniedAccountFuture, label: 'Compte futur',
+        effectiveFrom: '2026-09-13'
+      }),
+      account({
+        tenant: TENANTS[0], id: deniedAccountExpired, label: 'Compte expire',
+        effectiveTo: '2026-09-11'
+      }),
+      account({
+        tenant: TENANTS[0], id: deniedRelationClassification,
+        label: 'Relation C3 refusee', holderEntityId: 'HOLDER-DB',
+        holderRevision: 'holder-a-db-rev-1'
       })
     ],
     relations: [
@@ -380,6 +397,10 @@ function buildSyntheticCorpus(schemaFingerprint) {
       relationFixture({
         kind: 'holder_entity', referenceId: 'HOLDER-D8',
         sourceRevision: 'holder-a-d8-rev-1', effectiveTo: '2026-09-11'
+      }),
+      relationFixture({
+        kind: 'holder_entity', referenceId: 'HOLDER-DB',
+        sourceRevision: 'holder-a-db-rev-1', classification: 'C3'
       })
     ],
     revisions: TENANTS.map((tenant, index) => {
@@ -420,7 +441,10 @@ function buildSyntheticCorpus(schemaFingerprint) {
       accessGrant({ id: deniedHolderInactive }),
       accessGrant({ id: deniedInstitutionInvisible }),
       accessGrant({ id: deniedOwnerFuture }),
-      accessGrant({ id: deniedHolderExpired })
+      accessGrant({ id: deniedHolderExpired }),
+      accessGrant({ id: deniedAccountFuture }),
+      accessGrant({ id: deniedAccountExpired }),
+      accessGrant({ id: deniedRelationClassification })
     ],
     audit: [{
       tenant_id: TENANTS[0],
@@ -527,11 +551,36 @@ function expectedRelations(schemaPlan) {
     || left.relname.localeCompare(right.relname));
 }
 
+function expectedRowSecurity(schemaPlan) {
+  return schemaPlan.expectedCatalog.tables.map(table => ({
+    table_name: table.name,
+    row_security: false,
+    force_row_security: false
+  })).sort((left, right) => left.table_name.localeCompare(right.table_name));
+}
+
 const METADATA_QUERIES = Object.freeze({
   schema: 'SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1) AS exists',
   relations: `SELECT c.relname, c.relkind
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = $1 ORDER BY c.relkind, c.relname`,
+  rowSecurity: `SELECT c.relname AS table_name,
+      c.relrowsecurity AS row_security, c.relforcerowsecurity AS force_row_security
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') ORDER BY c.relname`,
+  policies: `SELECT c.relname AS table_name, p.polname AS policy_name,
+      p.polcmd AS command, p.polpermissive AS permissive,
+      ARRAY(
+        SELECT CASE WHEN role_ref.role_oid = 0 THEN 'PUBLIC'
+          ELSE pg_get_userbyid(role_ref.role_oid) END
+        FROM unnest(p.polroles) AS role_ref(role_oid)
+        ORDER BY 1
+      )::text AS roles,
+      pg_get_expr(p.polqual, p.polrelid, true) AS using_expression,
+      pg_get_expr(p.polwithcheck, p.polrelid, true) AS check_expression
+    FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = $1 ORDER BY c.relname, p.polname`,
   columns: `SELECT table_name, column_name, data_type, character_maximum_length,
       datetime_precision, column_default, is_nullable, collation_name, is_identity, identity_generation,
       is_generated, generation_expression, ordinal_position
@@ -608,14 +657,17 @@ async function collectInventory(database, schemaPlan) {
   for (const [name, query] of Object.entries(METADATA_QUERIES)) {
     if (name !== 'schema') metadata[name] = (await database.query(query, [SCHEMA_NAME])).rows;
   }
-  const objectCount = metadata.relations.length + metadata.triggers.length
-    + metadata.routines.length + metadata.extensions.length + metadata.grants.length;
+  const objectCount = metadata.relations.length + metadata.rowSecurity.length
+    + metadata.policies.length + metadata.triggers.length + metadata.routines.length
+    + metadata.extensions.length + metadata.grants.length;
   if (objectCount === 0) return inventoryFields('empty', null, null, []);
 
   const constraintIdentities = metadata.constraints.map(
     ({ table_name, conname, contype }) => ({ table_name, conname, contype })
   );
   const conformant = canonical(metadata.relations) === canonical(expectedRelations(schemaPlan))
+    && canonical(metadata.rowSecurity) === canonical(expectedRowSecurity(schemaPlan))
+    && metadata.policies.length === 0
     && canonical(metadata.columns) === canonical(expectedColumns(schemaPlan))
     && canonical(constraintIdentities) === canonical(expectedConstraints(schemaPlan))
     && fingerprint(metadata.constraints) === EXPECTED_CONSTRAINT_DEFINITIONS_FINGERPRINT
@@ -798,7 +850,7 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     if (canonical(listB.map(row => row.bank_account_id))
       !== canonical([uuid('b1'), uuid('f1')])) fail();
     const deniedLifecycleIdsA = [
-      'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'f1'
+      'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'da', 'db', 'f1'
     ].map(uuid);
     if (deniedLifecycleIdsA.some(id => (
       listA.some(row => row.bank_account_id === id)
