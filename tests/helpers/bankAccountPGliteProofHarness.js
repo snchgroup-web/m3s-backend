@@ -302,6 +302,8 @@ function buildSyntheticCorpus(schemaFingerprint) {
   const b1 = uuid('b1');
   const b2 = uuid('b2');
   const b3 = uuid('b3');
+  const b4 = uuid('b4');
+  const b5 = uuid('b5');
   const shared = uuid('f1');
   const deniedAccessInactive = uuid('d1');
   const deniedAccessFuture = uuid('d2');
@@ -338,6 +340,12 @@ function buildSyntheticCorpus(schemaFingerprint) {
       account({
         tenant: TENANTS[1], id: b3, label: 'Compte fictif B3',
         classification: 'C3'
+      }),
+      account({
+        tenant: TENANTS[1], id: b4, label: 'Pagination identique', currency: 'USD'
+      }),
+      account({
+        tenant: TENANTS[1], id: b5, label: 'Pagination identique', currency: 'USD'
       }),
       account({ tenant: TENANTS[0], id: shared, label: 'Partage refuse A' }),
       account({ tenant: TENANTS[1], id: shared, label: 'Partage autorise B' }),
@@ -427,6 +435,8 @@ function buildSyntheticCorpus(schemaFingerprint) {
       accessGrant({ tenant: TENANTS[1], id: b1 }),
       accessGrant({ tenant: TENANTS[1], id: b2 }),
       accessGrant({ tenant: TENANTS[1], id: b3 }),
+      accessGrant({ tenant: TENANTS[1], id: b4 }),
+      accessGrant({ tenant: TENANTS[1], id: b5 }),
       accessGrant({ tenant: TENANTS[1], id: shared }),
       accessGrant({
         tenant: TENANTS[1], actor: ACTORS[TENANTS[0]], id: shared,
@@ -539,14 +549,20 @@ function expectedConstraints(schemaPlan) {
     || left.conname.localeCompare(right.conname));
 }
 
-function expectedRelations(schemaPlan) {
+function expectedRelations(schemaPlan, ownerName) {
   return [
-    ...schemaPlan.expectedCatalog.indexes.map(index => ({ relname: index.name, relkind: 'i' })),
+    ...schemaPlan.expectedCatalog.indexes.map(index => ({
+      relname: index.name, relkind: 'i', relpersistence: 'p', owner_name: ownerName
+    })),
     ...schemaPlan.expectedCatalog.tables.map(table => ({
       relname: `pk_${table.name}`,
-      relkind: 'i'
+      relkind: 'i',
+      relpersistence: 'p',
+      owner_name: ownerName
     })),
-    ...schemaPlan.expectedCatalog.tables.map(table => ({ relname: table.name, relkind: 'r' }))
+    ...schemaPlan.expectedCatalog.tables.map(table => ({
+      relname: table.name, relkind: 'r', relpersistence: 'p', owner_name: ownerName
+    }))
   ].sort((left, right) => left.relkind.localeCompare(right.relkind)
     || left.relname.localeCompare(right.relname));
 }
@@ -560,8 +576,10 @@ function expectedRowSecurity(schemaPlan) {
 }
 
 const METADATA_QUERIES = Object.freeze({
-  schema: 'SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1) AS exists',
-  relations: `SELECT c.relname, c.relkind
+  schema: `SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1) AS exists,
+      (SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = $1) AS owner_name`,
+  relations: `SELECT c.relname, c.relkind, c.relpersistence,
+      pg_get_userbyid(c.relowner) AS owner_name
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = $1 ORDER BY c.relkind, c.relname`,
   rowSecurity: `SELECT c.relname AS table_name,
@@ -648,10 +666,12 @@ function inventoryFields(schemaState, catalog, catalogFingerprint, unexpectedObj
 async function collectInventory(database, schemaPlan) {
   const version = await database.query('SHOW server_version');
   const encoding = await database.query('SHOW server_encoding');
+  const currentRole = await database.query('SELECT current_user AS owner_name');
   if (Number.parseInt(version.rows[0].server_version, 10) !== TARGET.postgresMajor
     || encoding.rows[0].server_encoding !== TARGET.databaseEncoding) fail();
   const schema = await database.query(METADATA_QUERIES.schema, [SCHEMA_NAME]);
   if (schema.rows[0].exists !== true) return inventoryFields('missing', null, null, []);
+  const expectedOwner = currentRole.rows[0].owner_name;
 
   const metadata = {};
   for (const [name, query] of Object.entries(METADATA_QUERIES)) {
@@ -665,7 +685,8 @@ async function collectInventory(database, schemaPlan) {
   const constraintIdentities = metadata.constraints.map(
     ({ table_name, conname, contype }) => ({ table_name, conname, contype })
   );
-  const conformant = canonical(metadata.relations) === canonical(expectedRelations(schemaPlan))
+  const conformant = schema.rows[0].owner_name === expectedOwner
+    && canonical(metadata.relations) === canonical(expectedRelations(schemaPlan, expectedOwner))
     && canonical(metadata.rowSecurity) === canonical(expectedRowSecurity(schemaPlan))
     && metadata.policies.length === 0
     && canonical(metadata.columns) === canonical(expectedColumns(schemaPlan))
@@ -848,7 +869,7 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     const listBParams = listParams(TENANTS[1], ACTORS[TENANTS[1]]);
     const listB = await boundedQuery(database, q3, listBParams);
     if (canonical(listB.map(row => row.bank_account_id))
-      !== canonical([uuid('b1'), uuid('f1')])) fail();
+      !== canonical([uuid('b1'), uuid('b4'), uuid('b5'), uuid('f1')])) fail();
     const deniedLifecycleIdsA = [
       'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'da', 'db', 'f1'
     ].map(uuid);
@@ -860,11 +881,17 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     );
     const classificationDeniedB = await boundedQuery(database, q3, classificationDeniedBParams);
     if (classificationDeniedB.length !== 0) fail();
-    const stale = listParams(TENANTS[0], ACTORS[TENANTS[0]]);
-    stale[3] = 'policy-a-old';
-    stale[12] = 'list-a-rev-1';
-    stale[13] = 'source-a-rev-1';
-    if ((await boundedQuery(database, q3, stale)).length !== 0) fail();
+    for (const [parameterIndex, staleRevision] of [
+      [3, 'policy-a-old'],
+      [12, 'list-a-old'],
+      [13, 'source-a-old']
+    ]) {
+      const stale = listParams(TENANTS[0], ACTORS[TENANTS[0]]);
+      stale[parameterIndex] = staleRevision;
+      const staleList = await boundedQuery(database, q3, stale);
+      const staleTotal = await boundedQuery(database, q4, totalParams(stale));
+      if (staleList.length !== 0 || staleTotal[0].authorized_filtered_count !== 0) fail();
+    }
     controls.add(16);
     if (!listA.some(row => row.bank_account_id === uuid('a2'))) fail();
     controls.add(17);
@@ -887,7 +914,15 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
         holderEntityId: 'HOLDER-NO-MATCH'
       })
     );
-    if (noFilterMatch.length !== 0) fail();
+    const nonActiveStatusParams = listParams(
+      TENANTS[0], ACTORS[TENANTS[0]], { status: 'suspended' }
+    );
+    const nonActiveStatusList = await boundedQuery(database, q3, nonActiveStatusParams);
+    const nonActiveStatusTotal = await boundedQuery(
+      database, q4, totalParams(nonActiveStatusParams)
+    );
+    if (noFilterMatch.length !== 0 || nonActiveStatusList.length !== 0
+      || nonActiveStatusTotal[0].authorized_filtered_count !== 0) fail();
     controls.add(18);
 
     const firstPage = await boundedQuery(
@@ -902,6 +937,28 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     ));
     if (firstPage.length !== 1 || secondPage.length !== 1
       || firstPage[0].bank_account_id === secondPage[0].bank_account_id) fail();
+    const equalLabelFirstPage = await boundedQuery(
+      database, q3, listParams(TENANTS[1], ACTORS[TENANTS[1]], {
+        currency: 'USD', limit: 1
+      })
+    );
+    if (equalLabelFirstPage.length !== 1) fail();
+    const equalLabelSecondPage = await boundedQuery(database, q3, listParams(
+      TENANTS[1], ACTORS[TENANTS[1]], {
+        currency: 'USD',
+        afterLabel: equalLabelFirstPage[0].internal_label_order,
+        afterId: equalLabelFirstPage[0].bank_account_id,
+        limit: 1
+      }
+    ));
+    if (equalLabelSecondPage.length !== 1) fail();
+    const equalLabelIds = [
+      equalLabelFirstPage[0].bank_account_id,
+      equalLabelSecondPage[0].bank_account_id
+    ].sort();
+    if (equalLabelFirstPage[0].internal_label_order !== 'Pagination identique'
+      || equalLabelSecondPage[0].internal_label_order !== 'Pagination identique'
+      || canonical(equalLabelIds) !== canonical([uuid('b4'), uuid('b5')].sort())) fail();
     let limitClosed = false;
     try {
       await boundedQuery(
@@ -917,7 +974,7 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     if (totalA[0].authorized_filtered_count !== 2
       || totalA[0].authorized_filtered_count !== listA.length) fail();
     const totalB = await boundedQuery(database, q4, totalParams(listBParams));
-    if (totalB[0].authorized_filtered_count !== 2
+    if (totalB[0].authorized_filtered_count !== 4
       || totalB[0].authorized_filtered_count !== listB.length) fail();
     const classificationDeniedTotalB = await boundedQuery(
       database, q4, totalParams(classificationDeniedBParams)

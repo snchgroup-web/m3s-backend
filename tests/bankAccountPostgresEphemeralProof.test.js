@@ -160,6 +160,53 @@ test('row-security flags and policy definitions are part of catalog conformance'
   }
 });
 
+test('schema and relation ownership drift is rejected', async () => {
+  const schemaPlan = buildBankAccountPostgresOfflinePlan();
+  const driftStatements = [
+    `ALTER SCHEMA "${SCHEMA_NAME}" OWNER TO bank_account_owner_probe`,
+    `ALTER TABLE "${SCHEMA_NAME}"."${REVISION_TABLE}"
+      OWNER TO bank_account_owner_probe`
+  ];
+
+  for (const statement of driftStatements) {
+    const database = new PGlite();
+    try {
+      await database.exec('CREATE ROLE bank_account_owner_probe');
+      await database.exec(`CREATE SCHEMA "${SCHEMA_NAME}"`);
+      for (const schemaStatement of schemaPlan.statements) await database.exec(schemaStatement);
+
+      const conformant = await collectInventory(database, schemaPlan);
+      assert.equal(conformant.schemaState, 'conformant');
+
+      await database.exec(statement);
+      const divergent = await collectInventory(database, schemaPlan);
+      assert.equal(divergent.schemaState, 'divergent');
+      assert.deepEqual(divergent.unexpectedObjects, ['catalog-drift']);
+    } finally {
+      await database.close();
+    }
+  }
+});
+
+test('table persistence drift is rejected', async () => {
+  const database = new PGlite();
+  try {
+    const schemaPlan = buildBankAccountPostgresOfflinePlan();
+    await database.exec(`CREATE SCHEMA "${SCHEMA_NAME}"`);
+    for (const statement of schemaPlan.statements) await database.exec(statement);
+
+    const conformant = await collectInventory(database, schemaPlan);
+    assert.equal(conformant.schemaState, 'conformant');
+
+    await database.exec(`ALTER TABLE "${SCHEMA_NAME}"."${REVISION_TABLE}" SET UNLOGGED`);
+    const divergent = await collectInventory(database, schemaPlan);
+    assert.equal(divergent.schemaState, 'divergent');
+    assert.deepEqual(divergent.unexpectedObjects, ['catalog-drift']);
+  } finally {
+    await database.close();
+  }
+});
+
 test('synthetic corpus validation fails before creating the in-memory engine', async () => {
   const invalidCorpus = structuredClone(buildSyntheticCorpus('a'.repeat(64)));
   invalidCorpus.accounts[0].source_revision = 'CH9300762011623852957';
