@@ -886,7 +886,25 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     const wrongRevision = await boundedQuery(database, q2, [
       TENANTS[0], 'holder_entity', 'HOLDER-A', 'holder-a-rev-2', REQUEST_AT
     ]);
-    if (relation.length !== 1 || wrongRevision.length !== 0) fail();
+    const wrongTenantRelation = await boundedQuery(database, q2, [
+      TENANTS[1], 'holder_entity', 'HOLDER-A', 'holder-a-rev-1', REQUEST_AT
+    ]);
+    const futureAccount = await boundedQuery(database, q1, [
+      TENANTS[0], uuid('d9'), REQUEST_AT
+    ]);
+    const expiredAccount = await boundedQuery(database, q1, [
+      TENANTS[0], uuid('da'), REQUEST_AT
+    ]);
+    const futureRelation = await boundedQuery(database, q2, [
+      TENANTS[0], 'business_owner_agent', 'AGENT-D7', 'agent-a-d7-rev-1', REQUEST_AT
+    ]);
+    const expiredRelation = await boundedQuery(database, q2, [
+      TENANTS[0], 'holder_entity', 'HOLDER-D8', 'holder-a-d8-rev-1', REQUEST_AT
+    ]);
+    if (relation.length !== 1 || wrongRevision.length !== 0
+      || wrongTenantRelation.length !== 0
+      || futureAccount.length !== 0 || expiredAccount.length !== 0
+      || futureRelation.length !== 0 || expiredRelation.length !== 0) fail();
     controls.add(15);
 
     const listAParams = listParams(TENANTS[0], ACTORS[TENANTS[0]]);
