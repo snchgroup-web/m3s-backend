@@ -215,6 +215,7 @@ function validateInventory(schemaPlan, target, inventory, generatedAtMs) {
   if (inventory.schemaState === 'conformant') {
     validateUnexpectedObjects(inventory.unexpectedObjects, true);
     if (!inventory.catalog || typeof inventory.catalog !== 'object'
+      || Object.hasOwn(inventory.catalog, 'postgresMajor')
       || !/^[0-9a-f]{64}$/.test(inventory.catalogFingerprint || '')
       || fingerprint(inventory.catalog) !== inventory.catalogFingerprint) fail();
     try {
@@ -309,4 +310,3 @@ module.exports = {
   buildBankAccountPostgresPlan,
   validateBankAccountPostgresPlan
 };
-

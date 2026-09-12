@@ -215,6 +215,19 @@ test('conformant catalog drift is refused instead of repaired', () => {
   }));
 });
 
+test('conformant catalog cannot override the trusted PostgreSQL version', () => {
+  const schemaPlan = buildBankAccountPostgresOfflinePlan();
+  const candidate = inventory(schemaPlan, 'conformant');
+  candidate.catalog.postgresMajor = 16;
+  candidate.catalogFingerprint = fingerprint(candidate.catalog);
+  rejects(() => buildBankAccountPostgresPlan({
+    schemaPlan,
+    target: target({ postgresMajor: 18 }),
+    inventory: candidate,
+    generatedAt: GENERATED_AT
+  }));
+});
+
 test('schema plan alterations are refused before output', () => {
   for (const change of [
     value => { value.fingerprint = '0'.repeat(64); },
