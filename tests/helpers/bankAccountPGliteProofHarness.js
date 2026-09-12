@@ -149,7 +149,9 @@ function uuid(suffix) {
 function account({
   tenant, id, version = 1, label, classification = 'C2', visible = true,
   status = 'active', replacedAt = null, currency = 'CHF',
-  holderEntityId = null, institutionId = null,
+  holderEntityId = null, holderRevision = null,
+  institutionId = null, institutionRevision = null,
+  ownerAgentId = null, ownerRevision = null,
   accountType = 'OPERATING_CURRENT'
 }) {
   const marker = id.slice(-2).toUpperCase();
@@ -159,13 +161,13 @@ function account({
     bank_account_id: id,
     record_version: version,
     holder_entity_id: holderEntityId || `HOLDER-${lowerTenant.toUpperCase()}`,
-    holder_entity_source_revision: holderEntityId
-      ? `holder-${lowerTenant}-2-rev-1` : `holder-${lowerTenant}-rev-1`,
+    holder_entity_source_revision: holderRevision || (holderEntityId
+      ? `holder-${lowerTenant}-2-rev-1` : `holder-${lowerTenant}-rev-1`),
     financial_institution_id: institutionId || `INSTITUTION-${lowerTenant.toUpperCase()}`,
-    financial_institution_source_revision: institutionId
-      ? `institution-${lowerTenant}-2-rev-1` : `institution-${lowerTenant}-rev-1`,
-    business_owner_agent_id: `AGENT-${lowerTenant.toUpperCase()}`,
-    business_owner_agent_source_revision: `agent-${lowerTenant}-rev-1`,
+    financial_institution_source_revision: institutionRevision || (institutionId
+      ? `institution-${lowerTenant}-2-rev-1` : `institution-${lowerTenant}-rev-1`),
+    business_owner_agent_id: ownerAgentId || `AGENT-${lowerTenant.toUpperCase()}`,
+    business_owner_agent_source_revision: ownerRevision || `agent-${lowerTenant}-rev-1`,
     internal_label: label,
     internal_label_order: label,
     account_type: accountType,
@@ -177,10 +179,52 @@ function account({
     effective_from: '2026-01-01',
     effective_to: null,
     source_revision: `source-${lowerTenant}-rev-1`,
-    verified_at: status === 'active' ? '2026-01-02T10:00:00.000Z' : null,
+    verified_at: ['active', 'suspended', 'closed'].includes(status)
+      ? '2026-01-02T10:00:00.000Z' : null,
     created_at: version === 1
       ? '2026-01-02T10:00:00.000Z' : '2026-06-01T10:00:00.000Z',
     replaced_at: replacedAt
+  };
+}
+
+function relationFixture({
+  kind, referenceId, sourceRevision, active = true, visible = true,
+  effectiveFrom = '2026-01-01', effectiveTo = null
+}) {
+  const institution = kind === 'financial_institution';
+  return {
+    tenant_id: TENANTS[0],
+    relation_kind: kind,
+    reference_id: referenceId,
+    source_revision: sourceRevision,
+    label_snapshot: `Relation fictive ${referenceId}`,
+    active,
+    visible,
+    classification: 'C2',
+    effective_from: effectiveFrom,
+    effective_to: effectiveTo,
+    country_id: institution ? 'CH' : null,
+    institution_type: institution ? 'bank' : null,
+    created_at: '2026-01-01T10:00:00.000Z'
+  };
+}
+
+function accessGrant({
+  tenant = TENANTS[0], actor = ACTORS[tenant], id,
+  policyRevision = tenant === TENANTS[0] ? 'policy-a-rev-1' : 'policy-b-rev-1',
+  maxClassification = 'C2', active = true,
+  effectiveFrom = '2026-01-01T00:00:00.000Z', effectiveTo = null
+}) {
+  return {
+    tenant_id: tenant,
+    actor_id: actor,
+    bank_account_id: id,
+    policy_revision: policyRevision,
+    max_classification: maxClassification,
+    active,
+    effective_from: effectiveFrom,
+    effective_to: effectiveTo,
+    created_at: '2026-01-01T00:00:00.000Z'
   };
 }
 
@@ -257,6 +301,15 @@ function buildSyntheticCorpus(schemaFingerprint) {
   const b1 = uuid('b1');
   const b2 = uuid('b2');
   const b3 = uuid('b3');
+  const shared = uuid('f1');
+  const deniedAccessInactive = uuid('d1');
+  const deniedAccessFuture = uuid('d2');
+  const deniedAccessExpired = uuid('d3');
+  const deniedAccountStatus = uuid('d4');
+  const deniedHolderInactive = uuid('d5');
+  const deniedInstitutionInvisible = uuid('d6');
+  const deniedOwnerFuture = uuid('d7');
+  const deniedHolderExpired = uuid('d8');
   const currentA1 = account({
     tenant: TENANTS[0], id: a1, version: 2, label: '\uE000'
   });
@@ -281,9 +334,54 @@ function buildSyntheticCorpus(schemaFingerprint) {
       account({
         tenant: TENANTS[1], id: b3, label: 'Compte fictif B3',
         classification: 'C3'
+      }),
+      account({ tenant: TENANTS[0], id: shared, label: 'Partage refuse A' }),
+      account({ tenant: TENANTS[1], id: shared, label: 'Partage autorise B' }),
+      account({ tenant: TENANTS[0], id: deniedAccessInactive, label: 'Delegation inactive' }),
+      account({ tenant: TENANTS[0], id: deniedAccessFuture, label: 'Delegation future' }),
+      account({ tenant: TENANTS[0], id: deniedAccessExpired, label: 'Delegation expiree' }),
+      account({
+        tenant: TENANTS[0], id: deniedAccountStatus,
+        label: 'Compte suspendu', status: 'suspended'
+      }),
+      account({
+        tenant: TENANTS[0], id: deniedHolderInactive, label: 'Titulaire inactif',
+        holderEntityId: 'HOLDER-D5', holderRevision: 'holder-a-d5-rev-1'
+      }),
+      account({
+        tenant: TENANTS[0], id: deniedInstitutionInvisible,
+        label: 'Institution invisible', institutionId: 'INSTITUTION-D6',
+        institutionRevision: 'institution-a-d6-rev-1'
+      }),
+      account({
+        tenant: TENANTS[0], id: deniedOwnerFuture, label: 'Responsable futur',
+        ownerAgentId: 'AGENT-D7', ownerRevision: 'agent-a-d7-rev-1'
+      }),
+      account({
+        tenant: TENANTS[0], id: deniedHolderExpired, label: 'Titulaire expire',
+        holderEntityId: 'HOLDER-D8', holderRevision: 'holder-a-d8-rev-1'
       })
     ],
-    relations: [...relationsFor(TENANTS[0]), ...relationsFor(TENANTS[1])],
+    relations: [
+      ...relationsFor(TENANTS[0]),
+      ...relationsFor(TENANTS[1]),
+      relationFixture({
+        kind: 'holder_entity', referenceId: 'HOLDER-D5',
+        sourceRevision: 'holder-a-d5-rev-1', active: false
+      }),
+      relationFixture({
+        kind: 'financial_institution', referenceId: 'INSTITUTION-D6',
+        sourceRevision: 'institution-a-d6-rev-1', visible: false
+      }),
+      relationFixture({
+        kind: 'business_owner_agent', referenceId: 'AGENT-D7',
+        sourceRevision: 'agent-a-d7-rev-1', effectiveFrom: '2026-09-13'
+      }),
+      relationFixture({
+        kind: 'holder_entity', referenceId: 'HOLDER-D8',
+        sourceRevision: 'holder-a-d8-rev-1', effectiveTo: '2026-09-11'
+      })
+    ],
     revisions: TENANTS.map((tenant, index) => {
       const marker = index === 0 ? 'a' : 'b';
       return {
@@ -301,25 +399,29 @@ function buildSyntheticCorpus(schemaFingerprint) {
       };
     }),
     access: [
-      [TENANTS[0], ACTORS[TENANTS[0]], a1, 'policy-a-rev-1', 'C2', true],
-      [TENANTS[0], ACTORS[TENANTS[0]], a2, 'policy-a-rev-1', 'C3', true],
-      [TENANTS[0], ACTORS[TENANTS[0]], a3, 'policy-a-rev-1', 'C2', true],
-      [TENANTS[0], ACTORS[TENANTS[0]], a1, 'policy-a-old', 'C3', true],
-      [TENANTS[1], ACTORS[TENANTS[1]], b1, 'policy-b-rev-1', 'C2', true],
-      [TENANTS[1], ACTORS[TENANTS[1]], b2, 'policy-b-rev-1', 'C2', true],
-      [TENANTS[1], ACTORS[TENANTS[1]], b3, 'policy-b-rev-1', 'C2', true]
-    ].map(([tenant_id, actor_id, bank_account_id, policy_revision,
-      max_classification, active]) => ({
-      tenant_id,
-      actor_id,
-      bank_account_id,
-      policy_revision,
-      max_classification,
-      active,
-      effective_from: '2026-01-01T00:00:00.000Z',
-      effective_to: null,
-      created_at: '2026-01-01T00:00:00.000Z'
-    })),
+      accessGrant({ id: a1 }),
+      accessGrant({ id: a2, maxClassification: 'C3' }),
+      accessGrant({ id: a3 }),
+      accessGrant({ id: a1, policyRevision: 'policy-a-old', maxClassification: 'C3' }),
+      accessGrant({ tenant: TENANTS[1], id: b1 }),
+      accessGrant({ tenant: TENANTS[1], id: b2 }),
+      accessGrant({ tenant: TENANTS[1], id: b3 }),
+      accessGrant({ tenant: TENANTS[1], id: shared }),
+      accessGrant({
+        tenant: TENANTS[1], actor: ACTORS[TENANTS[0]], id: shared,
+        policyRevision: 'policy-a-rev-1'
+      }),
+      accessGrant({ id: deniedAccessInactive, active: false }),
+      accessGrant({ id: deniedAccessFuture, effectiveFrom: '2026-09-13T00:00:00.000Z' }),
+      accessGrant({
+        id: deniedAccessExpired, effectiveTo: '2026-09-12T12:00:00.000Z'
+      }),
+      accessGrant({ id: deniedAccountStatus }),
+      accessGrant({ id: deniedHolderInactive }),
+      accessGrant({ id: deniedInstitutionInvisible }),
+      accessGrant({ id: deniedOwnerFuture }),
+      accessGrant({ id: deniedHolderExpired })
+    ],
     audit: [{
       tenant_id: TENANTS[0],
       event_id: uuid('e1'),
@@ -363,7 +465,7 @@ function validateSyntheticCorpus(corpus) {
     accountIds.get(row.tenant_id)?.add(row.bank_account_id);
     if (!/^\*{4,30}[A-Za-z0-9]{0,4}$/.test(row.masked_identifier || '')) fail();
   }
-  if ([...accountIds.values()].some(ids => ids.size < 1 || ids.size > 3)) fail();
+  if ([...accountIds.values()].some(ids => ids.size < 1 || ids.size > 16)) fail();
   return true;
 }
 
@@ -693,7 +795,14 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     if (listA.length !== 2) fail();
     const listBParams = listParams(TENANTS[1], ACTORS[TENANTS[1]]);
     const listB = await boundedQuery(database, q3, listBParams);
-    if (listB.length !== 1 || listB[0].bank_account_id !== uuid('b1')) fail();
+    if (canonical(listB.map(row => row.bank_account_id))
+      !== canonical([uuid('b1'), uuid('f1')])) fail();
+    const deniedLifecycleIdsA = [
+      'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'f1'
+    ].map(uuid);
+    if (deniedLifecycleIdsA.some(id => (
+      listA.some(row => row.bank_account_id === id)
+    ))) fail();
     const classificationDeniedBParams = listParams(
       TENANTS[1], ACTORS[TENANTS[1]], { classification: 'C3' }
     );
@@ -753,9 +862,11 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     controls.add(19);
 
     const totalA = await boundedQuery(database, q4, totalParams(listAParams));
-    if (totalA[0].authorized_filtered_count !== listA.length) fail();
+    if (totalA[0].authorized_filtered_count !== 2
+      || totalA[0].authorized_filtered_count !== listA.length) fail();
     const totalB = await boundedQuery(database, q4, totalParams(listBParams));
-    if (totalB[0].authorized_filtered_count !== listB.length) fail();
+    if (totalB[0].authorized_filtered_count !== 2
+      || totalB[0].authorized_filtered_count !== listB.length) fail();
     const classificationDeniedTotalB = await boundedQuery(
       database, q4, totalParams(classificationDeniedBParams)
     );
