@@ -256,6 +256,7 @@ function buildSyntheticCorpus(schemaFingerprint) {
   const a3 = uuid('a3');
   const b1 = uuid('b1');
   const b2 = uuid('b2');
+  const b3 = uuid('b3');
   const currentA1 = account({
     tenant: TENANTS[0], id: a1, version: 2, label: '\uE000'
   });
@@ -276,7 +277,11 @@ function buildSyntheticCorpus(schemaFingerprint) {
         replacedAt: '2026-07-01T10:00:00.000Z'
       }),
       account({ tenant: TENANTS[1], id: b1, label: 'Compte fictif B1', currency: 'XOF' }),
-      account({ tenant: TENANTS[1], id: b2, label: 'Compte fictif B2', visible: false })
+      account({ tenant: TENANTS[1], id: b2, label: 'Compte fictif B2', visible: false }),
+      account({
+        tenant: TENANTS[1], id: b3, label: 'Compte fictif B3',
+        classification: 'C3'
+      })
     ],
     relations: [...relationsFor(TENANTS[0]), ...relationsFor(TENANTS[1])],
     revisions: TENANTS.map((tenant, index) => {
@@ -301,7 +306,8 @@ function buildSyntheticCorpus(schemaFingerprint) {
       [TENANTS[0], ACTORS[TENANTS[0]], a3, 'policy-a-rev-1', 'C2', true],
       [TENANTS[0], ACTORS[TENANTS[0]], a1, 'policy-a-old', 'C3', true],
       [TENANTS[1], ACTORS[TENANTS[1]], b1, 'policy-b-rev-1', 'C2', true],
-      [TENANTS[1], ACTORS[TENANTS[1]], b2, 'policy-b-rev-1', 'C2', true]
+      [TENANTS[1], ACTORS[TENANTS[1]], b2, 'policy-b-rev-1', 'C2', true],
+      [TENANTS[1], ACTORS[TENANTS[1]], b3, 'policy-b-rev-1', 'C2', true]
     ].map(([tenant_id, actor_id, bank_account_id, policy_revision,
       max_classification, active]) => ({
       tenant_id,
@@ -449,10 +455,24 @@ const METADATA_QUERIES = Object.freeze({
   extensions: `SELECT e.extname FROM pg_extension e
     JOIN pg_namespace n ON n.oid = e.extnamespace
     WHERE n.nspname = $1 ORDER BY e.extname`,
-  grants: `SELECT table_name, grantee, privilege_type
-    FROM information_schema.role_table_grants
-    WHERE table_schema = $1 AND grantee <> current_user
-    ORDER BY table_name, grantee, privilege_type`
+  grants: `SELECT object_kind, object_name, column_name, acl
+    FROM (
+      SELECT 'schema'::text AS object_kind, n.nspname AS object_name,
+        NULL::text AS column_name, n.nspacl::text AS acl
+      FROM pg_namespace n
+      WHERE n.nspname = $1 AND n.nspacl IS NOT NULL
+      UNION ALL
+      SELECT 'table'::text, c.relname, NULL::text, c.relacl::text
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') AND c.relacl IS NOT NULL
+      UNION ALL
+      SELECT 'column'::text, c.relname, a.attname, a.attacl::text
+      FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = $1 AND c.relkind IN ('r', 'p')
+        AND a.attnum > 0 AND NOT a.attisdropped AND a.attacl IS NOT NULL
+    ) privilege_acl
+    ORDER BY object_kind, object_name, column_name`
 });
 
 function inventoryFields(schemaState, catalog, catalogFingerprint, unexpectedObjects) {
@@ -674,6 +694,11 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     const listBParams = listParams(TENANTS[1], ACTORS[TENANTS[1]]);
     const listB = await boundedQuery(database, q3, listBParams);
     if (listB.length !== 1 || listB[0].bank_account_id !== uuid('b1')) fail();
+    const classificationDeniedBParams = listParams(
+      TENANTS[1], ACTORS[TENANTS[1]], { classification: 'C3' }
+    );
+    const classificationDeniedB = await boundedQuery(database, q3, classificationDeniedBParams);
+    if (classificationDeniedB.length !== 0) fail();
     const stale = listParams(TENANTS[0], ACTORS[TENANTS[0]]);
     stale[3] = 'policy-a-old';
     stale[12] = 'list-a-rev-1';
@@ -731,6 +756,10 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     if (totalA[0].authorized_filtered_count !== listA.length) fail();
     const totalB = await boundedQuery(database, q4, totalParams(listBParams));
     if (totalB[0].authorized_filtered_count !== listB.length) fail();
+    const classificationDeniedTotalB = await boundedQuery(
+      database, q4, totalParams(classificationDeniedBParams)
+    );
+    if (classificationDeniedTotalB[0].authorized_filtered_count !== 0) fail();
     controls.add(20);
     const zeroParams = listParams(TENANTS[0], ACTORS[TENANTS[0]], { currency: 'JPY' });
     const zero = await boundedQuery(database, q4, totalParams(zeroParams));

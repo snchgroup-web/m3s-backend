@@ -105,6 +105,33 @@ test('timestamp precision drift is rejected even when the data type is unchanged
   }
 });
 
+test('schema, table and column grants are rejected including PUBLIC privileges', async () => {
+  const schemaPlan = buildBankAccountPostgresOfflinePlan();
+  const grantCases = [
+    `GRANT USAGE ON SCHEMA "${SCHEMA_NAME}" TO PUBLIC`,
+    `GRANT SELECT ON TABLE "${SCHEMA_NAME}"."${REVISION_TABLE}" TO PUBLIC`,
+    `GRANT SELECT (updated_at) ON TABLE "${SCHEMA_NAME}"."${REVISION_TABLE}" TO PUBLIC`
+  ];
+
+  for (const grant of grantCases) {
+    const database = new PGlite();
+    try {
+      await database.exec(`CREATE SCHEMA "${SCHEMA_NAME}"`);
+      for (const statement of schemaPlan.statements) await database.exec(statement);
+
+      const conformant = await collectInventory(database, schemaPlan);
+      assert.equal(conformant.schemaState, 'conformant');
+
+      await database.exec(grant);
+      const divergent = await collectInventory(database, schemaPlan);
+      assert.equal(divergent.schemaState, 'divergent');
+      assert.deepEqual(divergent.unexpectedObjects, ['catalog-drift']);
+    } finally {
+      await database.close();
+    }
+  }
+});
+
 test('synthetic corpus validation fails before creating the in-memory engine', async () => {
   const invalidCorpus = structuredClone(buildSyntheticCorpus('a'.repeat(64)));
   invalidCorpus.accounts[0].source_revision = 'CH9300762011623852957';
