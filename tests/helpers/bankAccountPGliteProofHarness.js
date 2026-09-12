@@ -190,11 +190,12 @@ function account({
 
 function relationFixture({
   kind, referenceId, sourceRevision, active = true, visible = true,
-  classification = 'C2', effectiveFrom = '2026-01-01', effectiveTo = null
+  classification = 'C2', effectiveFrom = '2026-01-01', effectiveTo = null,
+  tenant = TENANTS[0]
 }) {
   const institution = kind === 'financial_institution';
   return {
-    tenant_id: TENANTS[0],
+    tenant_id: tenant,
     relation_kind: kind,
     reference_id: referenceId,
     source_revision: sourceRevision,
@@ -304,6 +305,8 @@ function buildSyntheticCorpus(schemaFingerprint) {
   const b3 = uuid('b3');
   const b4 = uuid('b4');
   const b5 = uuid('b5');
+  const b6 = uuid('b6');
+  const b7 = uuid('b7');
   const shared = uuid('f1');
   const deniedAccessInactive = uuid('d1');
   const deniedAccessFuture = uuid('d2');
@@ -316,6 +319,7 @@ function buildSyntheticCorpus(schemaFingerprint) {
   const deniedAccountFuture = uuid('d9');
   const deniedAccountExpired = uuid('da');
   const deniedRelationClassification = uuid('db');
+  const deniedRelationTenantBinding = uuid('dc');
   const currentA1 = account({
     tenant: TENANTS[0], id: a1, version: 2, label: '\uE000'
   });
@@ -346,6 +350,12 @@ function buildSyntheticCorpus(schemaFingerprint) {
       }),
       account({
         tenant: TENANTS[1], id: b5, label: 'Pagination identique', currency: 'USD'
+      }),
+      account({
+        tenant: TENANTS[1], id: b6, label: 'Zeta pagination', currency: 'GBP'
+      }),
+      account({
+        tenant: TENANTS[1], id: b7, label: 'Alpha pagination', currency: 'GBP'
       }),
       account({ tenant: TENANTS[0], id: shared, label: 'Partage refuse A' }),
       account({ tenant: TENANTS[1], id: shared, label: 'Partage autorise B' }),
@@ -385,6 +395,11 @@ function buildSyntheticCorpus(schemaFingerprint) {
         tenant: TENANTS[0], id: deniedRelationClassification,
         label: 'Relation C3 refusee', holderEntityId: 'HOLDER-DB',
         holderRevision: 'holder-a-db-rev-1'
+      }),
+      account({
+        tenant: TENANTS[0], id: deniedRelationTenantBinding,
+        label: 'Relation autre tenant refusee', holderEntityId: 'HOLDER-SHARED',
+        holderRevision: 'holder-shared-rev-1'
       })
     ],
     relations: [
@@ -409,6 +424,14 @@ function buildSyntheticCorpus(schemaFingerprint) {
       relationFixture({
         kind: 'holder_entity', referenceId: 'HOLDER-DB',
         sourceRevision: 'holder-a-db-rev-1', classification: 'C3'
+      }),
+      relationFixture({
+        kind: 'holder_entity', referenceId: 'HOLDER-SHARED',
+        sourceRevision: 'holder-shared-rev-1', active: false
+      }),
+      relationFixture({
+        kind: 'holder_entity', referenceId: 'HOLDER-SHARED',
+        sourceRevision: 'holder-shared-rev-1', tenant: TENANTS[1]
       })
     ],
     revisions: TENANTS.map((tenant, index) => {
@@ -437,6 +460,8 @@ function buildSyntheticCorpus(schemaFingerprint) {
       accessGrant({ tenant: TENANTS[1], id: b3 }),
       accessGrant({ tenant: TENANTS[1], id: b4 }),
       accessGrant({ tenant: TENANTS[1], id: b5 }),
+      accessGrant({ tenant: TENANTS[1], id: b6 }),
+      accessGrant({ tenant: TENANTS[1], id: b7 }),
       accessGrant({ tenant: TENANTS[1], id: shared }),
       accessGrant({
         tenant: TENANTS[1], actor: ACTORS[TENANTS[0]], id: shared,
@@ -454,7 +479,8 @@ function buildSyntheticCorpus(schemaFingerprint) {
       accessGrant({ id: deniedHolderExpired }),
       accessGrant({ id: deniedAccountFuture }),
       accessGrant({ id: deniedAccountExpired }),
-      accessGrant({ id: deniedRelationClassification })
+      accessGrant({ id: deniedRelationClassification }),
+      accessGrant({ id: deniedRelationTenantBinding })
     ],
     audit: [{
       tenant_id: TENANTS[0],
@@ -869,9 +895,11 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     const listBParams = listParams(TENANTS[1], ACTORS[TENANTS[1]]);
     const listB = await boundedQuery(database, q3, listBParams);
     if (canonical(listB.map(row => row.bank_account_id))
-      !== canonical([uuid('b1'), uuid('b4'), uuid('b5'), uuid('f1')])) fail();
+      !== canonical([
+        uuid('b7'), uuid('b1'), uuid('b4'), uuid('b5'), uuid('f1'), uuid('b6')
+      ])) fail();
     const deniedLifecycleIdsA = [
-      'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'da', 'db', 'f1'
+      'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'da', 'db', 'dc', 'f1'
     ].map(uuid);
     if (deniedLifecycleIdsA.some(id => (
       listA.some(row => row.bank_account_id === id)
@@ -959,6 +987,25 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     if (equalLabelFirstPage[0].internal_label_order !== 'Pagination identique'
       || equalLabelSecondPage[0].internal_label_order !== 'Pagination identique'
       || canonical(equalLabelIds) !== canonical([uuid('b4'), uuid('b5')].sort())) fail();
+    const labelFirstPage = await boundedQuery(
+      database, q3, listParams(TENANTS[1], ACTORS[TENANTS[1]], {
+        currency: 'GBP', limit: 1
+      })
+    );
+    if (labelFirstPage.length !== 1) fail();
+    const labelSecondPage = await boundedQuery(database, q3, listParams(
+      TENANTS[1], ACTORS[TENANTS[1]], {
+        currency: 'GBP',
+        afterLabel: labelFirstPage[0].internal_label_order,
+        afterId: labelFirstPage[0].bank_account_id,
+        limit: 1
+      }
+    ));
+    if (labelSecondPage.length !== 1
+      || labelFirstPage[0].bank_account_id !== uuid('b7')
+      || labelSecondPage[0].bank_account_id !== uuid('b6')
+      || labelFirstPage[0].internal_label_order !== 'Alpha pagination'
+      || labelSecondPage[0].internal_label_order !== 'Zeta pagination') fail();
     let limitClosed = false;
     try {
       await boundedQuery(
@@ -974,7 +1021,7 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
     if (totalA[0].authorized_filtered_count !== 2
       || totalA[0].authorized_filtered_count !== listA.length) fail();
     const totalB = await boundedQuery(database, q4, totalParams(listBParams));
-    if (totalB[0].authorized_filtered_count !== 4
+    if (totalB[0].authorized_filtered_count !== 6
       || totalB[0].authorized_filtered_count !== listB.length) fail();
     const classificationDeniedTotalB = await boundedQuery(
       database, q4, totalParams(classificationDeniedBParams)
@@ -1073,7 +1120,10 @@ async function runBankAccountPGliteProof({ corpusFactory = buildSyntheticCorpus 
 
     const revisions = await boundedQuery(database, q5, [TENANTS[0]]);
     const source = await boundedQuery(database, q6, [TENANTS[0]]);
-    if (revisions.length !== 1 || source.length !== 1) fail();
+    const absentTenantRevisions = await boundedQuery(database, q5, ['TENANT-CB-TEST-Z']);
+    const absentTenantSource = await boundedQuery(database, q6, ['TENANT-CB-TEST-Z']);
+    if (revisions.length !== 1 || source.length !== 1
+      || absentTenantRevisions.length !== 0 || absentTenantSource.length !== 0) fail();
     const generic = new BankAccountPGliteProofError();
     if (/SELECT|INSERT|finance_bank_accounts|driver detail/i.test(`${generic.message} ${generic.stack}`)) fail();
     controls.add(27);
