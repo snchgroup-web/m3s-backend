@@ -19,6 +19,14 @@ test('loads the trilingual Boussole from a server-side artifact', async () => {
   assert.match(content, /data-lang="EN"/);
 });
 
+test('keeps section and language navigation synchronized with the URL hash', async () => {
+  const content = await loadBoussoleArtifact();
+
+  assert.match(content, /nextHash=`#\$\{nextLang\.toLowerCase\(\)\}\/\$\{nextSection\}`/);
+  assert.match(content, /if\(location\.hash===nextHash\)\{route\(\);return\}location\.hash=nextHash/);
+  assert.match(content, /window\.addEventListener\('hashchange',route\)/);
+});
+
 test('rejects an invalid Boussole artifact', async () => {
   await assert.rejects(
     loadBoussoleArtifact(async () => '<html><body>Other document</body></html>'),
