@@ -16,6 +16,7 @@ const cors = require('cors');
 const { BigQuery } = require('@google-cloud/bigquery');
 const { createCorsOriginValidator, createCorsErrorHandler } = require('./corsPolicy');
 const { createDebugAccessMiddleware, createDebugSampleGuard } = require('./debugAccess');
+const { createBoussoleArtifactHandler } = require('./boussoleArtifact');
 const {
   createMembersDirectoryHandler,
   isFeatureEnabled,
@@ -499,6 +500,9 @@ app.get('/api/intelligence/latest/:artifact(html|pdf|reference)', async (req, re
     return res.status(500).json({ success: false, error: 'Livrable Intelligence indisponible' });
   }
 });
+
+// The Boussole contains internal governance context and must never be a public static asset.
+app.get('/api/boussole/latest/html', authenticateRequest, createBoussoleArtifactHandler());
 
 // ============================================================================
 // HEALTH CHECK
@@ -2100,6 +2104,9 @@ app.get('/api/info', (req, res) => {
         'GET /api/intelligence/latest/html',
         'GET /api/intelligence/latest/pdf',
         'GET /api/intelligence/latest/reference'
+      ],
+      boussole: [
+        'GET /api/boussole/latest/html'
       ],
       administration: [
         'GET /api/administration/resources',
