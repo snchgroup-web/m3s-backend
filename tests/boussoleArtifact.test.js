@@ -27,6 +27,14 @@ test('keeps section and language navigation synchronized with the URL hash', asy
   assert.match(content, /window\.addEventListener\('hashchange',route\)/);
 });
 
+test('temporarily clears an active search for native printing and restores it afterwards', async () => {
+  const content = await loadBoussoleArtifact();
+
+  assert.match(content, /if\(printedSearch===null\)printedSearch=\$\('search'\)\.value;\$\('search'\)\.value='';search\(\)/);
+  assert.match(content, /\$\('search'\)\.value=printedSearch;printedSearch=null;search\(\)/);
+  assert.match(content, /\$\('print'\)\.onclick=\(\)=>window\.print\(\)/);
+});
+
 test('rejects an invalid Boussole artifact', async () => {
   await assert.rejects(
     loadBoussoleArtifact(async () => '<html><body>Other document</body></html>'),
