@@ -19,11 +19,13 @@ test('loads the trilingual Boussole from a server-side artifact', async () => {
   assert.match(content, /data-lang="EN"/);
 });
 
-test('keeps section and language navigation synchronized with the URL hash', async () => {
+test('renders section and language changes without depending on blob hash navigation', async () => {
   const content = await loadBoussoleArtifact();
 
   assert.match(content, /nextHash=`#\$\{nextLang\.toLowerCase\(\)\}\/\$\{nextSection\}`/);
-  assert.match(content, /if\(location\.hash===nextHash\)\{route\(\);return\}location\.hash=nextHash/);
+  assert.match(content, /lang=nextLang;current=nextSection;\$\('search'\)\.value='';render\(\)/);
+  assert.match(content, /\$\('page-'\+current\)\.focus\(\);window\.scrollTo\(0,0\)/);
+  assert.match(content, /try\{if\(location\.hash!==nextHash\)history\.pushState\(null,'',nextHash\)\}catch\(_\)\{\}/);
   assert.match(content, /window\.addEventListener\('hashchange',route\)/);
 });
 
