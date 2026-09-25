@@ -17,6 +17,7 @@ const { BigQuery } = require('@google-cloud/bigquery');
 const { createCorsOriginValidator, createCorsErrorHandler } = require('./corsPolicy');
 const { createDebugAccessMiddleware, createDebugSampleGuard } = require('./debugAccess');
 const { createBoussoleArtifactHandler } = require('./boussoleArtifact');
+const { registerHistoricalOwnAccountDiagnosticRoute, createSanitizedOwnAccountLoader } = require('./ownAccountDiagnostic');
 const {
   createMembersDirectoryHandler,
   isFeatureEnabled,
@@ -417,6 +418,11 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.use('/api', requireAuth);
+registerHistoricalOwnAccountDiagnosticRoute(app, {
+  enabled: process.env.M3S_OWN_ACCOUNT_DIAGNOSTIC_ENABLED === 'true',
+  verifyToken: parseToken,
+  loadAccounts: createSanitizedOwnAccountLoader(getConfiguredUsers)
+});
 app.use('/api/debug', requireDebugAccess);
 
 // Administration registries always require an authenticated, tenant-scoped identity.
