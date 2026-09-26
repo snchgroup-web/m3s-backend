@@ -17,6 +17,7 @@ const { BigQuery } = require('@google-cloud/bigquery');
 const { createCorsOriginValidator, createCorsErrorHandler } = require('./corsPolicy');
 const { createDebugAccessMiddleware, createDebugSampleGuard } = require('./debugAccess');
 const { createBoussoleArtifactHandler } = require('./boussoleArtifact');
+const { profileNoStore, createOwnProfileHandler } = require('./ownProfile');
 const { ownAccountDiagnosticNoStore, registerHistoricalOwnAccountDiagnosticRoute,
   createSanitizedOwnAccountLoader } = require('./ownAccountDiagnostic');
 const {
@@ -425,7 +426,12 @@ const ownAccountDiagnosticEnabled = process.env.M3S_OWN_ACCOUNT_DIAGNOSTIC_ENABL
 if (ownAccountDiagnosticEnabled) {
   app.use('/api/auth/account-diagnostic', ownAccountDiagnosticNoStore);
 }
+app.use('/api/auth/profile', profileNoStore);
 app.use('/api', requireAuth);
+app.get('/api/auth/profile', authenticateRequest, createOwnProfileHandler({
+  getAccounts: getConfiguredUsers,
+  readDirectory: () => readDirectoryDocument(RH001_DIRECTORY_PATH)
+}));
 registerHistoricalOwnAccountDiagnosticRoute(app, {
   enabled: ownAccountDiagnosticEnabled,
   verifyToken: parseToken,
