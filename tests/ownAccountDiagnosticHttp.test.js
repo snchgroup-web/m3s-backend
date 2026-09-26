@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const express = require('express');
 const { signJwtToken, verifyJwtToken } = require('../authConfiguration');
-const { registerHistoricalOwnAccountDiagnosticRoute, createSanitizedOwnAccountLoader } = require('../ownAccountDiagnostic');
+const { ownAccountDiagnosticNoStore, registerHistoricalOwnAccountDiagnosticRoute,
+  createSanitizedOwnAccountLoader } = require('../ownAccountDiagnostic');
 
 const secret = 'synthetic-http-diagnostic-signing-material-not-for-production';
 const clock = 1800000000000;
@@ -28,6 +29,21 @@ test('HTTP route is absent by default', () => withServer(undefined, async ({ req
   assert.equal((await request()).status, 404);
   assert.equal((await request(token)).status, 404);
 }));
+
+test('upstream authentication refusal is private when diagnostic is enabled', async () => {
+  const app = express();
+  app.use('/api/auth/account-diagnostic', ownAccountDiagnosticNoStore);
+  app.use('/api', (_req, res) => res.status(401).json({ success: false, error: 'Authentification requise' }));
+  const server = http.createServer(app);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/auth/account-diagnostic`);
+    assert.equal(response.status, 401);
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
 
 test('HTTP independent authentication, own scope, no-store, current state and no writes', () =>
   withServer(true, async ({ request, token, setAccounts }) => {

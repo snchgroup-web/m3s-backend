@@ -1,3 +1,8 @@
+function ownAccountDiagnosticNoStore(_req, res, next) {
+  res.set('Cache-Control', 'private, no-store');
+  next();
+}
+
 function registerOwnAccountDiagnosticRoute(app, { authenticate, loadAccounts }) {
   app.get('/api/auth/account-diagnostic', authenticate('account:read'), async (req, res) => {
     res.set('Cache-Control', 'private, no-store');
@@ -69,5 +74,5 @@ function registerHistoricalOwnAccountDiagnosticRoute(app, { enabled = false, ver
   } });
 }
 
-module.exports = { registerOwnAccountDiagnosticRoute, registerHistoricalOwnAccountDiagnosticRoute,
-  createSanitizedOwnAccountLoader };
+module.exports = { ownAccountDiagnosticNoStore, registerOwnAccountDiagnosticRoute,
+  registerHistoricalOwnAccountDiagnosticRoute, createSanitizedOwnAccountLoader };
