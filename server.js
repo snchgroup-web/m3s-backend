@@ -19,6 +19,7 @@ const { createDebugAccessMiddleware, createDebugSampleGuard } = require('./debug
 const { createBoussoleArtifactHandler } = require('./boussoleArtifact');
 const { profileNoStore, createOwnProfileHandler } = require('./ownProfile');
 const { createIdentityRuntime } = require('./identityRuntime');
+const { PREFIX: GED_PREFIX, isPrivateGedRoute, createGedRuntime } = require('./gedPrivate');
 const { ownAccountDiagnosticNoStore, registerHistoricalOwnAccountDiagnosticRoute,
   createSanitizedOwnAccountLoader } = require('./ownAccountDiagnostic');
 const {
@@ -264,8 +265,10 @@ app.use(cors({
   credentials: true
 }));
 app.use('/api/finance/budget-drafts', createBudgetBodyMiddleware());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+const generalJsonBody = express.json({ limit: '50mb' });
+const generalFormBody = express.urlencoded({ limit: '50mb', extended: true });
+app.use((req, res, next) => isPrivateGedRoute(req.path) ? next() : generalJsonBody(req, res, next));
+app.use((req, res, next) => isPrivateGedRoute(req.path) ? next() : generalFormBody(req, res, next));
 
 // Logging
 app.use((req, res, next) => {
@@ -380,6 +383,7 @@ const verifyPassword = (account, password) => {
 
 const identityRuntime = createIdentityRuntime({ env: process.env, getAccounts: getConfiguredUsers,
   credentials: googleCredentials, authenticateLegacy });
+app.use(GED_PREFIX, createGedRuntime({ env: process.env, identityRuntime, credentials: googleCredentials }));
 app.get('/api/auth/provider', profileNoStore, (_req, res) => res.json(identityRuntime.publicConfig));
 app.get('/api/auth/me', identityRuntime.currentAccount);
 

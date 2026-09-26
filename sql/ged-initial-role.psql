@@ -1,0 +1,16 @@
+\set ON_ERROR_STOP on
+\getenv ged_initial_password M3S_GED_INITIAL_PASSWORD
+SELECT length(:'ged_initial_password') = 64 AND :'ged_initial_password' ~ '^[a-f0-9]{64}$' AS credential_valid \gset
+\if :credential_valid
+BEGIN;
+CREATE ROLE m3s_ged_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+  NOREPLICATION NOBYPASSRLS NOINHERIT CONNECTION LIMIT 5 PASSWORD :'ged_initial_password';
+GRANT CONNECT ON DATABASE railway TO m3s_ged_app;
+GRANT USAGE ON SCHEMA ged_private TO m3s_ged_app;
+GRANT SELECT, INSERT ON ged_private.documents TO m3s_ged_app;
+GRANT INSERT ON ged_private.events TO m3s_ged_app;
+COMMIT;
+\else
+SELECT 1/0;
+\endif
+\unset ged_initial_password
