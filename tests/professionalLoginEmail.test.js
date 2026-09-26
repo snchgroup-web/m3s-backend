@@ -31,6 +31,8 @@ test('professional override fails closed for invalid configuration and ambiguous
   }
   assert.equal(findUniqueLoginAccount([original, { email: 'other@example.test', active: true }],
     professionalEmail, override), null);
+  assert.equal(findUniqueLoginAccount([original, { active: true }], professionalEmail, override), null);
+  assert.equal(findUniqueLoginAccount([original, { email: '  ' }], professionalEmail, override), null);
   assert.equal(findUniqueLoginAccount([{ ...original, email: 'replacement@example.test' }],
     professionalEmail, override), null);
   assert.equal(findUniqueLoginAccount(accounts, professionalEmail,
