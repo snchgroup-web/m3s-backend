@@ -608,7 +608,7 @@ test('Finance DDL is identifier-safe and absent from normal server startup', () 
   assert.match(server, /resolveBudgetStorageConfig/);
   assert.match(server, /selectSigningKeyProvider\(process\.env, CONFIGURED_AUTH_KEY_PROVIDER\)/);
   assert.match(server, /revision: APP_REVISION/);
-  assert.match(server, /findUniqueLoginAccount\(users, loginIdentifier\)/);
+  assert.match(server, /findUniqueLoginAccount\(users, loginIdentifier,/);
   assert.match(server, /isBudgetRoute\(req\.path\)/);
   assert.match(server, /normalizeBudgetRoute\(req\.path\)/);
 });

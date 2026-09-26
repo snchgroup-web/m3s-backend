@@ -385,7 +385,10 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   const users = getConfiguredUsers();
-  const account = findUniqueLoginAccount(users, loginIdentifier);
+  const singleAccountLoginEmail = process.env.M3S_AUTH_SINGLE_ACCOUNT_LOGIN_EMAIL;
+  const singleAccountSourceEmailSha256 = process.env.M3S_AUTH_SINGLE_ACCOUNT_SOURCE_EMAIL_SHA256;
+  const account = findUniqueLoginAccount(users, loginIdentifier,
+    { singleAccountLoginEmail, singleAccountSourceEmailSha256 });
 
   if (!account || !verifyPassword(account, password)) {
     return res.status(401).json({
@@ -400,7 +403,7 @@ app.post('/api/auth/login', (req, res) => {
   }
   const user = {
     ...accountIdentity,
-    email: account.email,
+    email: singleAccountLoginEmail || account.email,
     name: account.name || account.email,
     role: account.role || 'Utilisateur',
     permissions: [...new Set([
