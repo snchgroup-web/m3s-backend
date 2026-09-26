@@ -17,7 +17,8 @@ const { BigQuery } = require('@google-cloud/bigquery');
 const { createCorsOriginValidator, createCorsErrorHandler } = require('./corsPolicy');
 const { createDebugAccessMiddleware, createDebugSampleGuard } = require('./debugAccess');
 const { createBoussoleArtifactHandler } = require('./boussoleArtifact');
-const { registerHistoricalOwnAccountDiagnosticRoute, createSanitizedOwnAccountLoader } = require('./ownAccountDiagnostic');
+const { ownAccountDiagnosticNoStore, registerHistoricalOwnAccountDiagnosticRoute,
+  createSanitizedOwnAccountLoader } = require('./ownAccountDiagnostic');
 const {
   createMembersDirectoryHandler,
   isFeatureEnabled,
@@ -417,9 +418,13 @@ app.post('/api/auth/login', (req, res) => {
   });
 });
 
+const ownAccountDiagnosticEnabled = process.env.M3S_OWN_ACCOUNT_DIAGNOSTIC_ENABLED === 'true';
+if (ownAccountDiagnosticEnabled) {
+  app.use('/api/auth/account-diagnostic', ownAccountDiagnosticNoStore);
+}
 app.use('/api', requireAuth);
 registerHistoricalOwnAccountDiagnosticRoute(app, {
-  enabled: process.env.M3S_OWN_ACCOUNT_DIAGNOSTIC_ENABLED === 'true',
+  enabled: ownAccountDiagnosticEnabled,
   verifyToken: parseToken,
   loadAccounts: createSanitizedOwnAccountLoader(getConfiguredUsers)
 });
