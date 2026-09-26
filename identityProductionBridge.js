@@ -31,7 +31,12 @@ function createIdentityProductionBridge(options = {}) {
     try {
       // Ignore prefilled req.user, token roles and the historical signing secret.
       const principal = await authorize(req.get('authorization'));
+      const profile = await loadProfile({ id: principal.userId, tenantId: principal.organizationId });
+      if (!profile || profile.id !== principal.userId || profile.tenantId !== principal.organizationId || profile.active !== true) {
+        throw new Error('ACCOUNT_UNAVAILABLE');
+      }
       req.user = Object.freeze({ id: principal.userId, tenantId: principal.organizationId,
+        role: typeof profile.role === 'string' ? profile.role : 'Utilisateur', authProvider: 'google',
         permissions: principal.permissions, permissionsExplicit: true,
         financePermissionsExplicit: true });
       return next();

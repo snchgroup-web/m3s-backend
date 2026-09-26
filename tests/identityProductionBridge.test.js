@@ -155,7 +155,7 @@ test('wrong profile or failed reader cannot leak another account', async () => {
   options.loadProfile = async () => { throw new Error('private failure'); };
   const unavailable = response();
   await createIdentityProductionBridge(options).currentAccount(request(), unavailable);
-  assert.equal(unavailable.code, 503);
+  assert.equal(unavailable.code, 401);
   assert.equal(JSON.stringify(unavailable.body).includes('private failure'), false);
 });
 

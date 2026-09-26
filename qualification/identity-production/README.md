@@ -1,7 +1,8 @@
 # Production identity bridge preparation
 
-Status: isolated candidate, NOT imported by server.js, NOT deployed or activated.
-The existing production password and session paths remain unchanged.
+Status: wired into server.js, OFF by default (`M3S_IDENTITY_MODE=legacy`).
+Deployment alone preserves existing password/session behavior. Google activation
+requires an approved binding and public browser configuration in runtime variables.
 
 `identityAccessGate.js` and `identityAccountReader.js` reuse the access qualification
 contracts with an authentication-only mode (no new business grant) and stricter
@@ -15,6 +16,30 @@ Effective grants are the intersection of approved and current explicit grants.
 Both permission-explicit flags are set, including Finance, so a Manager label
 cannot expand a reduced set. `/auth/me` returns whitelisted metadata only.
 Credential-bearing account JSON must not be passed to the injected repositories.
+
+`identityRuntime.js` projects the current historical account into sanitized
+metadata. Its pinned role and ID must still match. The approved permission
+snapshot is the maximum: historical permission resolution can restrict it,
+never extend it. The raw source is neither exported nor rewritten.
+Node 24 and firebase-admin 14.4.0 are pinned at the runtime boundary.
+Provider verification has an eight-second deadline and 32 concurrent operations
+maximum. Password/MFA/recovery abuse controls remain at Firebase's endpoints.
+
+## Controlled activation
+
+1. Deploy backend in default legacy mode, then the compatible browser release.
+2. Set `M3S_FIREBASE_WEB_CONFIG_JSON` with only apiKey, projectId, authDomain,
+   appId (public Firebase browser configuration; never a service-account key).
+3. Set `M3S_IDENTITY_BINDING_JSON`: projectId, tenantId (null), subject,
+   userId, organizationId, active (true), role and approved permissions.
+   These are private deployment metadata, not source files or PR attachments.
+4. Validate identity/grants against the existing runtime and set
+   `M3S_IDENTITY_MODE=google`. `API_REQUIRE_AUTH` must be true.
+5. Reload the browser. The user alone enters the password and Authenticator
+   code. Verify own profile/photo and existing permissions, then signout/reload.
+
+Rollback is an explicit operator change to legacy mode, with browser reload.
+No automatic fallback is allowed. User documents and passwords are unchanged.
 
 ## Verification
 

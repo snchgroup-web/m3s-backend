@@ -51,13 +51,14 @@
     "dotenv": "^16.3.1",
     "@google-cloud/bigquery": "^7.0.0",
     "body-parser": "^1.20.2",
-    "helmet": "^7.1.0"
+    "helmet": "^7.1.0",
+    "firebase-admin": "14.4.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.7",
     "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": "18.x"
+    "node": "24.x"
   }
 }
