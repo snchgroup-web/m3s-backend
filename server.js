@@ -18,6 +18,7 @@ const { createCorsOriginValidator, createCorsErrorHandler } = require('./corsPol
 const { createDebugAccessMiddleware, createDebugSampleGuard } = require('./debugAccess');
 const { createBoussoleArtifactHandler } = require('./boussoleArtifact');
 const { profileNoStore, createOwnProfileHandler } = require('./ownProfile');
+const { createIdentityRuntime } = require('./identityRuntime');
 const { ownAccountDiagnosticNoStore, registerHistoricalOwnAccountDiagnosticRoute,
   createSanitizedOwnAccountLoader } = require('./ownAccountDiagnostic');
 const {
@@ -290,7 +291,7 @@ const parseToken = token => verifyJwtToken(token, {
   allowLegacyFallback: Boolean(CONFIGURED_AUTH_KEY_PROVIDER && process.env.JWT_SECRET)
 });
 
-const authenticateRequest = (req, res, next) => {
+const authenticateLegacy = (req, res, next) => {
   if (req.user) return next();
   const authHeader = req.get('authorization') || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
@@ -307,6 +308,7 @@ const authenticateRequest = (req, res, next) => {
   return next();
 };
 
+const authenticateRequest = (req, res, next) => identityRuntime.authenticate(req, res, next);
 const requireDebugAccess = createDebugAccessMiddleware(authenticateRequest);
 const disableProductionDebugSamples = createDebugSampleGuard(NODE_ENV);
 
@@ -316,6 +318,8 @@ const requireAuth = (req, res, next) => {
     '/health',
     '/info',
     '/api/auth/login',
+    '/auth/provider',
+    '/api/auth/provider',
     '/api/health',
     '/api/info',
     '/intelligence/latest/publish',
@@ -374,7 +378,12 @@ const verifyPassword = (account, password) => {
 // AUTH ROUTES
 // ============================================================================
 
-app.post('/api/auth/login', (req, res) => {
+const identityRuntime = createIdentityRuntime({ env: process.env, getAccounts: getConfiguredUsers,
+  credentials: googleCredentials, authenticateLegacy });
+app.get('/api/auth/provider', profileNoStore, (_req, res) => res.json(identityRuntime.publicConfig));
+app.get('/api/auth/me', identityRuntime.currentAccount);
+
+app.post('/api/auth/login', identityRuntime.guardPasswordLogin, (req, res) => {
   const { email, password } = req.body || {};
   const loginIdentifier = normalizeLoginIdentifier(email);
 
@@ -433,7 +442,7 @@ app.get('/api/auth/profile', authenticateRequest, createOwnProfileHandler({
   readDirectory: () => readDirectoryDocument(RH001_DIRECTORY_PATH)
 }));
 registerHistoricalOwnAccountDiagnosticRoute(app, {
-  enabled: ownAccountDiagnosticEnabled,
+  enabled: ownAccountDiagnosticEnabled && identityRuntime.mode === 'legacy',
   verifyToken: parseToken,
   loadAccounts: createSanitizedOwnAccountLoader(getConfiguredUsers)
 });

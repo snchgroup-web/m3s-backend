@@ -254,7 +254,10 @@ function createBudgetAccountMiddleware({ getAccounts, defaultTenantId = '2sg' })
     });
     if (!account) return res.status(401).json({ success: false, code: 'BUDGET_UNAUTHENTICATED' });
     // Re-read Finance rights from the current account, not just the possibly older signed token.
-    req.user = { ...req.user, permissions: permissionsForAccount(account), financePermissionsExplicit: true };
+    const currentPermissions = permissionsForAccount(account);
+    req.user = { ...req.user, permissions: req.user.authProvider === 'google'
+      ? currentPermissions.filter(permission => req.user.permissions.includes(permission)) : currentPermissions,
+    financePermissionsExplicit: true };
     return next();
   };
 }
