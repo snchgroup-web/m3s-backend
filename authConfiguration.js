@@ -214,9 +214,25 @@ function normalizeLoginIdentifier(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
-function findUniqueLoginAccount(accounts = [], value) {
+function findUniqueLoginAccount(accounts = [], value,
+  { singleAccountLoginEmail, singleAccountSourceEmailSha256 } = {}) {
   const loginIdentifier = normalizeLoginIdentifier(value);
   if (!loginIdentifier) return null;
+  if (singleAccountLoginEmail !== undefined && singleAccountLoginEmail !== '') {
+    if (typeof singleAccountLoginEmail !== 'string'
+      || singleAccountLoginEmail !== singleAccountLoginEmail.trim()
+      || singleAccountLoginEmail !== normalizeLoginIdentifier(singleAccountLoginEmail)
+      || singleAccountLoginEmail.length > 254
+      || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(singleAccountLoginEmail)
+      || typeof singleAccountSourceEmailSha256 !== 'string'
+      || !/^[a-f0-9]{64}$/.test(singleAccountSourceEmailSha256)) return null;
+    const active = accounts.filter(account => account?.active !== false
+      && normalizeLoginIdentifier(account.email));
+    if (active.length !== 1 || loginIdentifier !== singleAccountLoginEmail) return null;
+    const sourceDigest = crypto.createHash('sha256')
+      .update(normalizeLoginIdentifier(active[0].email)).digest('hex');
+    return sourceDigest === singleAccountSourceEmailSha256 ? active[0] : null;
+  }
   const matches = accounts.filter(account => account?.active !== false
     && normalizeLoginIdentifier(account.email) === loginIdentifier);
   return matches.length === 1 ? matches[0] : null;

@@ -132,6 +132,17 @@ M3S_AUTH_USERS_JSON=[{"email":"admin@example.com","name":"Admin","role":"Adminis
 
 En production Railway, définir ces variables dans le tableau de bord Railway, pas dans GitHub.
 
+Pour une transition d'adresse sur une installation ayant exactement un compte actif, la variable
+non secrete `M3S_AUTH_SINGLE_ACCOUNT_LOGIN_EMAIL` accepte une adresse e-mail canonique en
+minuscules. Elle doit etre accompagnee de `M3S_AUTH_SINGLE_ACCOUNT_SOURCE_EMAIL_SHA256`,
+l'empreinte SHA-256 hexadecimale de l'ancienne adresse normalisee (minuscules, sans espaces).
+Une fois ces deux valeurs definies, seule la nouvelle adresse permet la connexion au compte existant ;
+l'ancienne adresse est refusee. Le mot de passe, l'identite interne, les droits et le JSON
+du compte ne changent pas. Si plusieurs comptes deviennent actifs ou si l'adresse configuree
+est invalide ou si l'empreinte ne correspond plus, la connexion est refusee. Retirer les deux
+variables restaure l'ancien
+identifiant. Cette transition ne configure ni Firebase, ni recuperation de mot de passe, ni MFA.
+
 `GOOGLE_CREDENTIALS` peut contenir le JSON complet du service account Google, ou ce même JSON encodé en base64. En local, si cette variable est absente, le backend utilise `config/credentials.json`.
 
 Quand `API_REQUIRE_AUTH=true`, tous les endpoints `/api/*` demandent un token `Authorization: Bearer ...`, sauf `/api/auth/login`, `/api/health` et `/api/info`.
