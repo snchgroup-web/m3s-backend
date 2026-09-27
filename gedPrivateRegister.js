@@ -1,7 +1,7 @@
 const { randomUUID } = require('node:crypto');
 const { HASH, fail } = require('./gedPrivatePolicy');
 
-function createRegister(pool) {
+function createRegister(pool, { lifecyclePolicy } = {}) {
   if (typeof pool?.connect !== 'function') fail('GED_REGISTER_UNAVAILABLE');
   async function transaction(scope, work) {
     if (!scope || !HASH.test(scope.tenant) || !HASH.test(scope.owner)) fail('GED_ACCESS_DENIED');
@@ -13,10 +13,12 @@ function createRegister(pool) {
       const result = await work(client);
       await client.query('COMMIT');
       return result;
-    } catch {
+    } catch (error) {
       if (client) {
         try { await client.query('ROLLBACK'); } catch { broken = true; }
       }
+      if (['GED_VERSION_CONFLICT','GED_INVALID_COMMAND','GED_INVALID_TITLE','GED_DOCUMENT_TRASHED','GED_DOCUMENT_NOT_TRASHED',
+        'GED_REVISION_LIMIT','GED_VERSION_NOT_APPROVED','GED_VERSION_ALREADY_LINKED','GED_VERSION_NOT_ROOT','GED_NOT_FOUND','GED_DOCUMENT_NOT_APPROVED'].includes(error?.code)) throw error;
       fail('GED_REGISTER_UNAVAILABLE');
     } finally { client?.release(broken); }
   }
@@ -37,6 +39,7 @@ function createRegister(pool) {
   [randomUUID(), scope.tenant, scope.owner, id, action]);
 
   return Object.freeze({
+    lifecycle: lifecyclePolicy ? require('./gedLifecycle').createLifecycle({ transaction, read, policy: lifecyclePolicy }) : null,
     list: scope => transaction(scope, async client => {
       const { rows } = await client.query(`SELECT tenant, owner_id, document_id, filename, byte_size, generation, created_at
         FROM ged_private.documents WHERE tenant=$1 AND owner_id=$2 ORDER BY created_at, document_id LIMIT 100`, [scope.tenant, scope.owner]);
