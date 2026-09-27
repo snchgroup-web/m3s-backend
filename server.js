@@ -50,6 +50,7 @@ const {
   nonSocialIncomePredicate,
 } = require('./financeDataScope');
 const { resolveFinanceSources } = require('./financeSources');
+const { supportsExpenseAmounts, expenseQueryParams, fields: expenseAmountFields, sourceAmountSelect, maskIncompleteExpenseTotals } = require('./financeExpenseStorage');
 const {
   buildSupplierCountQuery,
   normalizeSupplierCount
@@ -168,6 +169,7 @@ let financeSources = {
   location: DATASET_LOCATION,
   resolved: false
 };
+let expenseAmountsReady = false;
 const financeTableRef = sourceKey => (
   `\`${PROJECT_ID}.${DATASET_ID}.${financeSources[sourceKey]}\``
 );
@@ -819,7 +821,9 @@ app.get('/api/finance/expenses', requireFinanceRead, requireResolvedFinanceSourc
         CHF as montant_chf,
         CFA as montant_cfa,
         SAFE_DIVIDE(CFA, NULLIF(CHF, 0)) as taux_fx,
-        'CHF' as devise_origine,
+        ${expenseAmountsReady ? "COALESCE(ORIGINAL_CURRENCY, 'CHF')" : "'CHF'"} as devise_origine,
+        ${expenseAmountsReady ? 'COALESCE(CAST(TOTAL_PAID AS FLOAT64), CHF)' : 'CHF'} as montant_origine,
+        ${expenseAmountsReady ? sourceAmountSelect : 'NULL AS amount_contract_version, NULL AS source_amounts'},
         PAIEMENT as type,
         \`RUBRIQUE DEP\` as category,
         DATE as date_created,
@@ -851,6 +855,7 @@ app.get('/api/finance/expenses', requireFinanceRead, requireResolvedFinanceSourc
 
     res.json({
       success: true,
+      capabilities: { expense_amount_contract: expenseAmountsReady ? 2 : 1 },
       data: rows,
       count: rows.length,
       timestamp: new Date().toISOString()
@@ -1101,15 +1106,17 @@ const applyTeamAgentContract = async (row) => {
 };
 app.post('/api/finance/expenses', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
+    if (req.body.amount_contract_version === 2 && !expenseAmountsReady) throw new Error('Expense source amounts unavailable');
     const normalizedRow = normalizeFinanceTransaction(req.body, `DEP-APP-${Date.now()}`, 'expense');
     const { row, warnings } = await applyTeamAgentContract(normalizedRow);
+    const extended = row.amount_contract_version === 2;
     await bigquery.query({
       query: `INSERT INTO ${financeTableRef('expenses')}
         (\`Nr REF\`, DATE, DESIGNATION, CHF, CFA, PAIEMENT, \`POSTE  \`, \`OPERATION \`,
-         \`RUBRIQUE DEP\`, BU, DEPARTEMENT, TEAM, PHASE, \` AGENT\`, FOURNISSEUR, PAYS, COMMENTAIRES)
+         \`RUBRIQUE DEP\`, BU, DEPARTEMENT, TEAM, PHASE, \` AGENT\`, FOURNISSEUR, PAYS, COMMENTAIRES${extended ? ', ' + Object.keys(expenseAmountFields).join(', ') : ''})
         VALUES (@id,@date,@description,@montant_chf,@montant_cfa,@type,'','',@categorie,
-                '',@departement,@team,@phase_projet,@agent,@fournisseur,@pays,@commentaire)`,
-      params: row, location: financeSources.location || DATASET_LOCATION
+                '',@departement,@team,@phase_projet,@agent,@fournisseur,@pays,@commentaire${extended ? ', ' + Object.values(expenseAmountFields).map(name => '@' + name).join(', ') : ''})`,
+      ...(extended ? expenseQueryParams(row) : { params: row }), location: financeSources.location || DATASET_LOCATION
     });
     res.status(201).json({ success: true, data: row, warnings });
   } catch (error) {
@@ -1120,16 +1127,23 @@ app.post('/api/finance/expenses', requireFinanceWrite, requireResolvedFinanceSou
 
 app.put('/api/finance/expenses/:id', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
+    if (req.body.amount_contract_version === 2 && !expenseAmountsReady) throw new Error('Expense source amounts unavailable');
     const normalizedRow = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'expense');
     const { row, warnings } = await applyTeamAgentContract(normalizedRow);
-    await bigquery.query({
+    const extended = row.amount_contract_version === 2;
+    const [job] = await bigquery.createQueryJob({
       query: `UPDATE ${financeTableRef('expenses')}
         SET DATE=@date, DESIGNATION=@description, CHF=@montant_chf, CFA=@montant_cfa,
             PAIEMENT=@type, \`RUBRIQUE DEP\`=@categorie, DEPARTEMENT=@departement, TEAM=@team,
             PHASE=@phase_projet, \` AGENT\`=@agent, FOURNISSEUR=@fournisseur,
-            PAYS=@pays, COMMENTAIRES=@commentaire WHERE \`Nr REF\`=@id`,
-      params: row, location: financeSources.location || DATASET_LOCATION
+            PAYS=@pays, COMMENTAIRES=@commentaire
+            ${extended ? ', ' + Object.entries(expenseAmountFields).map(([column, param]) => column + '=@' + param).join(', ') : ''}
+            WHERE \`Nr REF\`=@id ${expenseAmountsReady ? (extended ? 'AND AMOUNT_CONTRACT_VERSION = 2' : 'AND AMOUNT_CONTRACT_VERSION IS NULL') : ''}`,
+      ...(extended ? expenseQueryParams(row) : { params: row }), location: financeSources.location || DATASET_LOCATION
     });
+    await job.getQueryResults();
+    const [metadata] = await job.getMetadata();
+    if (Number(metadata?.statistics?.query?.numDmlAffectedRows) !== 1) throw new Error('Expense update not confirmed; reload the register');
     res.json({ success: true, data: row, warnings });
   } catch (error) {
     console.error('Update Expense Error:', error.message);
@@ -1404,7 +1418,9 @@ app.get('/api/finance/dashboard', requireFinanceRead, requireResolvedFinanceSour
         (SELECT SUM(MONTANT_CFA) FROM ${financeTableRef('income')} WHERE ${nonSocialIncomeWhere}) as total_income_cfa,
         (SELECT COUNT(*) FROM ${financeTableRef('expenses')}) as total_expense_count,
         (SELECT SUM(CHF) FROM ${financeTableRef('expenses')}) as total_expenses,
-        (SELECT SUM(CFA) FROM ${financeTableRef('expenses')}) as total_expenses_cfa
+        (SELECT SUM(CFA) FROM ${financeTableRef('expenses')}) as total_expenses_cfa,
+        (SELECT COUNTIF(CHF IS NULL) FROM ${financeTableRef('expenses')}) as expenses_missing_chf,
+        (SELECT COUNTIF(CFA IS NULL) FROM ${financeTableRef('expenses')}) as expenses_missing_cfa
     `;
 
     const options = financeQueryOptions(query);
@@ -1412,7 +1428,7 @@ app.get('/api/finance/dashboard', requireFinanceRead, requireResolvedFinanceSour
 
     res.json({
       success: true,
-      data: rows[0] || {},
+      data: maskIncompleteExpenseTotals(rows[0] || {}),
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -2180,6 +2196,8 @@ const startServer = async () => {
       ...resolvedSources,
       resolved: true
     };
+    const [expenseMetadata] = await bigquery.dataset(DATASET_ID).table(financeSources.expenses).getMetadata();
+    expenseAmountsReady = supportsExpenseAmounts(expenseMetadata.schema?.fields || []);
     console.log(
       `Finance sources ready: income=${financeSources.income}, expenses=${financeSources.expenses}, location=${financeSources.location || DATASET_LOCATION}`
     );

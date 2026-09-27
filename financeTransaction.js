@@ -1,9 +1,18 @@
+const { expenseAmountParams } = require('./financeExpenseStorage');
 const numberOrZero = (value) => {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const normalizeFinanceTransaction = (body, id, kind) => {
+  if (body.amount_contract_version !== undefined || body.source_amounts !== undefined) {
+    if (kind !== 'expense' || body.amount_contract_version !== 2) throw new Error('Unsupported expense amount contract');
+    const amounts = expenseAmountParams(body);
+    const metadata = normalizeFinanceTransaction({ ...body, amount_contract_version: undefined,
+      source_amounts: undefined, devise_origine: 'CHF', montant_origine: 1,
+      montant_chf: 1, montant_cfa: 1, taux_fx_applique: 1 }, id, kind);
+    return { ...metadata, ...amounts };
+  }
   const date = String(body.date || body.date_created || '').slice(0, 10);
   const description = String(body.description || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !description) {
