@@ -385,7 +385,16 @@ const verifyPassword = (account, password) => {
 
 const identityRuntime = createIdentityRuntime({ env: process.env, getAccounts: getConfiguredUsers,
   credentials: googleCredentials, authenticateLegacy });
-app.use(GED_PREFIX, createGedRuntime({ env: process.env, identityRuntime, credentials: googleCredentials }));
+app.use(GED_PREFIX, createGedRuntime({ env: process.env, identityRuntime, credentials: googleCredentials,
+  financeRead: createFinanceAuthorizationMiddleware(FINANCE_PERMISSIONS.READ),
+  resolveExpense: async id => {
+    if (typeof id !== 'string' || !id.trim() || id.length > 128 || !financeSources.resolved) return null;
+    const table = financeTableRef('expenses');
+    const [rows] = await bigquery.query({ query: `SELECT \`Nr REF\` AS id FROM ${table} WHERE \`Nr REF\`=@id LIMIT 2`,
+      params: { id }, location: financeSources.location || DATASET_LOCATION });
+    return rows.length === 1 ? { id: rows[0].id, source: table.replace(/`/g, '') } : null;
+  }
+}));
 app.get('/api/auth/provider', profileNoStore, (_req, res) => res.json(identityRuntime.publicConfig));
 app.get('/api/auth/me', identityRuntime.currentAccount);
 

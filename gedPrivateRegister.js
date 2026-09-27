@@ -40,6 +40,15 @@ function createRegister(pool, { lifecyclePolicy, maxBytes = MAX_BYTES } = {}) {
   [randomUUID(), scope.tenant, scope.owner, id, action]);
 
   return Object.freeze({
+    expenseLinks: (scope, source, id) => transaction(scope, async client => {
+      if (typeof source !== 'string' || !source || source.length > 256 || typeof id !== 'string' || !id || id.length > 128) fail('GED_NOT_FOUND');
+      return (await client.query(`SELECT * FROM (
+        SELECT DISTINCT ON (document_id) document_id, document_version_id, revision, action, document_role, external_reference
+        FROM ged_private.expense_document_links
+        WHERE tenant=$1 AND owner_id=$2 AND expense_source=$3 AND expense_id=$4
+        ORDER BY document_id, revision DESC
+      ) latest WHERE action='attach' ORDER BY document_id LIMIT 100`, [scope.tenant, scope.owner, source, id])).rows;
+    }),
     lifecycle: lifecyclePolicy ? require('./gedLifecycle').createLifecycle({ transaction, read, policy: lifecyclePolicy }) : null,
     list: scope => transaction(scope, async client => {
       const { rows } = await client.query(`SELECT tenant, owner_id, document_id, filename, byte_size, generation, created_at

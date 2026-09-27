@@ -13,7 +13,7 @@ const objectKey = (scope, id) => `ged-private/v1/${scope.tenant}/${scope.owner}/
 const reference = (scope, row) => ({ key: objectKey(scope, row.document_id), generation: row.generation,
   size: row.byte_size, sha256: row.document_id });
 
-function createGedRouter({ policy, authenticate, getServices, origins = ['https://seneswiss-group.com'] }) {
+function createGedRouter({ policy, authenticate, getServices, financeRead, resolveExpense, origins = ['https://seneswiss-group.com'] }) {
   const router = express.Router();
   router.use((_req, res, next) => {
     res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
@@ -43,6 +43,44 @@ function createGedRouter({ policy, authenticate, getServices, origins = ['https:
     next();
   });
   const handle = fn => async (req, res, next) => { try { await fn(req, res); } catch (error) { next(error); } };
+  async function linkedDocuments(req) {
+    const expense = await resolveExpense(req.params.expenseId);
+    if (!expense) fail('GED_NOT_FOUND');
+    const { register } = await getServices();
+    if (!register.lifecycle) fail('GED_LIFECYCLE_NOT_ENABLED');
+    const links = await register.expenseLinks(req.gedScope, expense.source, expense.id);
+    const roots = await register.lifecycle.list(req.gedScope);
+    const result = [];
+    for (const link of links) {
+      const root = roots.find(row => row.root_id === link.document_id);
+      if (!root || root.trashed || categoryFor(approvedDocument(policy, root.root_id)) !== 'finance') continue;
+      if (categoryFor(approvedDocument(policy, link.document_version_id)) !== 'finance') continue;
+      const history = await register.lifecycle.history(req.gedScope, root.root_id);
+      if (!history.some(event => event.current_document_id === link.document_version_id)) continue;
+      const row = await register.read(req.gedScope, link.document_version_id);
+      if (row) result.push({ ...publicRecord(row, policy), rootId: root.root_id,
+        documentRole: link.document_role, externalReference: link.external_reference, linkRevision: link.revision });
+    }
+    return result;
+  }
+  if (financeRead && resolveExpense) {
+    router.get('/expenses/:expenseId/documents', financeRead, handle(async (req, res) => {
+      res.json({ success: true, documents: await linkedDocuments(req) });
+    }));
+    router.get('/expenses/:expenseId/documents/:id/content', financeRead, handle(async (req, res) => {
+      const linked = (await linkedDocuments(req)).find(row => row.id === req.params.id);
+      if (!linked) fail('GED_NOT_FOUND');
+      const { register, storage } = await getServices();
+      const row = await register.read(req.gedScope, linked.id);
+      const bytes = await storage.get(reference(req.gedScope, row));
+      await register.auditDownload(req.gedScope, linked.id);
+      const entry = approvedDocument(policy, linked.id);
+      res.set({ 'Content-Type': contentTypeFor(entry), 'Content-Length': String(bytes.length),
+        'Content-Disposition': `attachment; filename="document.${extensionFor(entry)}"; filename*=UTF-8''${encodeURIComponent(row.filename).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`,
+        'Content-Security-Policy': "default-src 'none'; sandbox" });
+      res.send(bytes);
+    }));
+  }
   router.get('/documents', handle(async (req, res) => {
     const { register } = await getServices();
     const rows = await (register.lifecycle ? register.lifecycle.list(req.gedScope) : register.list(req.gedScope));
@@ -149,7 +187,7 @@ async function assertDatabaseAccess(pool, lifecycleEnabled = false) {
   }
 }
 
-function createGedRuntime({ env, identityRuntime, credentials, dependencies = {} }) {
+function createGedRuntime({ env, identityRuntime, credentials, financeRead, resolveExpense, dependencies = {} }) {
   let policy;
   try { policy = readPolicy(env); } catch { policy = null; }
   let ready;
@@ -178,7 +216,7 @@ function createGedRuntime({ env, identityRuntime, credentials, dependencies = {}
     if (!ready) ready = initialize().catch(error => { ready = null; throw error; });
     return ready;
   };
-  return createGedRouter({ policy, authenticate: identityRuntime.authenticate, getServices });
+  return createGedRouter({ policy, authenticate: identityRuntime.authenticate, getServices, financeRead, resolveExpense });
 }
 
 module.exports = { PREFIX, isPrivateGedRoute, createGedRouter, createGedRuntime, databaseOptions, assertDatabaseAccess };
