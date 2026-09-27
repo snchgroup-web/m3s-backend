@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   BOUSSOLE_ARTIFACT_PATH,
@@ -89,4 +90,44 @@ test('the HTTP route always requires authentication and forbids caching', () => 
     server,
     /app\.get\('\/api\/boussole\/latest\/html', authenticateRequest, createBoussoleArtifactHandler\(\)\)/
   );
+});
+
+test('mobile navigation stays sticky without changing desktop or print navigation', async () => {
+  const content = await loadBoussoleArtifact();
+  const css = content.match(/<style id="mobile-navigation">([\s\S]*?)<\/style>/)[1];
+  assert.match(css, /@media screen and \(max-width:700px\)/);
+  assert.match(css, /aside\{position:sticky;top:0;bottom:auto;z-index:5;overflow:visible/);
+  assert.match(content, /applyTheme\(\);search\(\);revealActiveNavigation\(\);/);
+});
+
+test('active mobile tab is centred horizontally on render or resize without scrolling the page', async () => {
+  const content = await loadBoussoleArtifact();
+  const script = content.match(/<script id="mobile-navigation-script">([\s\S]*?)<\/script>/)[1];
+  let mobile = true;
+  let active = { getBoundingClientRect: () => ({ left: 1100, width: 180 }) };
+  const moves = [];
+  const listeners = {};
+  const nav = {
+    clientWidth: 340, scrollLeft: 0,
+    getBoundingClientRect: () => ({ left: 16 }),
+    querySelector: selector => { assert.equal(selector, '[aria-current="page"]'); return active; },
+    scrollTo: options => moves.push(options.left)
+  };
+  const context = vm.createContext({
+    window: { matchMedia: () => ({ matches: mobile }), addEventListener: (name, fn) => { listeners[name] = fn; } },
+    document: { getElementById: id => { assert.equal(id, 'nav'); return nav; } }
+  });
+  vm.runInContext(script, context);
+  context.revealActiveNavigation();
+  assert.deepEqual(moves, [1004]);
+  nav.scrollLeft = 1004;
+  active = { getBoundingClientRect: () => ({ left: 96, width: 180 }) };
+  listeners.resize();
+  assert.deepEqual(moves, [1004, 1004]);
+  mobile = false;
+  listeners.resize();
+  active = null;
+  mobile = true;
+  context.revealActiveNavigation();
+  assert.equal(moves.length, 2);
 });

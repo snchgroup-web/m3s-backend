@@ -42,7 +42,32 @@ for (const lang of ['FR', 'DE', 'EN']) {
 markdown += '\n---\n# Archive V3.1 - 13-09-2026\n\n';
 const exportStart = 'new Blob(["# 2SG / M3S';
 if (!source.includes(exportStart)) throw new Error('Missing export marker');
+// Keep the archived template unchanged; apply navigation fixes to the live artifact.
+const mobileNavigation = `
+<style id="mobile-navigation">
+@media screen and (max-width:700px){
+  aside{position:sticky;top:0;bottom:auto;z-index:5;overflow:visible;padding:10px 16px}
+  .brand{margin-bottom:8px}
+  .nav{scroll-padding-inline:8px}
+}
+</style>
+<script id="mobile-navigation-script">
+function revealActiveNavigation(){
+  if(!window.matchMedia('(max-width:700px)').matches)return;
+  const nav=document.getElementById('nav');
+  const active=nav&&nav.querySelector('[aria-current="page"]');
+  if(!active)return;
+  const bounds=nav.getBoundingClientRect(),item=active.getBoundingClientRect();
+  nav.scrollTo({left:nav.scrollLeft+item.left-bounds.left-(nav.clientWidth-item.width)/2,behavior:'instant'});
+}
+window.addEventListener('resize',revealActiveNavigation);
+</script>
+`;
+const renderEnd = 'applyTheme();search();}';
+if (!source.includes(renderEnd)) throw new Error('Missing navigation render marker');
 const html = source.replace(pattern, (_all, start, _json, end) => start + JSON.stringify(data).replace(/</g, '\\u003c') + end)
+  .replace('</head>', mobileNavigation + '</head>')
+  .replace(renderEnd, 'applyTheme();search();revealActiveNavigation();}')
   .replace('datetime="2026-09-13"', `datetime="${date}"`)
   .replace('2SG / M3S · V3.1 · 2026-09-13', `2SG / M3S · V3.3 · ${date}`)
   .replace(exportStart, () => 'new Blob([' + JSON.stringify(markdown) + ' + "# 2SG / M3S')
