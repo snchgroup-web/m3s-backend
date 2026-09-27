@@ -6,7 +6,8 @@ const isPrivateGedRoute = path => path.toLowerCase() === PREFIX || path.toLowerC
 const publicRecord = (row, policy) => {
   const entry = approvedDocument(policy, row.document_id);
   return { id: row.document_id, name: row.filename, size: row.byte_size, createdAt: row.created_at,
-    category: categoryFor(entry), contentType: contentTypeFor(entry) };
+    category: categoryFor(entry), contentType: contentTypeFor(entry), ...(row.root_id ? {
+      rootId: row.root_id, title: row.title, revision: row.revision, trashed: row.trashed, lifecycle: true } : {}) };
 };
 const objectKey = (scope, id) => `ged-private/v1/${scope.tenant}/${scope.owner}/${id}`;
 const reference = (scope, row) => ({ key: objectKey(scope, row.document_id), generation: row.generation,
@@ -44,9 +45,28 @@ function createGedRouter({ policy, authenticate, getServices, origins = ['https:
   const handle = fn => async (req, res, next) => { try { await fn(req, res); } catch (error) { next(error); } };
   router.get('/documents', handle(async (req, res) => {
     const { register } = await getServices();
-    const rows = await register.list(req.gedScope);
+    const rows = await (register.lifecycle ? register.lifecycle.list(req.gedScope) : register.list(req.gedScope));
     res.json({ success: true, documents: rows.map(row => publicRecord(row, policy)),
       approved: policy.documents.map(item => ({ ...item, category: categoryFor(item), contentType: contentTypeFor(item) })) });
+  }));
+  router.get('/documents/:id/history', handle(async (req, res) => {
+    const { register } = await getServices();
+    if (!register.lifecycle) fail('GED_LIFECYCLE_NOT_ENABLED');
+    const events = await register.lifecycle.history(req.gedScope, req.params.id);
+    res.json({ success: true, history: events.map(event => ({ revision: event.revision, action: event.action,
+      title: event.title, trashed: event.trashed, createdAt: event.created_at, document: publicRecord(event.row, policy) })) });
+  }));
+  router.post('/documents/:id/actions', express.json({ limit: 2048, strict: true }), handle(async (req, res) => {
+    const { register, storage } = await getServices();
+    if (!register.lifecycle) fail('GED_LIFECYCLE_NOT_ENABLED');
+    if (req.body?.action === 'version') {
+      approvedDocument(policy, req.body.versionId);
+      const row = await register.read(req.gedScope, req.body.versionId);
+      if (!row) fail('GED_NOT_FOUND');
+      await storage.get(reference(req.gedScope, row));
+    }
+    const row = await register.lifecycle.mutate(req.gedScope, req.params.id, req.body);
+    res.json({ success: true, document: publicRecord(row, policy) });
   }));
   router.post('/documents/:id', (req, res, next) => {
     let entry;
@@ -78,6 +98,10 @@ function createGedRouter({ policy, authenticate, getServices, origins = ['https:
     res.send(bytes);
   }));
   router.use((error, _req, res, _next) => {
+    const lifecycleStatus = { GED_VERSION_CONFLICT: 409, GED_INVALID_COMMAND: 400, GED_INVALID_TITLE: 400,
+      GED_DOCUMENT_TRASHED: 409, GED_DOCUMENT_NOT_TRASHED: 409, GED_REVISION_LIMIT: 409, GED_VERSION_NOT_APPROVED: 400,
+      GED_VERSION_ALREADY_LINKED: 409, GED_VERSION_NOT_ROOT: 409, GED_NOT_FOUND: 404, GED_LIFECYCLE_NOT_ENABLED: 503 }[error?.code];
+    if (lifecycleStatus) return res.status(lifecycleStatus).json({ success: false, code: error.code });
     const status = error?.type === 'entity.too.large' ? 413 : error?.code === 'GED_DOCUMENT_NOT_APPROVED' ? 400 : 503;
     res.status(status).json({ success: false, code: status === 413 ? 'GED_TOO_LARGE' : status === 400 ? 'GED_DOCUMENT_NOT_APPROVED' : 'GED_UNAVAILABLE' });
   });
@@ -93,7 +117,7 @@ function databaseOptions(env) {
     query_timeout: 12000, idle_in_transaction_session_timeout: 15000, application_name: 'm3s-ged-private' };
 }
 
-async function assertDatabaseAccess(pool) {
+async function assertDatabaseAccess(pool, lifecycleEnabled = false) {
   const { rows } = await pool.query(`SELECT current_user AS role, rolsuper, rolcreatedb, rolcreaterole, rolreplication,
     rolbypassrls, rolinherit, (SELECT count(*)::int FROM pg_auth_members WHERE member = r.oid) AS memberships
     FROM pg_roles r WHERE rolname = current_user`);
@@ -112,6 +136,17 @@ async function assertDatabaseAccess(pool) {
       rights.rows.some(row => row.relrowsecurity !== true || row.relforcerowsecurity !== true || row.owns_table !== false ||
         row.can_insert !== true || row.can_mutate !== false || row.can_create !== false ||
         (row.relname === 'documents' && row.can_read !== true))) fail('GED_DATABASE_ROLE_DENIED');
+  if (lifecycleEnabled) {
+    const result = await pool.query(`SELECT relrowsecurity, relforcerowsecurity,
+      relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user) AS owns_table,
+      has_table_privilege(current_user, oid, 'SELECT') AS can_read,
+      has_table_privilege(current_user, oid, 'INSERT') AS can_insert,
+      has_table_privilege(current_user, oid, 'UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS can_mutate
+      FROM pg_class WHERE oid=to_regclass('ged_private.revisions')`);
+    const r = result.rows[0];
+    if (result.rows.length !== 1 || r.relrowsecurity !== true || r.relforcerowsecurity !== true || r.owns_table !== false ||
+      r.can_read !== true || r.can_insert !== true || r.can_mutate !== false) fail('GED_DATABASE_ROLE_DENIED');
+  }
 }
 
 function createGedRuntime({ env, identityRuntime, credentials, dependencies = {} }) {
@@ -124,7 +159,8 @@ function createGedRuntime({ env, identityRuntime, credentials, dependencies = {}
       const { Pool } = dependencies.pg || require('pg');
       pool = new Pool(databaseOptions(env));
       pool.on('error', () => {}); // Never emit provider errors containing connection details.
-      await assertDatabaseAccess(pool);
+      const lifecycleEnabled = env.M3S_GED_LIFECYCLE_ENABLED === 'true';
+      await assertDatabaseAccess(pool, lifecycleEnabled);
       const { createPrivateObjectStore } = await import('./gedPrivateStorage.mjs');
       if (credentials?.client_email !== 'm3s-backend@mon-projet-data-2sg.iam.gserviceaccount.com' || !credentials.private_key) fail('GED_STORAGE_IDENTITY_DENIED');
       const { Storage } = dependencies.storage || require('@google-cloud/storage');
@@ -132,7 +168,7 @@ function createGedRuntime({ env, identityRuntime, credentials, dependencies = {}
         retryOptions: { autoRetry: false, maxRetries: 0, totalTimeout: 15 } }).bucket('m3s-ged-prive-mon-projet-data-2sg');
       const storage = createPrivateObjectStore({ enabled: true, bucket, target: {
         bucketName: 'm3s-ged-prive-mon-projet-data-2sg', projectNumber: '39747051341', location: 'EUROPE-WEST6', maxBytes: MAX_BYTES } });
-      return { register: createRegister(pool), storage };
+      return { register: createRegister(pool, { lifecyclePolicy: lifecycleEnabled ? policy : undefined }), storage };
     } catch {
       if (pool) await pool.end().catch(() => {});
       fail('GED_UNAVAILABLE');
