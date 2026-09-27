@@ -52,7 +52,7 @@ async function main() {
       retryOptions: { autoRetry: false, maxRetries: 0, totalTimeout: 15 } }).bucket('m3s-ged-prive-mon-projet-data-2sg');
     const { createPrivateObjectStore } = await import('../gedPrivateStorage.mjs');
     const storage = createPrivateObjectStore({ enabled: true, bucket, target: { bucketName: bucket.name,
-      projectNumber: '39747051341', location: 'EUROPE-WEST6', maxBytes: MAX_BYTES } });
+      projectNumber: '39747051341', location: 'EUROPE-WEST6', maxBytes: policy.maxBytes || MAX_BYTES } });
     const result = await registerApprovedBatch({ policy, storage, register: createRegister(pool), confirmed: true,
       readReference: async key => {
         const [m] = await bucket.file(key).getMetadata();
