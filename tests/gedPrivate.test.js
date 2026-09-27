@@ -85,6 +85,25 @@ test('DB options pin private hostname and restricted login and enforce certifica
   assert.equal(config.max, 3);
 });
 
+test('opt-in scan HTTP roundtrip supports >1 MiB, exact MIME and private attachment', async t => {
+  const f = fixture();
+  f.bytes = Buffer.alloc(2 * 1024 * 1024);
+  Buffer.from([255, 216, 255]).copy(f.bytes);
+  Buffer.from([255, 217]).copy(f.bytes, f.bytes.length - 2);
+  f.entry = { name: 'Synthetic scan.jpg', size: f.bytes.length, sha256: digest(f.bytes), category: 'finance' };
+  f.policy = readPolicy({ ...f.env, M3S_GED_IMPORT_PROFILE: 'scans-v2', M3S_GED_IMPORT_MANIFEST_JSON: JSON.stringify([f.entry]) });
+  const app = await setup(t, { fixture: f });
+  assert.equal((await app.upload()).status, 201);
+  assert.equal((await app.upload()).status, 200);
+  const res = await fetch(`${app.base}/${f.entry.sha256}/content`, { headers: app.headers });
+  assert.equal(res.headers.get('content-type'), 'image/jpeg');
+  assert.match(res.headers.get('content-disposition'), /attachment; filename="document.jpg"/);
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  assert.deepEqual(Buffer.from(await res.arrayBuffer()), f.bytes);
+  assert.equal((await app.upload({ headers: { ...app.headers, 'content-type': 'text/html' } })).status, 415);
+  assert.equal((await app.upload({ body: Buffer.alloc(5 * 1024 * 1024 + 1) })).status, 413);
+});
+
 test('private route bypasses global body parsers, including case-insensitive Express paths', () => {
   for (const value of ['/api/ged/private', '/API/GED/PRIVATE/documents', '/api/ged/private/documents/abc']) assert.equal(isPrivateGedRoute(value), true);
   for (const value of ['/api/documents', '/api/ged/privately']) assert.equal(isPrivateGedRoute(value), false);

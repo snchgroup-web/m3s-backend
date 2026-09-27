@@ -1,5 +1,5 @@
 const express = require('express');
-const { MAX_BYTES, contentTypeFor, categoryFor, readPolicy, scopeFor, approvedDocument, fail } = require('./gedPrivatePolicy');
+const { MAX_BYTES, extensionFor, contentTypeFor, categoryFor, readPolicy, scopeFor, approvedDocument, fail } = require('./gedPrivatePolicy');
 const { createRegister } = require('./gedPrivateRegister');
 const PREFIX = '/api/ged/private';
 const isPrivateGedRoute = path => path.toLowerCase() === PREFIX || path.toLowerCase().startsWith(`${PREFIX}/`);
@@ -75,7 +75,7 @@ function createGedRouter({ policy, authenticate, getServices, origins = ['https:
       return res.status(415).json({ success: false, code: 'GED_FORMAT_REQUIRED' });
     }
     return next();
-  }, express.raw({ type: () => true, limit: MAX_BYTES, inflate: false }), handle(async (req, res) => {
+  }, express.raw({ type: () => true, limit: policy.maxBytes || MAX_BYTES, inflate: false }), handle(async (req, res) => {
     const entry = approvedDocument(policy, req.params.id, req.body);
     const { storage, register } = await getServices();
     const stored = await storage.putIfAbsent({ key: objectKey(req.gedScope, entry.sha256), bytes: req.body });
@@ -93,7 +93,7 @@ function createGedRouter({ policy, authenticate, getServices, origins = ['https:
     const bytes = await storage.get(reference(req.gedScope, row));
     await register.auditDownload(req.gedScope, row.document_id);
     res.set({ 'Content-Type': contentTypeFor(entry), 'Content-Length': String(bytes.length),
-      'Content-Disposition': `attachment; filename="document.${entry.name.endsWith('.docx') ? 'docx' : 'pdf'}"; filename*=UTF-8''${encodeURIComponent(row.filename).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`,
+      'Content-Disposition': `attachment; filename="document.${extensionFor(entry)}"; filename*=UTF-8''${encodeURIComponent(row.filename).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`,
       'Content-Security-Policy': "default-src 'none'; sandbox" });
     res.send(bytes);
   }));
@@ -167,7 +167,7 @@ function createGedRuntime({ env, identityRuntime, credentials, dependencies = {}
       const bucket = new Storage({ credentials, projectId: 'mon-projet-data-2sg', timeout: 10000,
         retryOptions: { autoRetry: false, maxRetries: 0, totalTimeout: 15 } }).bucket('m3s-ged-prive-mon-projet-data-2sg');
       const storage = createPrivateObjectStore({ enabled: true, bucket, target: {
-        bucketName: 'm3s-ged-prive-mon-projet-data-2sg', projectNumber: '39747051341', location: 'EUROPE-WEST6', maxBytes: MAX_BYTES } });
+        bucketName: 'm3s-ged-prive-mon-projet-data-2sg', projectNumber: '39747051341', location: 'EUROPE-WEST6', maxBytes: policy.maxBytes || MAX_BYTES } });
       return { register: createRegister(pool, { lifecyclePolicy: lifecycleEnabled ? policy : undefined }), storage };
     } catch {
       if (pool) await pool.end().catch(() => {});
