@@ -18,6 +18,9 @@ html[data-theme="deep"]{--page:#080d15;--white:#0c131f;--navy:#05080e;--ink:#f8f
 @media print{.sectiontop{display:block}.sectiontop .searchline{display:none!important}}
 </style>
 <style id="mobile-navigation">
+@media screen and (min-width:701px){
+  body>header{position:sticky;top:0;z-index:5}
+}
 @media screen and (max-width:700px){
   aside{position:sticky;top:0;bottom:auto;z-index:5;overflow:visible;padding:10px 16px}
   .brand{margin-bottom:8px}

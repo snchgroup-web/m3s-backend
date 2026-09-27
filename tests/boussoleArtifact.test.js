@@ -100,6 +100,12 @@ test('mobile navigation stays sticky without changing desktop or print navigatio
   assert.match(content, /applyTheme\(\);search\(\);revealActiveNavigation\(\);/);
 });
 
+test('desktop language and theme header remains sticky without overriding mobile or print', async () => {
+  const content = await loadBoussoleArtifact();
+  const css = content.match(/<style id="mobile-navigation">([\s\S]*?)<\/style>/)[1];
+  assert.match(css, /@media screen and \(min-width:701px\)\{\s*body>header\{position:sticky;top:0;z-index:5\}/);
+});
+
 test('active mobile tab is centred horizontally on render or resize without scrolling the page', async () => {
   const content = await loadBoussoleArtifact();
   const script = content.match(/<script id="mobile-navigation-script">([\s\S]*?)<\/script>/)[1];

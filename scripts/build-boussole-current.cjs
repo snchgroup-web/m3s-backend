@@ -45,6 +45,9 @@ if (!source.includes(exportStart)) throw new Error('Missing export marker');
 // Keep the archived template unchanged; apply navigation fixes to the live artifact.
 const mobileNavigation = `
 <style id="mobile-navigation">
+@media screen and (min-width:701px){
+  body>header{position:sticky;top:0;z-index:5}
+}
 @media screen and (max-width:700px){
   aside{position:sticky;top:0;bottom:auto;z-index:5;overflow:visible;padding:10px 16px}
   .brand{margin-bottom:8px}
