@@ -53,6 +53,29 @@ test('only exact approved PDF bytes are accepted', () => {
   assert.throws(() => approvedDocument(policy, '0'.repeat(64), bytes));
 });
 
+test('classified DOCX files require exact operator-approved bytes; no generic Word upload is enabled', async t => {
+  const f = fixture();
+  f.bytes = Buffer.concat([Buffer.from([0x50,0x4b,0x03,0x04]), Buffer.from('SYNTHETIC WORD FIXTURE')]);
+  f.entry = { name: 'Synthetic CV.docx', size: f.bytes.length, sha256: digest(f.bytes), category: 'personal' };
+  f.policy = readPolicy({ ...f.env, M3S_GED_IMPORT_MANIFEST_JSON: JSON.stringify([f.entry]) });
+  assert.deepEqual(approvedDocument(f.policy, f.entry.sha256, f.bytes), f.entry);
+  for (const patch of [{ category: 'public' }, { name: 'Synthetic.docm' }, { category: undefined }]) {
+    assert.throws(() => readPolicy({ ...f.env, M3S_GED_IMPORT_MANIFEST_JSON: JSON.stringify([{ ...f.entry, ...patch }]) }));
+  }
+  const app = await setup(t, { fixture: f });
+  const imported = await app.upload(); assert.equal(imported.status, 201);
+  assert.equal((await imported.json()).document.category, 'personal');
+  const retry = await app.upload(); assert.equal(retry.status, 200); assert.equal((await retry.json()).created, false);
+  const list = await (await fetch(app.base, { headers: app.headers })).json();
+  assert.equal(list.approved[0].category, 'personal');
+  const downloaded = await fetch(`${app.base}/${f.entry.sha256}/content`, { headers: app.headers });
+  assert.equal(downloaded.headers.get('content-type'), require('../gedPrivatePolicy').DOCX_MIME);
+  assert.match(downloaded.headers.get('content-disposition'), /attachment; filename="document.docx"/);
+  assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), f.bytes);
+  assert.equal((await app.upload({ body: Buffer.from('PK-wrong-file-content') })).status, 400);
+  assert.equal((await app.upload({ headers: { ...app.headers, 'content-type': 'application/pdf' } })).status, 415);
+});
+
 test('DB options pin private hostname and restricted login and enforce certificate validation', () => {
   assert.throws(() => databaseOptions({}));
   const config = databaseOptions({ M3S_GED_DB_PASSWORD: 'synthetic-only'.repeat(4),
@@ -68,7 +91,7 @@ test('private route bypasses global body parsers, including case-insensitive Exp
 });
 
 async function setup(t, overrides = {}) {
-  const f = fixture();
+  const f = overrides.fixture || fixture();
   const rows = new Map(); const objects = new Map();
   const counters = { services: 0, audits: 0, creates: 0 };
   const storage = {
@@ -107,7 +130,7 @@ async function setup(t, overrides = {}) {
   const base = `http://127.0.0.1:${server.address().port}/api/ged/private/documents`;
   const headers = { authorization: 'Bearer synthetic-test', origin: 'https://seneswiss-group.com' };
   const upload = (extra = {}) => fetch(`${base}/${f.entry.sha256}`, { method: 'POST',
-    headers: { ...headers, 'content-type': 'application/pdf' }, body: f.bytes, ...extra });
+    headers: { ...headers, 'content-type': require('../gedPrivatePolicy').contentTypeFor(f.entry) }, body: f.bytes, ...extra });
   return { ...f, app, register, storage, rows, objects, counters, base, headers, upload };
 }
 
@@ -115,7 +138,7 @@ test('HTTP import, list, retry and private attachment roundtrip', async t => {
   const f = await setup(t);
   let response = await f.upload(); assert.equal(response.status, 201);
   const imported = await response.json(); assert.equal(imported.created, true);
-  assert.deepEqual(Object.keys(imported.document).sort(), ['createdAt', 'id', 'name', 'size']);
+  assert.deepEqual(Object.keys(imported.document).sort(), ['category', 'contentType', 'createdAt', 'id', 'name', 'size']);
   response = await f.upload(); assert.equal(response.status, 200); assert.equal((await response.json()).created, false);
   assert.equal(f.counters.creates, 1); assert.equal(f.objects.size, 1);
   response = await fetch(f.base, { headers: f.headers }); assert.equal((await response.json()).documents.length, 1);

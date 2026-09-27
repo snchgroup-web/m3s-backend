@@ -1,9 +1,13 @@
 const express = require('express');
-const { MAX_BYTES, readPolicy, scopeFor, approvedDocument, fail } = require('./gedPrivatePolicy');
+const { MAX_BYTES, contentTypeFor, categoryFor, readPolicy, scopeFor, approvedDocument, fail } = require('./gedPrivatePolicy');
 const { createRegister } = require('./gedPrivateRegister');
 const PREFIX = '/api/ged/private';
 const isPrivateGedRoute = path => path.toLowerCase() === PREFIX || path.toLowerCase().startsWith(`${PREFIX}/`);
-const publicRecord = row => ({ id: row.document_id, name: row.filename, size: row.byte_size, createdAt: row.created_at });
+const publicRecord = (row, policy) => {
+  const entry = approvedDocument(policy, row.document_id);
+  return { id: row.document_id, name: row.filename, size: row.byte_size, createdAt: row.created_at,
+    category: categoryFor(entry), contentType: contentTypeFor(entry) };
+};
 const objectKey = (scope, id) => `ged-private/v1/${scope.tenant}/${scope.owner}/${id}`;
 const reference = (scope, row) => ({ key: objectKey(scope, row.document_id), generation: row.generation,
   size: row.byte_size, sha256: row.document_id });
@@ -41,15 +45,17 @@ function createGedRouter({ policy, authenticate, getServices, origins = ['https:
   router.get('/documents', handle(async (req, res) => {
     const { register } = await getServices();
     const rows = await register.list(req.gedScope);
-    res.json({ success: true, documents: rows.map(publicRecord), approved: policy.documents.map(item => ({ ...item })) });
+    res.json({ success: true, documents: rows.map(row => publicRecord(row, policy)),
+      approved: policy.documents.map(item => ({ ...item, category: categoryFor(item), contentType: contentTypeFor(item) })) });
   }));
   router.post('/documents/:id', (req, res, next) => {
-    try { approvedDocument(policy, req.params.id); } catch (error) { return next(error); }
-    if (req.get('content-type') !== 'application/pdf' || req.get('content-encoding')) {
-      return res.status(415).json({ success: false, code: 'GED_PDF_REQUIRED' });
+    let entry;
+    try { entry = approvedDocument(policy, req.params.id); } catch (error) { return next(error); }
+    if (req.get('content-type') !== contentTypeFor(entry) || req.get('content-encoding')) {
+      return res.status(415).json({ success: false, code: 'GED_FORMAT_REQUIRED' });
     }
     return next();
-  }, express.raw({ type: 'application/pdf', limit: MAX_BYTES, inflate: false }), handle(async (req, res) => {
+  }, express.raw({ type: () => true, limit: MAX_BYTES, inflate: false }), handle(async (req, res) => {
     const entry = approvedDocument(policy, req.params.id, req.body);
     const { storage, register } = await getServices();
     const stored = await storage.putIfAbsent({ key: objectKey(req.gedScope, entry.sha256), bytes: req.body });
@@ -57,17 +63,17 @@ function createGedRouter({ policy, authenticate, getServices, origins = ['https:
     const result = await register.create(req.gedScope, entry, stored.generation);
     // An acknowledged row is not success unless its immutable bytes are readable.
     await storage.get(reference(req.gedScope, result.row));
-    res.status(result.created ? 201 : 200).json({ success: true, created: result.created, document: publicRecord(result.row) });
+    res.status(result.created ? 201 : 200).json({ success: true, created: result.created, document: publicRecord(result.row, policy) });
   }));
   router.get('/documents/:id/content', handle(async (req, res) => {
-    approvedDocument(policy, req.params.id);
+    const entry = approvedDocument(policy, req.params.id);
     const { register, storage } = await getServices();
     const row = await register.read(req.gedScope, req.params.id);
     if (!row) return res.status(404).json({ success: false, code: 'GED_NOT_FOUND' });
     const bytes = await storage.get(reference(req.gedScope, row));
     await register.auditDownload(req.gedScope, row.document_id);
-    res.set({ 'Content-Type': 'application/pdf', 'Content-Length': String(bytes.length),
-      'Content-Disposition': `attachment; filename="document.pdf"; filename*=UTF-8''${encodeURIComponent(row.filename).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`,
+    res.set({ 'Content-Type': contentTypeFor(entry), 'Content-Length': String(bytes.length),
+      'Content-Disposition': `attachment; filename="document.${entry.name.endsWith('.docx') ? 'docx' : 'pdf'}"; filename*=UTF-8''${encodeURIComponent(row.filename).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`,
       'Content-Security-Policy': "default-src 'none'; sandbox" });
     res.send(bytes);
   }));
