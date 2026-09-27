@@ -29,6 +29,23 @@ test('renders section and language changes without depending on blob hash naviga
   assert.match(content, /window\.addEventListener\('hashchange',route\)/);
 });
 
+test('current published summary matches its source while old sections remain dated archives', async () => {
+  const content = await loadBoussoleArtifact();
+  const data = JSON.parse(content.match(/<script id="data" type="application\/json">([\s\S]*?)<\/script>/)[1]);
+  const current = require('../artifacts/programAccessCurrentStatus.json');
+  assert.equal(data.version, '3.3');
+  assert.equal(data.date, current.snapshotDate);
+  assert.deepEqual(data.sections.find(section => section.id === current.id), current);
+  assert.equal(data.sections.filter(section => section.id === current.id).length, 1);
+  for (const lang of ['FR','DE','EN']) {
+    assert.equal(data.ui[lang].factBody[0], current.intro[lang]);
+    assert.equal(data.ui[lang].factBody[1], current.summary[lang]);
+    assert.equal(data.ui[lang].factBody[2], current.nextStep[lang]);
+  }
+  assert.match(data.sections[0].blocks[0].title.FR, /13 septembre/);
+  assert.doesNotMatch(JSON.stringify(current), /oobCode|AIza|BEGIN PRIVATE|8407|4673/);
+});
+
 test('temporarily clears an active search for native printing and restores it afterwards', async () => {
   const content = await loadBoussoleArtifact();
 
