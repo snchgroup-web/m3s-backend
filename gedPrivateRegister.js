@@ -1,7 +1,8 @@
 const { randomUUID } = require('node:crypto');
-const { HASH, fail } = require('./gedPrivatePolicy');
+const { HASH, MAX_BYTES, SCAN_MAX_BYTES, fail } = require('./gedPrivatePolicy');
 
-function createRegister(pool, { lifecyclePolicy } = {}) {
+function createRegister(pool, { lifecyclePolicy, maxBytes = MAX_BYTES } = {}) {
+  if (![MAX_BYTES, SCAN_MAX_BYTES].includes(maxBytes)) fail('GED_REGISTER_UNAVAILABLE');
   if (typeof pool?.connect !== 'function') fail('GED_REGISTER_UNAVAILABLE');
   async function transaction(scope, work) {
     if (!scope || !HASH.test(scope.tenant) || !HASH.test(scope.owner)) fail('GED_ACCESS_DENIED');
@@ -24,7 +25,7 @@ function createRegister(pool, { lifecyclePolicy } = {}) {
   }
   const validate = (row, scope) => {
     if (!row || row.tenant !== scope.tenant || row.owner_id !== scope.owner || !HASH.test(row.document_id) ||
-        typeof row.filename !== 'string' || !Number.isInteger(row.byte_size) || row.byte_size < 10 || row.byte_size > 1048576 ||
+        typeof row.filename !== 'string' || !Number.isInteger(row.byte_size) || row.byte_size < 10 || row.byte_size > maxBytes ||
         typeof row.generation !== 'string' || !/^[1-9][0-9]{0,29}$/.test(row.generation)) fail('GED_REGISTER_UNAVAILABLE');
     return row;
   };

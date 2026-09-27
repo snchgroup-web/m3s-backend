@@ -53,7 +53,7 @@ async function main() {
     const { createPrivateObjectStore } = await import('../gedPrivateStorage.mjs');
     const storage = createPrivateObjectStore({ enabled: true, bucket, target: { bucketName: bucket.name,
       projectNumber: '39747051341', location: 'EUROPE-WEST6', maxBytes: policy.maxBytes || MAX_BYTES } });
-    const result = await registerApprovedBatch({ policy, storage, register: createRegister(pool), confirmed: true,
+    const result = await registerApprovedBatch({ policy, storage, register: createRegister(pool, { maxBytes: policy.maxBytes }), confirmed: true,
       readReference: async key => {
         const [m] = await bucket.file(key).getMetadata();
         if (m.name !== key || m.bucket !== bucket.name || m.contentType !== 'application/octet-stream' ||

@@ -4,6 +4,7 @@ const { readFileSync } = require('node:fs');
 const { PGlite } = require('@electric-sql/pglite');
 const { readPolicy, approvedDocument, contentTypeFor, digest, MAX_BYTES, SCAN_MAX_BYTES } = require('../gedPrivatePolicy');
 const { mergeManifest } = require('../scripts/ged-merge-manifest');
+const { createRegister } = require('../gedPrivateRegister');
 const owner = { userId: 'synthetic-user', organizationId: 'synthetic-org' };
 const env = { M3S_GED_PRIVATE_ENABLED: 'true', M3S_IDENTITY_MODE: 'google', API_REQUIRE_AUTH: 'true',
   M3S_GED_OWNER_JSON: JSON.stringify(owner), M3S_IDENTITY_BINDING_JSON: JSON.stringify({ ...owner, active: true }) };
@@ -11,6 +12,28 @@ const entry = (bytes, name = 'Synthetic.jpg') => ({ name, size: bytes.length, sh
 const jpeg = Buffer.concat([Buffer.from([255,216,255]), Buffer.from('synthetic-only'), Buffer.from([255,217])]);
 const png = Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), Buffer.from('synthetic-only'), Buffer.from([0,0,0,0,73,69,78,68,174,66,96,130])]);
 const policy = (rows, profile = 'scans-v2') => readPolicy({ ...env, M3S_GED_IMPORT_PROFILE: profile, M3S_GED_IMPORT_MANIFEST_JSON: JSON.stringify(rows) });
+
+test('real transactional register creates and rereads scans up to the active policy limit', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(readFileSync(require.resolve('../sql/ged-private-v1.sql'), 'utf8'));
+    await db.exec(readFileSync(require.resolve('../sql/ged-scans-v3.sql'), 'utf8'));
+    const pool = { async connect() { return { query: (sql, params) => db.query(sql, params), release() {} }; } };
+    const scope = { tenant: 'a'.repeat(64), owner: 'b'.repeat(64) };
+    const register = createRegister(pool, { maxBytes: SCAN_MAX_BYTES });
+    for (const size of [MAX_BYTES + 1, SCAN_MAX_BYTES]) {
+      const doc = { name: `Synthetic-${size}.jpg`, sha256: digest(String(size)), size, category: 'finance' };
+      assert.equal((await register.create(scope, doc, '1')).created, true);
+      assert.equal((await register.create(scope, doc, '1')).created, false);
+      assert.equal((await register.read(scope, doc.sha256)).byte_size, size);
+    }
+    assert.equal((await register.list(scope)).length, 2);
+    await assert.rejects(createRegister(pool).list(scope), /GED_REGISTER_UNAVAILABLE/);
+    assert.throws(() => createRegister(pool, { maxBytes: SCAN_MAX_BYTES + 1 }));
+    await assert.rejects(register.create(scope, { name: 'TooBig.jpg', sha256: digest('too-big'), size: SCAN_MAX_BYTES + 1 }, '2'));
+    assert.equal((await register.list(scope)).length, 2);
+  } finally { await db.close(); }
+});
 
 test('scan profile is opt-in; pilot limits and unknown-profile refusal remain', () => {
   assert.throws(() => policy([entry(jpeg)], 'pilot-v1'));

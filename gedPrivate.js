@@ -168,7 +168,7 @@ function createGedRuntime({ env, identityRuntime, credentials, dependencies = {}
         retryOptions: { autoRetry: false, maxRetries: 0, totalTimeout: 15 } }).bucket('m3s-ged-prive-mon-projet-data-2sg');
       const storage = createPrivateObjectStore({ enabled: true, bucket, target: {
         bucketName: 'm3s-ged-prive-mon-projet-data-2sg', projectNumber: '39747051341', location: 'EUROPE-WEST6', maxBytes: policy.maxBytes || MAX_BYTES } });
-      return { register: createRegister(pool, { lifecyclePolicy: lifecycleEnabled ? policy : undefined }), storage };
+      return { register: createRegister(pool, { maxBytes: policy.maxBytes, lifecyclePolicy: lifecycleEnabled ? policy : undefined }), storage };
     } catch {
       if (pool) await pool.end().catch(() => {});
       fail('GED_UNAVAILABLE');
