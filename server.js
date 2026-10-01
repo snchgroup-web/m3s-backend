@@ -390,7 +390,10 @@ app.use(GED_PREFIX, createGedRuntime({ env: process.env, identityRuntime, creden
   // GED authorization stays mandatory even when legacy API_REQUIRE_AUTH is disabled.
   financeRead: createFinanceAuthorizationMiddleware(FINANCE_PERMISSIONS.READ),
   financeWrite: createFinanceAuthorizationMiddleware(FINANCE_PERMISSIONS.WRITE),
-  canFinanceWrite: req => financePermissionsForUser(req.user).includes(FINANCE_PERMISSIONS.WRITE),
+  canAttachExpense: req => {
+    const permissions = financePermissionsForUser(req.user);
+    return permissions.includes(FINANCE_PERMISSIONS.READ) && permissions.includes(FINANCE_PERMISSIONS.WRITE);
+  },
   resolveExpense: async id => {
     if (typeof id !== 'string' || !id.trim() || id.length > 128 || !financeSources.resolved) return null;
     const table = financeTableRef('expenses');

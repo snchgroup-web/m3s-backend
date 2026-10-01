@@ -57,6 +57,7 @@ test('server wires GED finance authorization independently of the legacy API aut
   const wiring = source.slice(start, end);
   assert.match(wiring, /financeRead:\s*createFinanceAuthorizationMiddleware\(FINANCE_PERMISSIONS\.READ\)/);
   assert.match(wiring, /financeWrite:\s*createFinanceAuthorizationMiddleware\(FINANCE_PERMISSIONS\.WRITE\)/);
+  assert.match(wiring, /canAttachExpense:\s*req\s*=>/);
   assert.doesNotMatch(wiring, /finance(?:Read|Write):\s*requireFinance/);
 });
 
@@ -102,7 +103,7 @@ test('HTTP attachment requires read, write, same origin and exposes lifecycle ca
     },
     financeRead: (_req, res, next) => denyRead ? res.sendStatus(403) : next(),
     financeWrite: (_req, res, next) => denyWrite ? res.sendStatus(403) : next(),
-    canFinanceWrite: () => !denyWrite,
+    canAttachExpense: () => !denyRead && !denyWrite,
     resolveExpense: async id => !missingExpense && id === f.expense.id ? f.expense : null,
     getServices: async () => ({ register: f.register, storage: {} })
   }));
@@ -117,7 +118,9 @@ test('HTTP attachment requires read, write, same origin and exposes lifecycle ca
     fetch(url, { method: 'POST', headers, body: requestBody });
   const listed = await (await fetch(documentsUrl)).json();
   assert.deepEqual(listed.capabilities, { expenseAttach: true });
-  denyRead = true; assert.equal((await send()).status, 403); denyRead = false;
+  denyRead = true;
+  assert.deepEqual((await (await fetch(documentsUrl)).json()).capabilities, { expenseAttach: false });
+  assert.equal((await send()).status, 403); denyRead = false;
   denyWrite = true;
   assert.deepEqual((await (await fetch(documentsUrl)).json()).capabilities, { expenseAttach: false });
   assert.equal((await send()).status, 403); denyWrite = false;

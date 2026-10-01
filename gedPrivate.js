@@ -13,7 +13,7 @@ const objectKey = (scope, id) => `ged-private/v1/${scope.tenant}/${scope.owner}/
 const reference = (scope, row) => ({ key: objectKey(scope, row.document_id), generation: row.generation,
   size: row.byte_size, sha256: row.document_id });
 
-function createGedRouter({ policy, authenticate, getServices, financeRead, financeWrite, canFinanceWrite, resolveExpense,
+function createGedRouter({ policy, authenticate, getServices, financeRead, financeWrite, canAttachExpense, resolveExpense,
   origins = ['https://seneswiss-group.com'] }) {
   const router = express.Router();
   router.use((_req, res, next) => {
@@ -99,7 +99,8 @@ function createGedRouter({ policy, authenticate, getServices, financeRead, finan
     const rows = await (register.lifecycle ? register.lifecycle.list(req.gedScope) : register.list(req.gedScope));
     res.json({ success: true, documents: rows.map(row => publicRecord(row, policy)),
       approved: policy.documents.map(item => ({ ...item, category: categoryFor(item), contentType: contentTypeFor(item) })),
-      capabilities: { expenseAttach: Boolean(financeWrite && canFinanceWrite?.(req) && resolveExpense && register.lifecycle &&
+      capabilities: { expenseAttach: Boolean(financeRead && financeWrite && canAttachExpense?.(req) &&
+        resolveExpense && register.lifecycle &&
         typeof register.attachExpenseDocument === 'function') } });
   }));
   router.get('/documents/:id/history', handle(async (req, res) => {
@@ -205,7 +206,7 @@ async function assertDatabaseAccess(pool, lifecycleEnabled = false) {
   }
 }
 
-function createGedRuntime({ env, identityRuntime, credentials, financeRead, financeWrite, canFinanceWrite,
+function createGedRuntime({ env, identityRuntime, credentials, financeRead, financeWrite, canAttachExpense,
   resolveExpense, dependencies = {} }) {
   let policy;
   try { policy = readPolicy(env); } catch { policy = null; }
@@ -236,7 +237,7 @@ function createGedRuntime({ env, identityRuntime, credentials, financeRead, fina
     return ready;
   };
   return createGedRouter({ policy, authenticate: identityRuntime.authenticate, getServices,
-    financeRead, financeWrite, canFinanceWrite, resolveExpense });
+    financeRead, financeWrite, canAttachExpense, resolveExpense });
 }
 
 module.exports = { PREFIX, isPrivateGedRoute, createGedRouter, createGedRuntime, databaseOptions, assertDatabaseAccess };
