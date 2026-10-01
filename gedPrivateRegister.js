@@ -1,5 +1,32 @@
 const { randomUUID } = require('node:crypto');
-const { HASH, MAX_BYTES, SCAN_MAX_BYTES, fail } = require('./gedPrivatePolicy');
+const { HASH, MAX_BYTES, SCAN_MAX_BYTES, approvedDocument, categoryFor, fail } = require('./gedPrivatePolicy');
+
+const EXPENSE_DOCUMENT_ROLES = Object.freeze([
+  'invoice', 'payment_receipt', 'transfer_receipt', 'credit_note', 'other'
+]);
+const expenseLinkKeys = Object.freeze(['documentId', 'documentRole', 'externalReference', 'versionId']);
+
+function validateExpenseDocumentLink(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).some(key => !expenseLinkKeys.includes(key)) ||
+      !HASH.test(value.documentId) || !HASH.test(value.versionId) ||
+      !EXPENSE_DOCUMENT_ROLES.includes(value.documentRole)) fail('GED_INVALID_COMMAND');
+  const externalReference = value.externalReference === undefined ? null : value.externalReference;
+  if (externalReference !== null && (typeof externalReference !== 'string' ||
+      externalReference !== externalReference.trim() || externalReference.length < 1 || externalReference.length > 140 ||
+      /[\x00-\x1f\x7f<>]/.test(externalReference))) fail('GED_INVALID_COMMAND');
+  return Object.freeze({ documentId: value.documentId, versionId: value.versionId,
+    documentRole: value.documentRole, externalReference });
+}
+
+const publicExpenseLink = row => Object.freeze({
+  expenseId: row.expense_id,
+  documentId: row.document_id,
+  versionId: row.document_version_id,
+  documentRole: row.document_role,
+  externalReference: row.external_reference,
+  revision: Number(row.revision)
+});
 
 function createRegister(pool, { lifecyclePolicy, maxBytes = MAX_BYTES } = {}) {
   if (![MAX_BYTES, SCAN_MAX_BYTES].includes(maxBytes)) fail('GED_REGISTER_UNAVAILABLE');
@@ -40,6 +67,54 @@ function createRegister(pool, { lifecyclePolicy, maxBytes = MAX_BYTES } = {}) {
   [randomUUID(), scope.tenant, scope.owner, id, action]);
 
   return Object.freeze({
+    attachExpenseDocument: lifecyclePolicy ? (scope, expense, candidate) => {
+      const link = validateExpenseDocumentLink(candidate);
+      if (!expense || typeof expense.source !== 'string' || expense.source.length < 1 || expense.source.length > 256 ||
+          typeof expense.id !== 'string' || expense.id.trim() !== expense.id || expense.id.length < 1 || expense.id.length > 128) {
+        fail('GED_NOT_FOUND');
+      }
+      const rootEntry = approvedDocument(lifecyclePolicy, link.documentId);
+      const versionEntry = approvedDocument(lifecyclePolicy, link.versionId);
+      if (categoryFor(rootEntry) !== 'finance' || categoryFor(versionEntry) !== 'finance') fail('GED_VERSION_NOT_APPROVED');
+      return transaction(scope, async client => {
+        // The same owner lock serializes lifecycle mutations and expense-link revisions.
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [scope.tenant + scope.owner]);
+        const root = await read(client, scope, link.documentId);
+        const version = await read(client, scope, link.versionId);
+        if (!root || !version) fail('GED_NOT_FOUND');
+        const alias = await client.query(`SELECT 1 FROM ged_private.revisions
+          WHERE tenant=$1 AND owner_id=$2 AND current_document_id=$3 AND document_id<>$3 LIMIT 1`,
+        [scope.tenant, scope.owner, link.documentId]);
+        if (alias.rows.length) fail('GED_VERSION_NOT_ROOT');
+        const lifecycle = await client.query(`SELECT current_document_id, trashed FROM ged_private.revisions
+          WHERE tenant=$1 AND owner_id=$2 AND document_id=$3 ORDER BY revision DESC LIMIT 1`,
+        [scope.tenant, scope.owner, link.documentId]);
+        const current = lifecycle.rows[0] || { current_document_id: link.documentId, trashed: false };
+        if (current.trashed === true) fail('GED_DOCUMENT_TRASHED');
+        if (current.current_document_id !== link.versionId) fail('GED_VERSION_CONFLICT');
+        const latestResult = await client.query(`SELECT expense_id, document_id, document_version_id, revision,
+          document_role, external_reference, action FROM ged_private.expense_document_links
+          WHERE tenant=$1 AND owner_id=$2 AND expense_source=$3 AND expense_id=$4 AND document_id=$5
+          ORDER BY revision DESC LIMIT 1`,
+        [scope.tenant, scope.owner, expense.source, expense.id, link.documentId]);
+        const latest = latestResult.rows[0];
+        if (latest?.action === 'attach' && latest.document_version_id === link.versionId &&
+            latest.document_role === link.documentRole && latest.external_reference === link.externalReference) {
+          return { created: false, link: publicExpenseLink(latest) };
+        }
+        const revision = latest ? Number(latest.revision) + 1 : 1;
+        if (!Number.isSafeInteger(revision) || revision > 10000) fail('GED_REVISION_LIMIT');
+        const result = await client.query(`INSERT INTO ged_private.expense_document_links
+          (tenant, owner_id, expense_source, expense_id, document_id, document_version_id,
+           revision, action, document_role, external_reference)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,'attach',$8,$9)
+          RETURNING expense_id, document_id, document_version_id, revision, document_role, external_reference`,
+        [scope.tenant, scope.owner, expense.source, expense.id, link.documentId, link.versionId,
+          revision, link.documentRole, link.externalReference]);
+        if (result.rows.length !== 1) fail('GED_REGISTER_UNAVAILABLE');
+        return { created: true, link: publicExpenseLink(result.rows[0]) };
+      });
+    } : null,
     expenseLinks: (scope, source, id) => transaction(scope, async client => {
       if (typeof source !== 'string' || !source || source.length > 256 || typeof id !== 'string' || !id || id.length > 128) fail('GED_NOT_FOUND');
       return (await client.query(`SELECT * FROM (
@@ -76,4 +151,4 @@ function createRegister(pool, { lifecyclePolicy, maxBytes = MAX_BYTES } = {}) {
   });
 }
 
-module.exports = { createRegister };
+module.exports = { EXPENSE_DOCUMENT_ROLES, validateExpenseDocumentLink, createRegister };
