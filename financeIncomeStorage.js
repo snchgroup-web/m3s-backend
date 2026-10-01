@@ -9,7 +9,8 @@ function supportsIncomeAmounts(schema) {
   const nullableField = name => schema.find(field => field.name === name && (!field.mode || field.mode === 'NULLABLE'));
   return Object.entries(columns).every(([name, type]) => nullableField(name)?.type === type)
     && amountColumns.every(name => numericTypes.has(nullableField(name)?.type))
-    && nullableField('DEVISE_SAISIE')?.type === 'STRING';
+    && nullableField('DEVISE_SAISIE')?.type === 'STRING'
+    && nullableField('DEVISE_CIBLE')?.type === 'STRING';
 }
 
 function incomeAmountParams(body) {

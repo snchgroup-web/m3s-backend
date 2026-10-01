@@ -19,8 +19,8 @@ function validateExpenseDocumentLink(value) {
     documentRole: value.documentRole, externalReference });
 }
 
-const publicExpenseLink = row => Object.freeze({
-  expenseId: row.expense_id,
+const publicFinancialLink = (row, kind) => Object.freeze({
+  [kind === 'income' ? 'incomeId' : 'expenseId']: row[`${kind}_id`],
   documentId: row.document_id,
   versionId: row.document_version_id,
   documentRole: row.document_role,
@@ -28,7 +28,7 @@ const publicExpenseLink = row => Object.freeze({
   revision: Number(row.revision)
 });
 
-function createRegister(pool, { lifecyclePolicy, maxBytes = MAX_BYTES } = {}) {
+function createRegister(pool, { lifecyclePolicy, maxBytes = MAX_BYTES, incomeLinksEnabled = false } = {}) {
   if (![MAX_BYTES, SCAN_MAX_BYTES].includes(maxBytes)) fail('GED_REGISTER_UNAVAILABLE');
   if (typeof pool?.connect !== 'function') fail('GED_REGISTER_UNAVAILABLE');
   async function transaction(scope, work) {
@@ -66,8 +66,12 @@ function createRegister(pool, { lifecyclePolicy, maxBytes = MAX_BYTES } = {}) {
     (event_id, tenant, owner_id, document_id, action) VALUES ($1,$2,$3,$4,$5)`,
   [randomUUID(), scope.tenant, scope.owner, id, action]);
 
-  return Object.freeze({
-    attachExpenseDocument: lifecyclePolicy ? (scope, expense, candidate) => {
+  function financialLinks(kind) {
+    // SQL identifiers come exclusively from this closed internal mapping.
+    if (!['expense', 'income'].includes(kind)) fail('GED_INVALID_COMMAND');
+    const table = `ged_private.${kind}_document_links`;
+    return {
+    attach: lifecyclePolicy ? (scope, expense, candidate) => {
       const link = validateExpenseDocumentLink(candidate);
       if (!expense || typeof expense.source !== 'string' || expense.source.length < 1 || expense.source.length > 256 ||
           typeof expense.id !== 'string' || expense.id.trim() !== expense.id || expense.id.length < 1 || expense.id.length > 128) {
@@ -92,38 +96,47 @@ function createRegister(pool, { lifecyclePolicy, maxBytes = MAX_BYTES } = {}) {
         const current = lifecycle.rows[0] || { current_document_id: link.documentId, trashed: false };
         if (current.trashed === true) fail('GED_DOCUMENT_TRASHED');
         if (current.current_document_id !== link.versionId) fail('GED_VERSION_CONFLICT');
-        const latestResult = await client.query(`SELECT expense_id, document_id, document_version_id, revision,
-          document_role, external_reference, action FROM ged_private.expense_document_links
-          WHERE tenant=$1 AND owner_id=$2 AND expense_source=$3 AND expense_id=$4 AND document_id=$5
+        const latestResult = await client.query(`SELECT ${kind}_id, document_id, document_version_id, revision,
+          document_role, external_reference, action FROM ${table}
+          WHERE tenant=$1 AND owner_id=$2 AND ${kind}_source=$3 AND ${kind}_id=$4 AND document_id=$5
           ORDER BY revision DESC LIMIT 1`,
         [scope.tenant, scope.owner, expense.source, expense.id, link.documentId]);
         const latest = latestResult.rows[0];
         if (latest?.action === 'attach' && latest.document_version_id === link.versionId &&
             latest.document_role === link.documentRole && latest.external_reference === link.externalReference) {
-          return { created: false, link: publicExpenseLink(latest) };
+          return { created: false, link: publicFinancialLink(latest, kind) };
         }
         const revision = latest ? Number(latest.revision) + 1 : 1;
         if (!Number.isSafeInteger(revision) || revision > 10000) fail('GED_REVISION_LIMIT');
-        const result = await client.query(`INSERT INTO ged_private.expense_document_links
-          (tenant, owner_id, expense_source, expense_id, document_id, document_version_id,
+        const result = await client.query(`INSERT INTO ${table}
+          (tenant, owner_id, ${kind}_source, ${kind}_id, document_id, document_version_id,
            revision, action, document_role, external_reference)
           VALUES ($1,$2,$3,$4,$5,$6,$7,'attach',$8,$9)
-          RETURNING expense_id, document_id, document_version_id, revision, document_role, external_reference`,
+          RETURNING ${kind}_id, document_id, document_version_id, revision, document_role, external_reference`,
         [scope.tenant, scope.owner, expense.source, expense.id, link.documentId, link.versionId,
           revision, link.documentRole, link.externalReference]);
         if (result.rows.length !== 1) fail('GED_REGISTER_UNAVAILABLE');
-        return { created: true, link: publicExpenseLink(result.rows[0]) };
+        return { created: true, link: publicFinancialLink(result.rows[0], kind) };
       });
     } : null,
-    expenseLinks: (scope, source, id) => transaction(scope, async client => {
+    list: (scope, source, id) => transaction(scope, async client => {
       if (typeof source !== 'string' || !source || source.length > 256 || typeof id !== 'string' || !id || id.length > 128) fail('GED_NOT_FOUND');
       return (await client.query(`SELECT * FROM (
         SELECT DISTINCT ON (document_id) document_id, document_version_id, revision, action, document_role, external_reference
-        FROM ged_private.expense_document_links
-        WHERE tenant=$1 AND owner_id=$2 AND expense_source=$3 AND expense_id=$4
+        FROM ${table}
+        WHERE tenant=$1 AND owner_id=$2 AND ${kind}_source=$3 AND ${kind}_id=$4
         ORDER BY document_id, revision DESC
       ) latest WHERE action='attach' ORDER BY document_id LIMIT 100`, [scope.tenant, scope.owner, source, id])).rows;
-    }),
+    })
+    };
+  }
+  const expenseLinks = financialLinks('expense');
+  const incomeLinks = incomeLinksEnabled && lifecyclePolicy ? financialLinks('income') : null;
+  return Object.freeze({
+    attachExpenseDocument: expenseLinks.attach,
+    expenseLinks: expenseLinks.list,
+    attachIncomeDocument: incomeLinks?.attach || null,
+    incomeLinks: incomeLinks?.list || null,
     lifecycle: lifecyclePolicy ? require('./gedLifecycle').createLifecycle({ transaction, read, policy: lifecyclePolicy }) : null,
     list: scope => transaction(scope, async client => {
       const { rows } = await client.query(`SELECT tenant, owner_id, document_id, filename, byte_size, generation, created_at

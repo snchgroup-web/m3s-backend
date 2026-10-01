@@ -52,6 +52,7 @@ const {
 } = require('./financeDataScope');
 const { resolveFinanceSources } = require('./financeSources');
 const { supportsExpenseAmounts, expenseQueryParams, fields: expenseAmountFields, sourceAmountSelect, maskIncompleteExpenseTotals } = require('./financeExpenseStorage');
+const { supportsIncomeAmounts, incomeQueryParams, incomeSourceAmountSelect, maskIncompleteIncomeTotals } = require('./financeIncomeStorage');
 const {
   buildSupplierCountQuery,
   normalizeSupplierCount
@@ -171,6 +172,7 @@ let financeSources = {
   resolved: false
 };
 let expenseAmountsReady = false;
+let incomeAmountsReady = false;
 const financeTableRef = sourceKey => (
   `\`${PROJECT_ID}.${DATASET_ID}.${financeSources[sourceKey]}\``
 );
@@ -398,6 +400,13 @@ app.use(GED_PREFIX, createGedRuntime({ env: process.env, identityRuntime, creden
     if (typeof id !== 'string' || !id.trim() || id.length > 128 || !financeSources.resolved) return null;
     const table = financeTableRef('expenses');
     const [rows] = await bigquery.query({ query: `SELECT \`Nr REF\` AS id FROM ${table} WHERE \`Nr REF\`=@id LIMIT 2`,
+      params: { id }, location: financeSources.location || DATASET_LOCATION });
+    return rows.length === 1 ? { id: rows[0].id, source: table.replace(/`/g, '') } : null;
+  },
+  resolveIncome: async id => {
+    if (typeof id !== 'string' || !id.trim() || id.length > 128 || !financeSources.resolved) return null;
+    const table = financeTableRef('income');
+    const [rows] = await bigquery.query({ query: `SELECT ID_RECETTE AS id FROM ${table} WHERE ID_RECETTE=@id LIMIT 2`,
       params: { id }, location: financeSources.location || DATASET_LOCATION });
     return rows.length === 1 ? { id: rows[0].id, source: table.replace(/`/g, '') } : null;
   }
@@ -979,6 +988,7 @@ app.get('/api/finance/income', requireFinanceRead, requireResolvedFinanceSources
       SELECT
         ID_RECETTE as id,
         ID_RECETTE as ref,
+        ${incomeAmountsReady ? incomeSourceAmountSelect : 'NULL AS amount_contract_version, NULL AS source_amounts'},
         DESIGNATION as description,
         MONTANT_SAISI as montant_origine,
         DEVISE_SAISIE as devise_origine,
@@ -1016,6 +1026,7 @@ app.get('/api/finance/income', requireFinanceRead, requireResolvedFinanceSources
 
     res.json({
       success: true,
+      capabilities: { income_amount_contract: incomeAmountsReady ? 2 : 1 },
       data: rows,
       count: rows.length,
       timestamp: new Date().toISOString()
@@ -1180,22 +1191,24 @@ app.delete('/api/finance/expenses/:id', requireFinanceWrite, requireResolvedFina
 
 app.post('/api/finance/income', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
+    if (req.body.amount_contract_version === 2 && !incomeAmountsReady) throw new Error('Income source amounts unavailable');
     const normalizedRow = normalizeFinanceTransaction(req.body, `REC-APP-${Date.now()}`, 'income');
     const { row, warnings } = await applyTeamAgentContract(normalizedRow);
+    const extended = row.amount_contract_version === 2;
     await bigquery.query({
       query: `INSERT INTO ${financeTableRef('income')}
         (ID_RECETTE,DATE,DESIGNATION,MONTANT_SAISI,DEVISE_SAISIE,MONTANT_CHF,MONTANT_CFA,
          MODE_ENCAISSEMENT,TYPE_BUDGETAIRE,NATURE_RECETTE,MODE_TAUX,PERIODE_REF,
          TAUX_REF_AUTO,TAUX_FX_SAISI,TAUX_FX_APPLIQUE,DEVISE_CIBLE,SENS_TRESORERIE,
-         BU,DEPARTEMENT,PHASE,SOUS_PHASE,TEAM,AGENT,PAYS,COMMENTAIRE,\`Année\`)
+         BU,DEPARTEMENT,PHASE,SOUS_PHASE,TEAM,AGENT,PAYS,COMMENTAIRE,\`Année\`${extended ? ',AMOUNT_CONTRACT_VERSION,CONVERSION_SOURCE' : ''})
         VALUES (@id,@date,@description,@montant_origine,@devise_origine,@montant_chf,@montant_cfa,
          @type,'',@categorie,
-         IF(@taux_fx_reference > 0,'Reference et applique distincts','Applique communique'),
-         IF(@taux_fx_reference > 0,DATE(@date),NULL),NULLIF(@taux_fx_reference,0),
+         ${extended ? "'Montants source documentes'" : "IF(@taux_fx_reference > 0,'Reference et applique distincts','Applique communique')"},
+         IF(@taux_fx_reference > 0,CAST(DATE(@date) AS STRING),NULL),NULLIF(@taux_fx_reference,0),
          @taux_fx_applique,@taux_fx_applique,
-         IF(@devise_origine='CHF','CFA','CHF'),'Entree','',@departement,@phase_projet,'',
-         @team,@agent,@pays,@commentaire,@annee)`,
-      params: row, location: financeSources.location || DATASET_LOCATION
+         ${extended ? "IF(@taux_fx_applique IS NULL,NULL,IF(@devise_origine='CHF','CFA','CHF'))" : "IF(@devise_origine='CHF','CFA','CHF')"},'Entree','',@departement,@phase_projet,'',
+         @team,@agent,@pays,@commentaire,@annee${extended ? ',@amount_contract_version,@conversion_source' : ''})`,
+      ...(extended ? incomeQueryParams(row) : { params: row }), location: financeSources.location || DATASET_LOCATION
     });
     res.status(201).json({ success: true, data: row, warnings });
   } catch (error) {
@@ -1206,22 +1219,29 @@ app.post('/api/finance/income', requireFinanceWrite, requireResolvedFinanceSourc
 
 app.put('/api/finance/income/:id', requireFinanceWrite, requireResolvedFinanceSources, async (req, res) => {
   try {
+    if (req.body.amount_contract_version === 2 && !incomeAmountsReady) throw new Error('Income source amounts unavailable');
     const normalizedRow = normalizeFinanceTransaction(req.body, String(req.params.id || ''), 'income');
     const { row, warnings } = await applyTeamAgentContract(normalizedRow);
-    await bigquery.query({
+    const extended = row.amount_contract_version === 2;
+    const [job] = await bigquery.createQueryJob({
       query: `UPDATE ${financeTableRef('income')}
         SET DATE=@date, DESIGNATION=@description, MONTANT_SAISI=@montant_origine,
             DEVISE_SAISIE=@devise_origine, MONTANT_CHF=@montant_chf, MONTANT_CFA=@montant_cfa,
             MODE_ENCAISSEMENT=@type, NATURE_RECETTE=@categorie,
-            MODE_TAUX=IF(@taux_fx_reference > 0,'Reference et applique distincts','Applique communique'),
-            PERIODE_REF=IF(@taux_fx_reference > 0,DATE(@date),NULL),
+            MODE_TAUX=${extended ? "'Montants source documentes'" : "IF(@taux_fx_reference > 0,'Reference et applique distincts','Applique communique')"},
+            PERIODE_REF=IF(@taux_fx_reference > 0,CAST(DATE(@date) AS STRING),NULL),
             TAUX_REF_AUTO=NULLIF(@taux_fx_reference,0), TAUX_FX_SAISI=@taux_fx_applique,
             TAUX_FX_APPLIQUE=@taux_fx_applique,
-            DEVISE_CIBLE=IF(@devise_origine='CHF','CFA','CHF'), DEPARTEMENT=@departement,
+            DEVISE_CIBLE=${extended ? "IF(@taux_fx_applique IS NULL,NULL,IF(@devise_origine='CHF','CFA','CHF'))" : "IF(@devise_origine='CHF','CFA','CHF')"}, DEPARTEMENT=@departement,
             PHASE=@phase_projet, TEAM=@team, AGENT=@agent, PAYS=@pays,
-            COMMENTAIRE=@commentaire, \`Année\`=@annee WHERE ID_RECETTE=@id`,
-      params: row, location: financeSources.location || DATASET_LOCATION
+            COMMENTAIRE=@commentaire, \`Année\`=@annee
+            ${extended ? ',AMOUNT_CONTRACT_VERSION=@amount_contract_version,CONVERSION_SOURCE=@conversion_source' : ''}
+            WHERE ID_RECETTE=@id ${incomeAmountsReady ? (extended ? 'AND AMOUNT_CONTRACT_VERSION = 2' : 'AND AMOUNT_CONTRACT_VERSION IS NULL') : ''}`,
+      ...(extended ? incomeQueryParams(row) : { params: row }), location: financeSources.location || DATASET_LOCATION
     });
+    await job.getQueryResults();
+    const [metadata] = await job.getMetadata();
+    if (Number(metadata?.statistics?.query?.numDmlAffectedRows) !== 1) throw new Error('Income update not confirmed; reload the register');
     res.json({ success: true, data: row, warnings });
   } catch (error) {
     console.error('Update Income Error:', error.message);
@@ -1432,6 +1452,8 @@ app.get('/api/finance/dashboard', requireFinanceRead, requireResolvedFinanceSour
         (SELECT COUNT(*) FROM ${financeTableRef('income')} WHERE ${nonSocialIncomeWhere}) as total_income_count,
         (SELECT SUM(MONTANT_CHF) FROM ${financeTableRef('income')} WHERE ${nonSocialIncomeWhere}) as total_income,
         (SELECT SUM(MONTANT_CFA) FROM ${financeTableRef('income')} WHERE ${nonSocialIncomeWhere}) as total_income_cfa,
+        (SELECT COUNTIF(MONTANT_CHF IS NULL) FROM ${financeTableRef('income')} WHERE ${nonSocialIncomeWhere}) as income_missing_chf,
+        (SELECT COUNTIF(MONTANT_CFA IS NULL) FROM ${financeTableRef('income')} WHERE ${nonSocialIncomeWhere}) as income_missing_cfa,
         (SELECT COUNT(*) FROM ${financeTableRef('expenses')}) as total_expense_count,
         (SELECT SUM(CHF) FROM ${financeTableRef('expenses')}) as total_expenses,
         (SELECT SUM(CFA) FROM ${financeTableRef('expenses')}) as total_expenses_cfa,
@@ -1444,7 +1466,7 @@ app.get('/api/finance/dashboard', requireFinanceRead, requireResolvedFinanceSour
 
     res.json({
       success: true,
-      data: maskIncompleteExpenseTotals(rows[0] || {}),
+      data: maskIncompleteIncomeTotals(maskIncompleteExpenseTotals(rows[0] || {})),
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -2214,6 +2236,8 @@ const startServer = async () => {
     };
     const [expenseMetadata] = await bigquery.dataset(DATASET_ID).table(financeSources.expenses).getMetadata();
     expenseAmountsReady = supportsExpenseAmounts(expenseMetadata.schema?.fields || []);
+    const [incomeMetadata] = await bigquery.dataset(DATASET_ID).table(financeSources.income).getMetadata();
+    incomeAmountsReady = supportsIncomeAmounts(incomeMetadata.schema?.fields || []);
     console.log(
       `Finance sources ready: income=${financeSources.income}, expenses=${financeSources.expenses}, location=${financeSources.location || DATASET_LOCATION}`
     );

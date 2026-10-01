@@ -13,7 +13,7 @@ const pdfEntry = (name, category) => {
   return { name: `${name}.pdf`, sha256: digest(bytes), size: bytes.length, category };
 };
 
-async function registerFixture(t) {
+async function registerFixture(t, incomeLinksEnabled = false) {
   const db = new PGlite();
   t.after(() => db.close());
   await db.exec(readFileSync(require.resolve('../sql/ged-private-v1.sql'), 'utf8'));
@@ -23,13 +23,17 @@ async function registerFixture(t) {
     GRANT INSERT ON ged_private.events TO m3s_ged_app;`);
   await db.exec(readFileSync(require.resolve('../sql/ged-lifecycle-v2.sql'), 'utf8'));
   await db.exec(readFileSync(require.resolve('../sql/ged-expense-links-candidate.sql'), 'utf8'));
+  if (incomeLinksEnabled) {
+    await db.exec(readFileSync(require.resolve('../sql/ged-income-links-candidate.sql'), 'utf8'));
+    await db.exec('GRANT SELECT, INSERT ON ged_private.income_document_links TO m3s_ged_app;');
+  }
   await db.exec('GRANT SELECT, INSERT ON ged_private.expense_document_links TO m3s_ged_app; SET ROLE m3s_ged_app;');
   const entries = [pdfEntry('Invoice root', 'finance'), pdfEntry('Invoice version', 'finance'),
     pdfEntry('Private note', 'personal')];
   const policy = { owner: { userId: 'synthetic-user', organizationId: 'synthetic-org' }, documents: entries };
   const scope = { tenant: digest(policy.owner.organizationId), owner: digest(policy.owner.userId) };
   const pool = { connect: async () => ({ query: (sql, params) => db.query(sql, params), release() {} }) };
-  const register = createRegister(pool, { lifecyclePolicy: policy });
+  const register = createRegister(pool, { lifecyclePolicy: policy, incomeLinksEnabled });
   for (const entry of entries) await register.create(scope, entry, '1234567890');
   return { db, entries, policy, scope, register,
     expense: { id: 'DEP-SYNTHETIC', source: 'synthetic.expenses' } };
@@ -89,8 +93,8 @@ test('append-only attachment enforces finance/current lifecycle and owner isolat
   await assert.rejects(f.register.attachExpenseDocument(f.scope, f.expense, current), /GED_DOCUMENT_TRASHED/);
 });
 
-test('HTTP attachment requires read, write, same origin and exposes lifecycle capability', async t => {
-  const f = await registerFixture(t);
+for (const kind of ['expense', 'income']) test(`${kind} HTTP attachment requires read, write, same origin and exposes lifecycle capability`, async t => {
+  const f = await registerFixture(t, kind === 'income');
   const root = f.entries[0];
   let denyRead = false;
   let denyWrite = false;
@@ -104,7 +108,7 @@ test('HTTP attachment requires read, write, same origin and exposes lifecycle ca
     financeRead: (_req, res, next) => denyRead ? res.sendStatus(403) : next(),
     financeWrite: (_req, res, next) => denyWrite ? res.sendStatus(403) : next(),
     canAttachExpense: () => !denyRead && !denyWrite,
-    resolveExpense: async id => !missingExpense && id === f.expense.id ? f.expense : null,
+    [kind === 'income' ? 'resolveIncome' : 'resolveExpense']: async id => !missingExpense && id === f.expense.id ? f.expense : null,
     getServices: async () => ({ register: f.register, storage: {} })
   }));
   const server = app.listen(0, '127.0.0.1');
@@ -112,17 +116,17 @@ test('HTTP attachment requires read, write, same origin and exposes lifecycle ca
   t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
   const origin = 'https://seneswiss-group.com';
   const documentsUrl = `http://127.0.0.1:${server.address().port}/api/ged/private/documents`;
-  const url = `http://127.0.0.1:${server.address().port}/api/ged/private/expenses/${f.expense.id}/documents`;
+  const url = `http://127.0.0.1:${server.address().port}/api/ged/private/${kind === 'income' ? 'income' : 'expenses'}/${f.expense.id}/documents`;
   const body = JSON.stringify({ documentId: root.sha256, versionId: root.sha256, documentRole: 'invoice' });
   const send = (headers = { origin, 'content-type': 'application/json' }, requestBody = body) =>
     fetch(url, { method: 'POST', headers, body: requestBody });
   const listed = await (await fetch(documentsUrl)).json();
-  assert.deepEqual(listed.capabilities, { expenseAttach: true });
+  assert.deepEqual(listed.capabilities, { expenseAttach: kind === 'expense', incomeAttach: kind === 'income' });
   denyRead = true;
-  assert.deepEqual((await (await fetch(documentsUrl)).json()).capabilities, { expenseAttach: false });
+  assert.deepEqual((await (await fetch(documentsUrl)).json()).capabilities, { expenseAttach: false, incomeAttach: false });
   assert.equal((await send()).status, 403); denyRead = false;
   denyWrite = true;
-  assert.deepEqual((await (await fetch(documentsUrl)).json()).capabilities, { expenseAttach: false });
+  assert.deepEqual((await (await fetch(documentsUrl)).json()).capabilities, { expenseAttach: false, incomeAttach: false });
   assert.equal((await send()).status, 403); denyWrite = false;
   assert.equal((await send({ 'content-type': 'application/json' })).status, 403);
   assert.equal((await send({ origin: 'https://foreign.example', 'content-type': 'application/json' })).status, 403);
@@ -132,7 +136,14 @@ test('HTTP attachment requires read, write, same origin and exposes lifecycle ca
   missingExpense = true; assert.equal((await send()).status, 404); missingExpense = false;
   let response = await send(); assert.equal(response.status, 201);
   assert.deepEqual(await response.json(), { success: true, created: true, link: {
-    expenseId: f.expense.id, documentId: root.sha256, versionId: root.sha256,
+    [kind === 'income' ? 'incomeId' : 'expenseId']: f.expense.id, documentId: root.sha256, versionId: root.sha256,
     documentRole: 'invoice', externalReference: null, revision: 1 } });
   response = await send(); assert.equal(response.status, 200); assert.equal((await response.json()).created, false);
+  if (kind === 'income') {
+    assert.equal((await f.register.incomeLinks(f.scope, f.expense.source, f.expense.id)).length, 1);
+    assert.equal((await f.register.expenseLinks(f.scope, f.expense.source, f.expense.id)).length, 0);
+    assert.equal((await f.register.incomeLinks({ ...f.scope, owner: digest('other') }, f.expense.source, f.expense.id)).length, 0);
+    await assert.rejects(f.db.query('DELETE FROM ged_private.income_document_links'), /permission denied/i);
+    await assert.rejects(f.db.query("UPDATE ged_private.income_document_links SET external_reference='tampered'"), /permission denied/i);
+  }
 });

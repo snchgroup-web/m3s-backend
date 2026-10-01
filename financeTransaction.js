@@ -1,4 +1,5 @@
 const { expenseAmountParams } = require('./financeExpenseStorage');
+const { incomeAmountParams } = require('./financeIncomeStorage');
 const numberOrZero = (value) => {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -6,8 +7,8 @@ const numberOrZero = (value) => {
 
 const normalizeFinanceTransaction = (body, id, kind) => {
   if (body.amount_contract_version !== undefined || body.source_amounts !== undefined) {
-    if (kind !== 'expense' || body.amount_contract_version !== 2) throw new Error('Unsupported expense amount contract');
-    const amounts = expenseAmountParams(body);
+    if (!['expense', 'income'].includes(kind) || body.amount_contract_version !== 2) throw new Error('Unsupported finance amount contract');
+    const amounts = kind === 'income' ? incomeAmountParams(body) : expenseAmountParams(body);
     const metadata = normalizeFinanceTransaction({ ...body, amount_contract_version: undefined,
       source_amounts: undefined, devise_origine: 'CHF', montant_origine: 1,
       montant_chf: 1, montant_cfa: 1, taux_fx_applique: 1 }, id, kind);

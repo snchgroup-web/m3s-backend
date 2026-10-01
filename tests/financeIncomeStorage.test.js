@@ -8,6 +8,7 @@ const { normalizeFinanceTransaction } = require('../financeTransaction');
 const baseSchema = ['MONTANT_SAISI', 'MONTANT_CHF', 'MONTANT_CFA', 'TAUX_FX_SAISI', 'TAUX_FX_APPLIQUE', 'TAUX_REF_AUTO']
   .map(name => ({ name, type: 'FLOAT', mode: 'NULLABLE' }));
 baseSchema.push({ name: 'DEVISE_SAISIE', type: 'STRING', mode: 'NULLABLE' });
+baseSchema.push({ name: 'DEVISE_CIBLE', type: 'STRING', mode: 'NULLABLE' });
 const schema = [...baseSchema, ...Object.entries(columns).map(([name, type]) => ({ name, type, mode: 'NULLABLE' }))];
 const body = { amount_contract_version: 2, source_amounts: { original_currency: 'CHF', total_received: '2.50' } };
 
@@ -32,7 +33,7 @@ test('schema gate requires nullable amounts, rates and source metadata', () => {
   assert.equal(supportsIncomeAmounts(schema), true);
   assert.equal(supportsIncomeAmounts(baseSchema), false);
   assert.equal(supportsIncomeAmounts(null), false);
-  for (const name of ['MONTANT_CFA', 'TAUX_FX_APPLIQUE', 'CONVERSION_SOURCE']) {
+  for (const name of ['MONTANT_CFA', 'TAUX_FX_APPLIQUE', 'CONVERSION_SOURCE', 'DEVISE_CIBLE']) {
     assert.equal(supportsIncomeAmounts(schema.map(field => field.name === name ? { ...field, mode: 'REQUIRED' } : field)), false);
     assert.equal(supportsIncomeAmounts(schema.filter(field => field.name !== name)), false);
   }
@@ -63,6 +64,12 @@ test('additive planner is bounded, idempotent and never executes a migration', (
     assert.throws(() => planIncomeAmountMigration({ ...input, ...change }));
   }
 });
-test('production normalizer still rejects the candidate income contract until integration', () => {
-  assert.throws(() => normalizeFinanceTransaction({ ...body, date: '2026-01-15', description: 'Synthetic refund' }, 'QA', 'income'));
+test('income normalizer retains source amounts and transaction dimensions', () => {
+  const row = normalizeFinanceTransaction({ ...body, date: '2026-01-15', description: 'Synthetic refund',
+    team: 'Synthetic team', agent: 'Synthetic agent', commentaire: 'Synthetic reference' }, 'QA', 'income');
+  assert.equal(row.montant_chf, 2.5);
+  assert.equal(row.montant_cfa, null);
+  assert.equal(row.agent, 'Synthetic agent');
+  assert.equal(row.commentaire, 'Synthetic reference');
+  assert.equal(row.type, 'Virement');
 });

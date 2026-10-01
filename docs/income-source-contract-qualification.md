@@ -38,8 +38,28 @@ never executes it. It rejects incompatible or non-nullable amount/rate columns.
   5.67 CHF; no synthetic CFA is produced.
 - Partial income sums are exposed separately from complete totals. Zero and null
   remain distinct. Expense totals are preserved.
-- No route imports these candidate modules. Current production normalization still
-  rejects income V2; an explicit regression test verifies this boundary.
+- Local routes now import the candidate modules. Income V2 is accepted only when
+  the resolved schema supports nullable amounts, rates, currencies and metadata.
+  Production has not been changed by this local integration.
+
+## Local integration in progress
+
+POST/PUT use typed source amounts; version guards protect V2 rows from legacy
+updates. Reads advertise the storage capability. Summary responses distinguish
+known income subtotals from incomplete totals. The frontend candidate includes
+FR/EN/DE receipt fields, partial indicators and null-preserving annual series.
+Income-specific GED links now use a separate append-only table, with the existing
+owner scope and lifecycle/version checks. They are disabled unless
+`M3S_GED_INCOME_LINKS_ENABLED=true`. Runtime checks require SELECT/INSERT only,
+forced RLS and a non-owner application role before enabling the registry.
+The expense namespace and stored links are unchanged.
+
+Verification of the integrated candidate: 165 frontend tests in ten suites,
+66 backend tests covering contracts, HTTP routes, lifecycle and owner isolation,
+and a strict CI build passed. Local synthetic desktop/mobile QA verified creation,
+credit-note attachment, PDF preview/close, edit reopening and cancellation.
+The synthetic fixture does not prove production schema or permissions.
+The checklist below describes activation gates, not completed production work.
 
 ## Required integration before activation
 
