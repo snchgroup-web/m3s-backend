@@ -1,6 +1,6 @@
 const express = require('express');
 const { MAX_BYTES, extensionFor, contentTypeFor, categoryFor, readPolicy, scopeFor, approvedDocument, fail } = require('./gedPrivatePolicy');
-const { createRegister } = require('./gedPrivateRegister');
+const { createRegister, validateExpenseDocumentLink } = require('./gedPrivateRegister');
 const PREFIX = '/api/ged/private';
 const isPrivateGedRoute = path => path.toLowerCase() === PREFIX || path.toLowerCase().startsWith(`${PREFIX}/`);
 const publicRecord = (row, policy) => {
@@ -13,7 +13,8 @@ const objectKey = (scope, id) => `ged-private/v1/${scope.tenant}/${scope.owner}/
 const reference = (scope, row) => ({ key: objectKey(scope, row.document_id), generation: row.generation,
   size: row.byte_size, sha256: row.document_id });
 
-function createGedRouter({ policy, authenticate, getServices, financeRead, resolveExpense, origins = ['https://seneswiss-group.com'] }) {
+function createGedRouter({ policy, authenticate, getServices, financeRead, financeWrite, canAttachExpense, resolveExpense,
+  origins = ['https://seneswiss-group.com'] }) {
   const router = express.Router();
   router.use((_req, res, next) => {
     res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
@@ -81,11 +82,26 @@ function createGedRouter({ policy, authenticate, getServices, financeRead, resol
       res.send(bytes);
     }));
   }
+  if (financeRead && financeWrite && resolveExpense) {
+    router.post('/expenses/:expenseId/documents', financeRead, financeWrite,
+      express.json({ limit: 2048, strict: true }), handle(async (req, res) => {
+        const candidate = validateExpenseDocumentLink(req.body);
+        const expense = await resolveExpense(req.params.expenseId);
+        if (!expense) fail('GED_NOT_FOUND');
+        const { register } = await getServices();
+        if (!register.lifecycle || typeof register.attachExpenseDocument !== 'function') fail('GED_LIFECYCLE_NOT_ENABLED');
+        const result = await register.attachExpenseDocument(req.gedScope, expense, candidate);
+        res.status(result.created ? 201 : 200).json({ success: true, ...result });
+      }));
+  }
   router.get('/documents', handle(async (req, res) => {
     const { register } = await getServices();
     const rows = await (register.lifecycle ? register.lifecycle.list(req.gedScope) : register.list(req.gedScope));
     res.json({ success: true, documents: rows.map(row => publicRecord(row, policy)),
-      approved: policy.documents.map(item => ({ ...item, category: categoryFor(item), contentType: contentTypeFor(item) })) });
+      approved: policy.documents.map(item => ({ ...item, category: categoryFor(item), contentType: contentTypeFor(item) })),
+      capabilities: { expenseAttach: Boolean(financeRead && financeWrite && canAttachExpense?.(req) &&
+        resolveExpense && register.lifecycle &&
+        typeof register.attachExpenseDocument === 'function') } });
   }));
   router.get('/documents/:id/history', handle(async (req, res) => {
     const { register } = await getServices();
@@ -140,8 +156,11 @@ function createGedRouter({ policy, authenticate, getServices, financeRead, resol
       GED_DOCUMENT_TRASHED: 409, GED_DOCUMENT_NOT_TRASHED: 409, GED_REVISION_LIMIT: 409, GED_VERSION_NOT_APPROVED: 400,
       GED_VERSION_ALREADY_LINKED: 409, GED_VERSION_NOT_ROOT: 409, GED_NOT_FOUND: 404, GED_LIFECYCLE_NOT_ENABLED: 503 }[error?.code];
     if (lifecycleStatus) return res.status(lifecycleStatus).json({ success: false, code: error.code });
-    const status = error?.type === 'entity.too.large' ? 413 : error?.code === 'GED_DOCUMENT_NOT_APPROVED' ? 400 : 503;
-    res.status(status).json({ success: false, code: status === 413 ? 'GED_TOO_LARGE' : status === 400 ? 'GED_DOCUMENT_NOT_APPROVED' : 'GED_UNAVAILABLE' });
+    const malformedJson = error?.type === 'entity.parse.failed';
+    const status = error?.type === 'entity.too.large' ? 413 :
+      malformedJson || error?.code === 'GED_DOCUMENT_NOT_APPROVED' ? 400 : 503;
+    res.status(status).json({ success: false, code: status === 413 ? 'GED_TOO_LARGE' :
+      malformedJson ? 'GED_INVALID_COMMAND' : status === 400 ? 'GED_DOCUMENT_NOT_APPROVED' : 'GED_UNAVAILABLE' });
   });
   return router;
 }
@@ -187,7 +206,8 @@ async function assertDatabaseAccess(pool, lifecycleEnabled = false) {
   }
 }
 
-function createGedRuntime({ env, identityRuntime, credentials, financeRead, resolveExpense, dependencies = {} }) {
+function createGedRuntime({ env, identityRuntime, credentials, financeRead, financeWrite, canAttachExpense,
+  resolveExpense, dependencies = {} }) {
   let policy;
   try { policy = readPolicy(env); } catch { policy = null; }
   let ready;
@@ -216,7 +236,8 @@ function createGedRuntime({ env, identityRuntime, credentials, financeRead, reso
     if (!ready) ready = initialize().catch(error => { ready = null; throw error; });
     return ready;
   };
-  return createGedRouter({ policy, authenticate: identityRuntime.authenticate, getServices, financeRead, resolveExpense });
+  return createGedRouter({ policy, authenticate: identityRuntime.authenticate, getServices,
+    financeRead, financeWrite, canAttachExpense, resolveExpense });
 }
 
 module.exports = { PREFIX, isPrivateGedRoute, createGedRouter, createGedRuntime, databaseOptions, assertDatabaseAccess };

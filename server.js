@@ -43,6 +43,7 @@ const {
   PERMISSIONS: FINANCE_PERMISSIONS,
   hasFinancePermissionConfiguration,
   permissionsForAccount: financePermissionsForAccount,
+  permissionsForUser: financePermissionsForUser,
   createFinanceAuthorizationMiddleware,
 } = require('./financeAccess');
 const {
@@ -386,7 +387,13 @@ const verifyPassword = (account, password) => {
 const identityRuntime = createIdentityRuntime({ env: process.env, getAccounts: getConfiguredUsers,
   credentials: googleCredentials, authenticateLegacy });
 app.use(GED_PREFIX, createGedRuntime({ env: process.env, identityRuntime, credentials: googleCredentials,
+  // GED authorization stays mandatory even when legacy API_REQUIRE_AUTH is disabled.
   financeRead: createFinanceAuthorizationMiddleware(FINANCE_PERMISSIONS.READ),
+  financeWrite: createFinanceAuthorizationMiddleware(FINANCE_PERMISSIONS.WRITE),
+  canAttachExpense: req => {
+    const permissions = financePermissionsForUser(req.user);
+    return permissions.includes(FINANCE_PERMISSIONS.READ) && permissions.includes(FINANCE_PERMISSIONS.WRITE);
+  },
   resolveExpense: async id => {
     if (typeof id !== 'string' || !id.trim() || id.length > 128 || !financeSources.resolved) return null;
     const table = financeTableRef('expenses');
