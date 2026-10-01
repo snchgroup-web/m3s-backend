@@ -14,6 +14,7 @@ const reference = (scope, row) => ({ key: objectKey(scope, row.document_id), gen
   size: row.byte_size, sha256: row.document_id });
 
 function createGedRouter({ policy, authenticate, getServices, financeRead, financeWrite, canAttachExpense, resolveExpense,
+  resolveIncome,
   origins = ['https://seneswiss-group.com'] }) {
   const router = express.Router();
   router.use((_req, res, next) => {
@@ -44,12 +45,13 @@ function createGedRouter({ policy, authenticate, getServices, financeRead, finan
     next();
   });
   const handle = fn => async (req, res, next) => { try { await fn(req, res); } catch (error) { next(error); } };
-  async function linkedDocuments(req) {
-    const expense = await resolveExpense(req.params.expenseId);
+  async function linkedDocuments(req, spec) {
+    const expense = await spec.resolve(req.params[spec.id]);
     if (!expense) fail('GED_NOT_FOUND');
     const { register } = await getServices();
     if (!register.lifecycle) fail('GED_LIFECYCLE_NOT_ENABLED');
-    const links = await register.expenseLinks(req.gedScope, expense.source, expense.id);
+    if (typeof register[spec.list] !== 'function') fail('GED_LIFECYCLE_NOT_ENABLED');
+    const links = await register[spec.list](req.gedScope, expense.source, expense.id);
     const roots = await register.lifecycle.list(req.gedScope);
     const result = [];
     for (const link of links) {
@@ -64,12 +66,18 @@ function createGedRouter({ policy, authenticate, getServices, financeRead, finan
     }
     return result;
   }
-  if (financeRead && resolveExpense) {
-    router.get('/expenses/:expenseId/documents', financeRead, handle(async (req, res) => {
-      res.json({ success: true, documents: await linkedDocuments(req) });
+  const linkSpecs = [
+    { path: 'expenses', id: 'expenseId', resolve: resolveExpense, list: 'expenseLinks', attach: 'attachExpenseDocument' },
+    { path: 'income', id: 'incomeId', resolve: resolveIncome, list: 'incomeLinks', attach: 'attachIncomeDocument' }
+  ];
+  for (const spec of linkSpecs) {
+  const route = `/${spec.path}/:${spec.id}/documents`;
+  if (financeRead && spec.resolve) {
+    router.get(route, financeRead, handle(async (req, res) => {
+      res.json({ success: true, documents: await linkedDocuments(req, spec) });
     }));
-    router.get('/expenses/:expenseId/documents/:id/content', financeRead, handle(async (req, res) => {
-      const linked = (await linkedDocuments(req)).find(row => row.id === req.params.id);
+    router.get(`${route}/:id/content`, financeRead, handle(async (req, res) => {
+      const linked = (await linkedDocuments(req, spec)).find(row => row.id === req.params.id);
       if (!linked) fail('GED_NOT_FOUND');
       const { register, storage } = await getServices();
       const row = await register.read(req.gedScope, linked.id);
@@ -82,17 +90,18 @@ function createGedRouter({ policy, authenticate, getServices, financeRead, finan
       res.send(bytes);
     }));
   }
-  if (financeRead && financeWrite && resolveExpense) {
-    router.post('/expenses/:expenseId/documents', financeRead, financeWrite,
+  if (financeRead && financeWrite && spec.resolve) {
+    router.post(route, financeRead, financeWrite,
       express.json({ limit: 2048, strict: true }), handle(async (req, res) => {
         const candidate = validateExpenseDocumentLink(req.body);
-        const expense = await resolveExpense(req.params.expenseId);
+        const expense = await spec.resolve(req.params[spec.id]);
         if (!expense) fail('GED_NOT_FOUND');
         const { register } = await getServices();
-        if (!register.lifecycle || typeof register.attachExpenseDocument !== 'function') fail('GED_LIFECYCLE_NOT_ENABLED');
-        const result = await register.attachExpenseDocument(req.gedScope, expense, candidate);
+        if (!register.lifecycle || typeof register[spec.attach] !== 'function') fail('GED_LIFECYCLE_NOT_ENABLED');
+        const result = await register[spec.attach](req.gedScope, expense, candidate);
         res.status(result.created ? 201 : 200).json({ success: true, ...result });
       }));
+  }
   }
   router.get('/documents', handle(async (req, res) => {
     const { register } = await getServices();
@@ -101,7 +110,9 @@ function createGedRouter({ policy, authenticate, getServices, financeRead, finan
       approved: policy.documents.map(item => ({ ...item, category: categoryFor(item), contentType: contentTypeFor(item) })),
       capabilities: { expenseAttach: Boolean(financeRead && financeWrite && canAttachExpense?.(req) &&
         resolveExpense && register.lifecycle &&
-        typeof register.attachExpenseDocument === 'function') } });
+        typeof register.attachExpenseDocument === 'function'),
+        incomeAttach: Boolean(financeRead && financeWrite && canAttachExpense?.(req) &&
+          resolveIncome && register.lifecycle && typeof register.attachIncomeDocument === 'function') } });
   }));
   router.get('/documents/:id/history', handle(async (req, res) => {
     const { register } = await getServices();
@@ -174,7 +185,7 @@ function databaseOptions(env) {
     query_timeout: 12000, idle_in_transaction_session_timeout: 15000, application_name: 'm3s-ged-private' };
 }
 
-async function assertDatabaseAccess(pool, lifecycleEnabled = false) {
+async function assertDatabaseAccess(pool, lifecycleEnabled = false, incomeLinksEnabled = false) {
   const { rows } = await pool.query(`SELECT current_user AS role, rolsuper, rolcreatedb, rolcreaterole, rolreplication,
     rolbypassrls, rolinherit, (SELECT count(*)::int FROM pg_auth_members WHERE member = r.oid) AS memberships
     FROM pg_roles r WHERE rolname = current_user`);
@@ -193,13 +204,18 @@ async function assertDatabaseAccess(pool, lifecycleEnabled = false) {
       rights.rows.some(row => row.relrowsecurity !== true || row.relforcerowsecurity !== true || row.owns_table !== false ||
         row.can_insert !== true || row.can_mutate !== false || row.can_create !== false ||
         (row.relname === 'documents' && row.can_read !== true))) fail('GED_DATABASE_ROLE_DENIED');
-  if (lifecycleEnabled) {
+  const lifecycleTables = lifecycleEnabled ? ['revisions'] : [];
+  if (incomeLinksEnabled) {
+    if (!lifecycleEnabled) fail('GED_DATABASE_ROLE_DENIED');
+    lifecycleTables.push('income_document_links');
+  }
+  for (const table of lifecycleTables) {
     const result = await pool.query(`SELECT relrowsecurity, relforcerowsecurity,
       relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user) AS owns_table,
       has_table_privilege(current_user, oid, 'SELECT') AS can_read,
       has_table_privilege(current_user, oid, 'INSERT') AS can_insert,
       has_table_privilege(current_user, oid, 'UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS can_mutate
-      FROM pg_class WHERE oid=to_regclass('ged_private.revisions')`);
+      FROM pg_class WHERE oid=to_regclass('ged_private.${table}')`);
     const r = result.rows[0];
     if (result.rows.length !== 1 || r.relrowsecurity !== true || r.relforcerowsecurity !== true || r.owns_table !== false ||
       r.can_read !== true || r.can_insert !== true || r.can_mutate !== false) fail('GED_DATABASE_ROLE_DENIED');
@@ -207,7 +223,7 @@ async function assertDatabaseAccess(pool, lifecycleEnabled = false) {
 }
 
 function createGedRuntime({ env, identityRuntime, credentials, financeRead, financeWrite, canAttachExpense,
-  resolveExpense, dependencies = {} }) {
+  resolveExpense, resolveIncome, dependencies = {} }) {
   let policy;
   try { policy = readPolicy(env); } catch { policy = null; }
   let ready;
@@ -218,7 +234,8 @@ function createGedRuntime({ env, identityRuntime, credentials, financeRead, fina
       pool = new Pool(databaseOptions(env));
       pool.on('error', () => {}); // Never emit provider errors containing connection details.
       const lifecycleEnabled = env.M3S_GED_LIFECYCLE_ENABLED === 'true';
-      await assertDatabaseAccess(pool, lifecycleEnabled);
+      const incomeLinksEnabled = env.M3S_GED_INCOME_LINKS_ENABLED === 'true';
+      await assertDatabaseAccess(pool, lifecycleEnabled, incomeLinksEnabled);
       const { createPrivateObjectStore } = await import('./gedPrivateStorage.mjs');
       if (credentials?.client_email !== 'm3s-backend@mon-projet-data-2sg.iam.gserviceaccount.com' || !credentials.private_key) fail('GED_STORAGE_IDENTITY_DENIED');
       const { Storage } = dependencies.storage || require('@google-cloud/storage');
@@ -226,7 +243,7 @@ function createGedRuntime({ env, identityRuntime, credentials, financeRead, fina
         retryOptions: { autoRetry: false, maxRetries: 0, totalTimeout: 15 } }).bucket('m3s-ged-prive-mon-projet-data-2sg');
       const storage = createPrivateObjectStore({ enabled: true, bucket, target: {
         bucketName: 'm3s-ged-prive-mon-projet-data-2sg', projectNumber: '39747051341', location: 'EUROPE-WEST6', maxBytes: policy.maxBytes || MAX_BYTES } });
-      return { register: createRegister(pool, { maxBytes: policy.maxBytes, lifecyclePolicy: lifecycleEnabled ? policy : undefined }), storage };
+      return { register: createRegister(pool, { maxBytes: policy.maxBytes, lifecyclePolicy: lifecycleEnabled ? policy : undefined, incomeLinksEnabled }), storage };
     } catch {
       if (pool) await pool.end().catch(() => {});
       fail('GED_UNAVAILABLE');
@@ -237,7 +254,8 @@ function createGedRuntime({ env, identityRuntime, credentials, financeRead, fina
     return ready;
   };
   return createGedRouter({ policy, authenticate: identityRuntime.authenticate, getServices,
-    financeRead, financeWrite, canAttachExpense, resolveExpense });
+    financeRead, financeWrite, canAttachExpense, resolveExpense,
+    resolveIncome: env.M3S_GED_INCOME_LINKS_ENABLED === 'true' ? resolveIncome : undefined });
 }
 
 module.exports = { PREFIX, isPrivateGedRoute, createGedRouter, createGedRuntime, databaseOptions, assertDatabaseAccess };
