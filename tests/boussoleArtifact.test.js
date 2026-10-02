@@ -33,8 +33,8 @@ test('renders section and language changes without depending on blob hash naviga
 test('current published summary matches its source while old sections remain dated archives', async () => {
   const content = await loadBoussoleArtifact();
   const data = JSON.parse(content.match(/<script id="data" type="application\/json">([\s\S]*?)<\/script>/)[1]);
-  const current = require('../artifacts/programAccessCurrentStatus.json');
-  assert.equal(data.version, '3.3');
+  const current = require('../artifacts/programDeliveryCurrentStatus.json');
+  assert.equal(data.version, '3.4');
   assert.equal(data.date, current.snapshotDate);
   assert.deepEqual(data.sections.find(section => section.id === current.id), current);
   assert.equal(data.sections.filter(section => section.id === current.id).length, 1);
