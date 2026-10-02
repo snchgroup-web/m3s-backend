@@ -4,7 +4,7 @@ const path = require('path');
 const BOUSSOLE_ARTIFACT_PATH = path.join(
   __dirname,
   'artifacts',
-  'M3S_BOUSSOLE_TRILINGUE_V3_3_2026-09-27.html'
+  'M3S_BOUSSOLE_TRILINGUE_V3_4_2026-10-03.html'
 );
 
 const loadBoussoleArtifact = async (readFile = fs.readFile) => {
@@ -26,7 +26,7 @@ const createBoussoleArtifactHandler = ({
     res
       .type('html')
       .set('Cache-Control', 'private, no-store')
-      .set('Content-Disposition', 'inline; filename="M3S_Boussole_V3_3.html"')
+      .set('Content-Disposition', 'inline; filename="M3S_Boussole_V3_4.html"')
       .set('X-Content-Type-Options', 'nosniff');
     return res.send(content);
   } catch (error) {

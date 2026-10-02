@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
-const update = JSON.parse(fs.readFileSync(path.join(root, 'artifacts/programAccessCurrentStatus.json'), 'utf8'));
+const update = JSON.parse(fs.readFileSync(path.join(root, 'artifacts/programDeliveryCurrentStatus.json'), 'utf8'));
 const source = fs.readFileSync(path.join(root, 'artifacts/M3S_BOUSSOLE_TRILINGUE_V3_1_2026-09-13.html'), 'utf8');
 const pattern = /(<script id="data" type="application\/json">)([\s\S]*?)(<\/script>)/;
 const match = source.match(pattern);
@@ -9,28 +9,33 @@ if (!match) throw new Error('Missing source data');
 const data = JSON.parse(match[2]);
 const date = update.snapshotDate;
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Invalid snapshot date');
-data.version = '3.3';
+data.version = '3.4';
 data.date = date;
+const displayDate = Object.fromEntries(['FR', 'DE', 'EN'].map(lang => [lang,
+  new Intl.DateTimeFormat({ FR: 'fr-CH', DE: 'de-CH', EN: 'en-GB' }[lang], {
+    dateStyle: 'long', timeZone: 'UTC'
+  }).format(new Date(`${date}T00:00:00Z`))
+]));
 const historic = { type: 'prose', title: {
   FR: 'Archive datée du 13 septembre 2026', DE: 'Archiv vom 13. September 2026', EN: 'Archive dated 13 September 2026'
 }, body: {
-  FR: 'Les états ci-dessous sont historiques. Le point courant Accès M3S du 27 septembre distingue les livraisons réelles et les suites ouvertes. Aucun compteur global recalculé.',
-  DE: 'Die folgenden Stände sind historisch. Der aktuelle M3S-Zugangsstand vom 27. September trennt reale Lieferungen von offenen Schritten. Keine globale Kennzahl neu berechnet.',
-  EN: 'The states below are historical. The current M3S Access status of 27 September separates live deliveries from open next steps. No global count recalculated.'
+  FR: `Les états ci-dessous sont historiques. Le point courant du ${displayDate.FR} distingue les livraisons réelles et les suites ouvertes. Aucun compteur global recalculé.`,
+  DE: `Die folgenden Stände sind historisch. Der aktuelle Stand vom ${displayDate.DE} trennt reale Lieferungen von offenen Schritten. Keine globale Kennzahl neu berechnet.`,
+  EN: `The states below are historical. The current update of ${displayDate.EN} separates live deliveries from open next steps. No global count recalculated.`
 }};
 for (const section of data.sections) section.blocks.unshift(historic);
 data.sections.splice(1, 0, update);
 const labels = {
-  FR: { date: '27 septembre 2026 · V3.3', foot: 'Point documentaire daté ; livraisons réelles distinguées des archives.', facts: ['Acquis réels', 'Périmètre vérifié', 'Suite ouverte'], read: 'Lecture documentaire · V3.3' },
-  DE: { date: '27. September 2026 · V3.3', foot: 'Datierter Dokumentationsstand; reale Lieferungen von Archiven getrennt.', facts: ['Reale Ergebnisse', 'Geprüfter Umfang', 'Offene Schritte'], read: 'Dokumentarische Ansicht · V3.3' },
-  EN: { date: '27 September 2026 · V3.3', foot: 'Dated documentary update; live deliveries distinguished from archives.', facts: ['Live progress', 'Verified scope', 'Open next steps'], read: 'Documentary view · V3.3' }
+  FR: { date: `${displayDate.FR} · V3.4`, foot: 'Point documentaire daté ; livraisons réelles distinguées des archives.', facts: ['Acquis réels', 'Périmètre vérifié', 'Suite ouverte'], read: 'Lecture documentaire · V3.4' },
+  DE: { date: `${displayDate.DE} · V3.4`, foot: 'Datierter Dokumentationsstand; reale Lieferungen von Archiven getrennt.', facts: ['Reale Ergebnisse', 'Geprüfter Umfang', 'Offene Schritte'], read: 'Dokumentarische Ansicht · V3.4' },
+  EN: { date: `${displayDate.EN} · V3.4`, foot: 'Dated documentary update; live deliveries distinguished from archives.', facts: ['Live progress', 'Verified scope', 'Open next steps'], read: 'Documentary view · V3.4' }
 };
 for (const lang of ['FR', 'DE', 'EN']) {
   Object.assign(data.ui[lang], labels[lang], { factBody: [update.intro[lang], update.summary[lang], update.nextStep[lang]] });
 }
-data.sources.push(['S14', 'Point de reprise GED 27-09-2026 ; mise en service §14.51 ; PR backend 106, frontend 336 ; vérification réelle.', '']);
+data.sources.push(['S14', 'Point de reprise GED 27-09-2026 ; journaux M3S 01/02/03-10-2026 ; PR backend 117 ; frontend 353–358 ; contrôles de publication.', '']);
 const cell = value => value.replace(/\|/g, '\\|').replace(/\n/g, ' ');
-let markdown = '# Boussole V3.3 - ' + date + '\n\n';
+let markdown = '# Boussole V3.4 - ' + date + '\n\n';
 for (const lang of ['FR', 'DE', 'EN']) {
   markdown += `## ${lang} - ${update.title[lang]}\n\n${update.intro[lang]}\n\n`;
   for (const block of update.blocks) {
@@ -72,10 +77,10 @@ const html = source.replace(pattern, (_all, start, _json, end) => start + JSON.s
   .replace('</head>', mobileNavigation + '</head>')
   .replace(renderEnd, 'applyTheme();search();revealActiveNavigation();}')
   .replace('datetime="2026-09-13"', `datetime="${date}"`)
-  .replace('2SG / M3S · V3.1 · 2026-09-13', `2SG / M3S · V3.3 · ${date}`)
+  .replace('2SG / M3S · V3.1 · 2026-09-13', `2SG / M3S · V3.4 · ${date}`)
   .replace(exportStart, () => 'new Blob([' + JSON.stringify(markdown) + ' + "# 2SG / M3S')
-  .replace("a.download='M3S_BOUSSOLE_REFERENCE_TRILINGUE_V3_1_2026-09-13.md'", `a.download='M3S_BOUSSOLE_REFERENCE_TRILINGUE_V3_3_${date}.md'`);
-const destination = path.join(root, `artifacts/M3S_BOUSSOLE_TRILINGUE_V3_3_${date}.html`);
+  .replace("a.download='M3S_BOUSSOLE_REFERENCE_TRILINGUE_V3_1_2026-09-13.md'", `a.download='M3S_BOUSSOLE_REFERENCE_TRILINGUE_V3_4_${date}.md'`);
+const destination = path.join(root, `artifacts/M3S_BOUSSOLE_TRILINGUE_V3_4_${date}.html`);
 fs.writeFileSync(destination, html);
 const generated = JSON.parse(html.match(pattern)[2]);
 if (JSON.stringify(generated.sections[1]) !== JSON.stringify(update)) throw new Error('Cockpit/Boussole mismatch');
