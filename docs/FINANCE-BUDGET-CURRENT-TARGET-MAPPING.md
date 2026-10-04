@@ -140,3 +140,22 @@ Confirmer ou amender `BUDGET-MAP-001 V0.1` comme correspondance de reference ent
 ## Suite T1 preparee
 
 Le cadrage groupe `BUDGET-T1-001 V0.1` est documente dans `FINANCE-BUDGET-T1-REFERENTIALS-ROLES.md`. Il distingue l'identite metier du budget, l'exercice fiscal, les responsabilites, la maturite reelle des referentiels et les cardinalites analytiques. Ce document reste candidat : il n'ajoute aucun champ, droit, schema, registre ou rattachement aux brouillons actuels.
+
+## Controle des sources Excel et relations - 03-10-2026
+
+Controle local en lecture seule, sans execution de macro ni modification des classeurs :
+
+- `RECETTES.xlsm`, feuille `BDD_Recettes`, en-tete ligne 5 : `TYPE_BUDGETAIRE` existe. Les valeurs observees sont Fonctionnement, Investissement, Operationnel et Social. Il s'agit d'une classification historique, pas d'un identifiant de budget ou de ligne budgetaire.
+- La meme feuille distingue `MODE_TAUX`, `PERIODE_REF`, `TAUX_REF_AUTO`, `TAUX_FX_SAISI` et `TAUX_FX_APPLIQUE`. La formule de reference utilise une recherche sur periode et devise cible; le mode Automatique/Saisi choisit ensuite la reference ou la valeur saisie. Cette structure seule ne prouve ni un cours journalier ni le taux d'un prestataire pour une operation donnee.
+- `BDD_DEPENSES.xlsx`, feuille `BDD_Depense`, en-tete ligne 4 : `POSTE`, `OPERATION`, `RUBRIQUE DEP`, `BU`, `PHASE`, `AGENT` et `FOURNISSEUR` sont presents, sans cle budgetaire observee. Les copies combinees d'avril 2026 portent egalement des rubriques et operations, sans relation de budget stable dans ces en-tetes.
+- Les champs de reference FX historiques sont conserves dans les payloads Finance. La presentation d'une estimation utilise un historique date et source; elle ne transforme pas une hypothese en taux applique prouve ni ne reecrit les equivalents enregistres.
+
+### Relation cible Recettes - Depenses - Budget
+
+Le budget porte une prevision; les registres Recettes et Depenses portent les operations existantes. Le rapprochement devra referencer ces operations, sans les recopier ni creer un second paiement.
+
+Une allocation candidate porte l'identifiant stable de l'operation et son type, la version budgetaire et la ligne visees, la periode, le montant alloue et sa devise, ainsi que la preuve et l'auteur de validation. Les dimensions projet/dossier/phase, agent/equipe et fonction reutilisent les referentiels recevables; aucun rattachement ne se deduit d'une ressemblance de libelles. Fournisseur et justificatifs GED restent relies a l'operation d'origine.
+
+Une operation peut etre ventilee sur plusieurs lignes uniquement avec un contrat d'allocation controle. Les montants affectes ne depassent pas l'assiette justifiee dans la meme devise; le reliquat reste explicitement non affecte. Une estimation FX ne modifie ni le montant paye ni le montant remis au beneficiaire.
+
+Statut : complement documentaire du cadrage T4, NON implemente. La demande de rapprochement et l'existence de `TYPE_BUDGETAIRE` ne valent pas autorisation de migration, d'approbation budgetaire ou d'affectation automatique des donnees historiques. Prochain lot : confirmer les correspondances historiques, les budgets/versions recevables et les cles de liaison avant toute ecriture.

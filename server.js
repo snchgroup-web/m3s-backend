@@ -17,6 +17,7 @@ const { BigQuery } = require('@google-cloud/bigquery');
 const { createCorsOriginValidator, createCorsErrorHandler } = require('./corsPolicy');
 const { createDebugAccessMiddleware, createDebugSampleGuard } = require('./debugAccess');
 const { createBoussoleArtifactHandler } = require('./boussoleArtifact');
+const { buildFxRateMetadata } = require('./fxRateMetadata');
 const { profileNoStore, createOwnProfileHandler } = require('./ownProfile');
 const { createIdentityRuntime } = require('./identityRuntime');
 const { PREFIX: GED_PREFIX, isPrivateGedRoute, createGedRuntime } = require('./gedPrivate');
@@ -2041,6 +2042,7 @@ app.get('/api/fx-rates', async (req, res) => {
     });
 
     let tauxDuJour = {};
+    let tauxDuJourDetails = {};
     try {
       const [currentRows] = await bigquery.query({
         query: `
@@ -2059,6 +2061,7 @@ app.get('/api/fx-rates', async (req, res) => {
         acc[`${row.devise_base}_${row.devise_cible}`] = row.taux;
         return acc;
       }, {});
+      tauxDuJourDetails = buildFxRateMetadata(currentRows, 'current_view');
     } catch (error) {
       if (!isMissingBigQueryTable(error)) {
         throw error;
@@ -2071,6 +2074,7 @@ app.get('/api/fx-rates', async (req, res) => {
         }
         return acc;
       }, {});
+      tauxDuJourDetails = buildFxRateMetadata(rows, 'history_fallback');
     }
 
     res.json({
@@ -2078,6 +2082,7 @@ app.get('/api/fx-rates', async (req, res) => {
       data: rows,
       count: rows.length,
       taux_du_jour: tauxDuJour,
+      taux_du_jour_details: tauxDuJourDetails,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
