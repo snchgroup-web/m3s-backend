@@ -71,6 +71,20 @@ function createRhReadRuntime({ enabled = false, qualified = false, identityRunti
     if (req.method !== 'GET') return res.status(405).set('Allow', 'GET').json({ code: 'RH_READ_ONLY' });
     next();
   });
+  router.get('/access', async (req, res, next) => {
+    try {
+      if (Object.keys(req.query).length) fail('RH_INVALID_PAGE');
+      const scope = await scopeFor(policy, req.user, 'read');
+      const register = await getRegister();
+      if (typeof register?.access !== 'function') fail('RH_SERVICE_UNAVAILABLE');
+      const decision = await register.access(scope);
+      if (!decision || Object.keys(decision).join(',') !== 'revision' ||
+          typeof decision.revision !== 'string' || !/^[1-9][0-9]{0,4}$/.test(decision.revision) ||
+          Number(decision.revision) > 10000) fail('RH_SERVICE_UNAVAILABLE');
+      res.json({ enabled: true, qualified: true, userId: req.user.id,
+        organizationId: req.user.tenantId, revision: decision.revision });
+    } catch (error) { next(error); }
+  });
   router.get('/employees', async (req, res, next) => {
     try {
       const scope = await scopeFor(policy, req.user, 'read');
