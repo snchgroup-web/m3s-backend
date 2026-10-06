@@ -21,6 +21,7 @@ const { buildFxRateMetadata } = require('./fxRateMetadata');
 const { profileNoStore, createOwnProfileHandler } = require('./ownProfile');
 const { createIdentityRuntime } = require('./identityRuntime');
 const { PREFIX: GED_PREFIX, isPrivateGedRoute, createGedRuntime } = require('./gedPrivate');
+const { PREFIX: RH_PREFIX, isPrivateRhRoute, createRhReadRuntime } = require('./rhReadRuntime');
 const { ownAccountDiagnosticNoStore, registerHistoricalOwnAccountDiagnosticRoute,
   createSanitizedOwnAccountLoader } = require('./ownAccountDiagnostic');
 const {
@@ -273,12 +274,13 @@ app.use(cors({
 app.use('/api/finance/budget-drafts', createBudgetBodyMiddleware());
 const generalJsonBody = express.json({ limit: '50mb' });
 const generalFormBody = express.urlencoded({ limit: '50mb', extended: true });
-app.use((req, res, next) => isPrivateGedRoute(req.path) ? next() : generalJsonBody(req, res, next));
-app.use((req, res, next) => isPrivateGedRoute(req.path) ? next() : generalFormBody(req, res, next));
+const hasPrivateBody = path => isPrivateGedRoute(path) || isPrivateRhRoute(path);
+app.use((req, res, next) => hasPrivateBody(req.path) ? next() : generalJsonBody(req, res, next));
+app.use((req, res, next) => hasPrivateBody(req.path) ? next() : generalFormBody(req, res, next));
 
 // Logging
 app.use((req, res, next) => {
-  const route = isBudgetRoute(req.path)
+  const route = isPrivateRhRoute(req.path) ? RH_PREFIX : isBudgetRoute(req.path)
     ? normalizeBudgetRoute(req.path)
     : req.path;
   console.log(`[${new Date().toISOString()}] ${req.method} ${route}`);
@@ -389,6 +391,8 @@ const verifyPassword = (account, password) => {
 
 const identityRuntime = createIdentityRuntime({ env: process.env, getAccounts: getConfiguredUsers,
   credentials: googleCredentials, authenticateLegacy });
+// Closed until the current RH entitlement source and restricted register are qualified.
+app.use(RH_PREFIX, createRhReadRuntime({ identityRuntime, origins: CORS_ORIGINS }));
 app.use(GED_PREFIX, createGedRuntime({ env: process.env, identityRuntime, credentials: googleCredentials,
   // GED authorization stays mandatory even when legacy API_REQUIRE_AUTH is disabled.
   financeRead: createFinanceAuthorizationMiddleware(FINANCE_PERMISSIONS.READ),
