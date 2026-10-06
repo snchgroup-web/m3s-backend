@@ -68,15 +68,42 @@ async function withServer(t, options, run) {
   } finally { await new Promise(resolve => server.close(resolve)); }
 }
 
-test('host mounts the RH runtime closed, with no entitlement or storage inferred', () => {
+test('host mounts the explicit RH bootstrap without inferring an entitlement or initializing storage', () => {
   const source = readFileSync(resolve(__dirname, '../server.js'), 'utf8');
-  assert.ok(source.includes('app.use(RH_PREFIX, createRhReadRuntime({ identityRuntime, origins: CORS_ORIGINS }));'));
+  assert.ok(source.includes('const rhReadHost = createRhReadHost({ env: process.env, identityRuntime,'));
+  assert.ok(source.includes('app.use(RH_PREFIX, rhReadHost.router);'));
   assert.ok(source.indexOf('app.use(RH_PREFIX,') < source.indexOf('app.use(GED_PREFIX,'));
   assert.ok(source.includes('isPrivateRhRoute(req.path) ? RH_PREFIX'));
   assert.equal(isPrivateRhRoute('/api/rh/private-ish'), false);
   assert.equal(isPrivateRhRoute('/api/rh/private/employees'), true);
   assert.equal(isPrivateRhRoute('/API/RH/PRIVATE/EMPLOYEES'), true);
   assert.equal(isPrivateRhRoute(null), false);
+});
+
+test('access marker is minimized, bounded and protected by the same live TOTP and RH decision', async t => {
+  const { options, state, claims, account } = fixture();
+  let revision = '1';
+  options.getRegister = async () => ({ access: async () => { state.storeReads++; return { revision }; } });
+  await withServer(t, options, async request => {
+    const allowed = await request('/access');
+    assert.equal(allowed.status, 200);
+    assert.deepEqual(allowed.body, { enabled: true, qualified: true,
+      userId: account.id, organizationId: account.tenantId, revision: '1' });
+    assert.match(allowed.headers.get('Cache-Control'), /no-store/);
+    const reads = state.reads + state.storeReads;
+    delete claims.firebase.sign_in_second_factor;
+    assert.equal((await request('/access')).status, 401);
+    assert.equal(state.reads + state.storeReads, reads);
+    claims.firebase.sign_in_second_factor = 'totp';
+    assert.equal((await request('/access?owner=foreign')).status, 400);
+    assert.equal((await request('/access', { method: 'POST', body: '{invalid',
+      headers: { 'Content-Type': 'application/json' } })).status, 405);
+    assert.equal(state.reads + state.storeReads, reads);
+    revision = '10001';
+    assert.deepEqual((await request('/access')).body, { code: 'RH_SERVICE_UNAVAILABLE' });
+    state.permissions = [];
+    assert.equal((await request('/access')).status, 403);
+  });
 });
 
 test('closed/default, unqualified, incomplete and legacy modes never contact auth or storage', async t => {

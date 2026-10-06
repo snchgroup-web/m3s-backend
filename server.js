@@ -21,7 +21,8 @@ const { buildFxRateMetadata } = require('./fxRateMetadata');
 const { profileNoStore, createOwnProfileHandler } = require('./ownProfile');
 const { createIdentityRuntime } = require('./identityRuntime');
 const { PREFIX: GED_PREFIX, isPrivateGedRoute, createGedRuntime } = require('./gedPrivate');
-const { PREFIX: RH_PREFIX, isPrivateRhRoute, createRhReadRuntime } = require('./rhReadRuntime');
+const { PREFIX: RH_PREFIX, isPrivateRhRoute } = require('./rhReadRuntime');
+const { createRhReadHost } = require('./rhReadBootstrap');
 const { ownAccountDiagnosticNoStore, registerHistoricalOwnAccountDiagnosticRoute,
   createSanitizedOwnAccountLoader } = require('./ownAccountDiagnostic');
 const {
@@ -392,7 +393,9 @@ const verifyPassword = (account, password) => {
 const identityRuntime = createIdentityRuntime({ env: process.env, getAccounts: getConfiguredUsers,
   credentials: googleCredentials, authenticateLegacy });
 // Closed until the current RH entitlement source and restricted register are qualified.
-app.use(RH_PREFIX, createRhReadRuntime({ identityRuntime, origins: CORS_ORIGINS }));
+const rhReadHost = createRhReadHost({ env: process.env, identityRuntime,
+  origins: CORS_ORIGINS, warn: code => console.warn(code) });
+app.use(RH_PREFIX, rhReadHost.router);
 app.use(GED_PREFIX, createGedRuntime({ env: process.env, identityRuntime, credentials: googleCredentials,
   // GED authorization stays mandatory even when legacy API_REQUIRE_AUTH is disabled.
   financeRead: createFinanceAuthorizationMiddleware(FINANCE_PERMISSIONS.READ),
