@@ -71,6 +71,13 @@ test('connector role drift is refused, with no raw provider error', async () => 
       { message: 'RH_DOCUMENT_SOURCE_UNAVAILABLE' });
   }
 });
+test('viewer activation requires exactly two SET-only memberships', async () => {
+  const client = patch => ({async query(){return {rows:[{...connector,memberships:2,can_assume_viewer:true,...patch}]};}});
+  await assertConnectorAccess(client({}), {viewer:true});
+  for (const patch of [{memberships:1},{memberships:3},{can_assume_viewer:false},{direct_access:true}]) {
+    await assert.rejects(assertConnectorAccess(client(patch),{viewer:true}),/RH_DOCUMENT_SOURCE_UNAVAILABLE/);
+  }
+});
 test('failed connector checkout destroys the borrowed connection before runtime can use it', async () => {
   let checkedPool; const releases = [];
   const host = createRhDocumentHost({ env, identityRuntime,
