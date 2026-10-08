@@ -12,7 +12,7 @@ const statuses = Object.freeze({ RH_ACCESS_DENIED: 403, RH_RETURN_OBSERVATION_DE
 
 // Unmounted candidate; matching POST only, preserving every existing RH route.
 function createQualifiedReturnRuntime({ qualified = false, identityRuntime, readBindings,
-  observeBatch, origins = ['https://seneswiss-group.com'] } = {}) {
+  observeBatch, readContext, origins = ['https://seneswiss-group.com'] } = {}) {
   if (!Array.isArray(origins) || !origins.length || origins.some(origin => {
     try { const value = new URL(origin); return value.origin !== origin || !['https:', 'http:'].includes(value.protocol); }
     catch { return true; }
@@ -21,6 +21,7 @@ function createQualifiedReturnRuntime({ qualified = false, identityRuntime, read
     typeof identityRuntime.authenticate === 'function' && typeof readBindings === 'function' && typeof observeBatch === 'function';
   const allowed = new Set(origins);
   const bridge = ready ? createQualifiedReturnSessionBridge({ qualified, readBindings, observeBatch }) : null;
+  const contextBridge = ready && typeof readContext === 'function' ? createQualifiedReturnSessionBridge({qualified,readBindings,observeBatch:readContext}) : null;
   const router = express.Router();
   router.use((req, res, next) => {
     res.set('Cache-Control', 'private, no-store').set('X-Content-Type-Options', 'nosniff');
@@ -44,6 +45,13 @@ function createQualifiedReturnRuntime({ qualified = false, identityRuntime, read
       res.status(200).json(result);
     } catch (error) { next(error); }
   });
+  router.post('/returns/context', async (req,res,next) => {
+    try {
+      if (!contextBridge) return res.status(503).json({code:'RH_RETURN_NOT_ENABLED'});
+      if (Object.keys(req.query).length || !req.body || Array.isArray(req.body) || Object.keys(req.body).join(',')!=='target') throw Error('RH_RETURN_INVALID_FIELDS');
+      res.json(await contextBridge.observeFromServerPrincipal(req.user,[req.body.target]));
+    } catch(error) {next(error);}
+  });
   router.use((error, req, res, next) => {
     if (res.headersSent) return next(error);
     if (error?.type === 'entity.too.large') return res.status(413).json({ code: 'RH_RETURN_BATCH_TOO_LARGE' });
@@ -52,7 +60,7 @@ function createQualifiedReturnRuntime({ qualified = false, identityRuntime, read
     res.status(statuses[code] || 503).json({ code });
   });
   return (req, res, next) => {
-    if (req.method !== 'POST' || !/^\/returns\/observations\/?$/i.test(req.path)) return next();
+    if (req.method !== 'POST' || !/^\/returns\/(?:observations|context)\/?$/i.test(req.path)) return next();
     return router(req, res, next);
   };
 }
