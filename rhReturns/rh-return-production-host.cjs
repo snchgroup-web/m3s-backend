@@ -3,6 +3,7 @@ const {returnDatabaseOptions,assertReturnConnectorAccess} = require('./rh-return
 const {createQualifiedReturnObservationService} = require('./rh-return-observation-service.cjs');
 const {createQualifiedReturnSqlSources} = require('./rh-return-sql-sources.cjs');
 const {createQualifiedReturnRuntime} = require('./rh-return-runtime.cjs');
+const {createReturnContextReader} = require('./rh-return-context.cjs');
 
 // Host wiring only: no DDL, source decisions, credential creation or deployment.
 function createQualifiedReturnHost({env={},identityRuntime,readBindings,origins,
@@ -30,7 +31,8 @@ function createQualifiedReturnHost({env={},identityRuntime,readBindings,origins,
     const sources = createQualifiedReturnSqlSources({qualified:true});
     const service = createQualifiedReturnObservationService(checkout,{qualified:true,...sources});
     const router = createRuntime({qualified:true,identityRuntime,readBindings,
-      observeBatch:(scope,inputs) => service.observeBatch(scope,inputs),origins});
+      observeBatch:(scope,inputs) => service.observeBatch(scope,inputs),
+      readContext:createReturnContextReader(checkout,sources),origins});
     let closing;
     return {router,close:() => closing ??= Promise.resolve().then(() => pool.end())};
   } catch {
