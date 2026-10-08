@@ -453,8 +453,9 @@ test('HTTP integration: isolation, reload, competing versions, current rights an
 test('server wiring places budget parser before global parser, auth before every route, and no schema bootstrap', () => {
   const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
   const budgetParser = source.indexOf("app.use('/api/finance/budget-drafts', createBudgetBodyMiddleware())");
-  const generalParser = source.indexOf("app.use((req, res, next) => isPrivateGedRoute(req.path) ? next() : generalJsonBody(req, res, next))");
+  const generalParser = source.indexOf("app.use((req, res, next) => hasPrivateBody(req.path) ? next() : generalJsonBody(req, res, next))");
   assert(budgetParser > 0 && generalParser > budgetParser);
+  assert(source.includes('const hasPrivateBody = path => isPrivateGedRoute(path) || isPrivateRhRoute(path)'));
   assert(source.includes("const generalJsonBody = express.json({ limit: '50mb' })"));
   const guard = source.indexOf("app.use('/api/finance/budget-drafts', authenticateRequest, requireCurrentBudgetAccount)");
   assert(guard > 0);
