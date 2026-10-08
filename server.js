@@ -24,6 +24,7 @@ const { PREFIX: GED_PREFIX, isPrivateGedRoute, createGedRuntime } = require('./g
 const { PREFIX: RH_PREFIX, isPrivateRhRoute } = require('./rhReadRuntime');
 const { createRhReadHost } = require('./rhReadBootstrap');
 const { createRhDocumentHost } = require('./rhDocumentBootstrap');
+const { createQualifiedReturnHost } = require('./rhReturns/rh-return-production-host.cjs');
 const { ownAccountDiagnosticNoStore, registerHistoricalOwnAccountDiagnosticRoute,
   createSanitizedOwnAccountLoader } = require('./ownAccountDiagnostic');
 const {
@@ -398,6 +399,11 @@ const rhReadHost = createRhReadHost({ env: process.env, identityRuntime,
   origins: CORS_ORIGINS, warn: code => console.warn(code) });
 const rhDocumentHost = createRhDocumentHost({ env: process.env, identityRuntime,
   origins: CORS_ORIGINS, warn: code => console.warn(code) });
+const rhReturnHost = createQualifiedReturnHost({ env: process.env, identityRuntime,
+  readBindings: rhReadHost.readBindings, origins: CORS_ORIGINS,
+  createPool: options => new (require('pg').Pool)(options),
+  warn: code => console.warn(code) });
+app.use(RH_PREFIX, rhReturnHost.router);
 app.use(RH_PREFIX, rhDocumentHost.router);
 app.use(RH_PREFIX, rhReadHost.router);
 app.use(GED_PREFIX, createGedRuntime({ env: process.env, identityRuntime, credentials: googleCredentials,
@@ -2293,7 +2299,7 @@ const startServer = async () => {
   });
   const stop = () => {
     server.close(async () => {
-      await Promise.allSettled([rhDocumentHost.close(), rhReadHost.close()]);
+      await Promise.allSettled([rhReturnHost.close(), rhDocumentHost.close(), rhReadHost.close()]);
       process.exit(0);
     });
     server.closeIdleConnections();
