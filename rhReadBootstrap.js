@@ -20,7 +20,7 @@ function createRhReadHost({ env, identityRuntime, origins, createPool = options 
     // Every scoped query checks the live role, schema/RLS and decision; the profile alone grants nothing.
     const source = createRhPostgresSource({ pool, qualified: true });
     let closing;
-    return { router: createRhReadRuntime({ enabled: true, qualified: true,
+    return { readBindings: source.readBindings, router: createRhReadRuntime({ enabled: true, qualified: true,
       identityRuntime, origins, ...source }), close: () => {
       closing ??= Promise.resolve().then(() => pool.end());
       return closing;

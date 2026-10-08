@@ -111,5 +111,5 @@ test('server mounts document host before reader, protects private bodies and clo
   const source = readFileSync(resolve(__dirname, '../server.js'), 'utf8');
   assert(source.indexOf('app.use(RH_PREFIX, rhDocumentHost.router)') < source.indexOf('app.use(RH_PREFIX, rhReadHost.router)'));
   assert(source.includes('const hasPrivateBody = path => isPrivateGedRoute(path) || isPrivateRhRoute(path)'));
-  assert(source.includes('Promise.allSettled([rhDocumentHost.close(), rhReadHost.close()])'));
+  assert(source.includes('Promise.allSettled([rhReturnHost.close(), rhDocumentHost.close(), rhReadHost.close()])'));
 });
