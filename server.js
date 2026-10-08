@@ -23,6 +23,7 @@ const { createIdentityRuntime } = require('./identityRuntime');
 const { PREFIX: GED_PREFIX, isPrivateGedRoute, createGedRuntime } = require('./gedPrivate');
 const { PREFIX: RH_PREFIX, isPrivateRhRoute } = require('./rhReadRuntime');
 const { createRhReadHost } = require('./rhReadBootstrap');
+const { createRhDocumentHost } = require('./rhDocumentBootstrap');
 const { ownAccountDiagnosticNoStore, registerHistoricalOwnAccountDiagnosticRoute,
   createSanitizedOwnAccountLoader } = require('./ownAccountDiagnostic');
 const {
@@ -395,6 +396,9 @@ const identityRuntime = createIdentityRuntime({ env: process.env, getAccounts: g
 // Closed until the current RH entitlement source and restricted register are qualified.
 const rhReadHost = createRhReadHost({ env: process.env, identityRuntime,
   origins: CORS_ORIGINS, warn: code => console.warn(code) });
+const rhDocumentHost = createRhDocumentHost({ env: process.env, identityRuntime,
+  origins: CORS_ORIGINS, warn: code => console.warn(code) });
+app.use(RH_PREFIX, rhDocumentHost.router);
 app.use(RH_PREFIX, rhReadHost.router);
 app.use(GED_PREFIX, createGedRuntime({ env: process.env, identityRuntime, credentials: googleCredentials,
   // GED authorization stays mandatory even when legacy API_REQUIRE_AUTH is disabled.
@@ -2262,7 +2266,7 @@ const startServer = async () => {
     console.error('Finance source resolution warning:', error.message);
   }
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
   console.log(`
 ╔════════════════════════════════════════════════════════════════╗
 ║  🚀 M3S BACKEND API - FIXED & RUNNING                         ║
@@ -2287,6 +2291,16 @@ const startServer = async () => {
 🌐 Test: curl http://localhost:3001/api/health
   `);
   });
+  const stop = () => {
+    server.close(async () => {
+      await Promise.allSettled([rhDocumentHost.close(), rhReadHost.close()]);
+      process.exit(0);
+    });
+    server.closeIdleConnections();
+    setTimeout(() => process.exit(1), 10000).unref();
+  };
+  process.once('SIGTERM', stop);
+  process.once('SIGINT', stop);
 };
 
 startServer();
