@@ -29,7 +29,7 @@ async function registerFixture(t, incomeLinksEnabled = false) {
   }
   await db.exec('GRANT SELECT, INSERT ON ged_private.expense_document_links TO m3s_ged_app; SET ROLE m3s_ged_app;');
   const entries = [pdfEntry('Invoice root', 'finance'), pdfEntry('Invoice version', 'finance'),
-    pdfEntry('Private note', 'personal')];
+    pdfEntry('Private note', 'personal'), pdfEntry('Correspondence note', 'correspondence')];
   const policy = { owner: { userId: 'synthetic-user', organizationId: 'synthetic-org' }, documents: entries };
   const scope = { tenant: digest(policy.owner.organizationId), owner: digest(policy.owner.userId) };
   const pool = { connect: async () => ({ query: (sql, params) => db.query(sql, params), release() {} }) };
@@ -66,13 +66,15 @@ test('server wires GED finance authorization independently of the legacy API aut
 });
 
 test('append-only attachment enforces finance/current lifecycle and owner isolation', async t => {
-  const f = await registerFixture(t);
-  const [root, version, personal] = f.entries;
+  const f = await registerFixture(t, true);
+  const [root, version, personal, correspondence] = f.entries;
   const base = { documentId: root.sha256, versionId: root.sha256, documentRole: 'invoice' };
   assert.throws(() => f.register.attachExpenseDocument(f.scope, f.expense,
     { ...base, documentId: 'f'.repeat(64), versionId: 'f'.repeat(64) }), /GED_DOCUMENT_NOT_APPROVED/);
   assert.throws(() => f.register.attachExpenseDocument(f.scope, f.expense,
     { ...base, documentId: personal.sha256, versionId: personal.sha256 }), /GED_VERSION_NOT_APPROVED/);
+  for (const kind of ['attachExpenseDocument', 'attachIncomeDocument']) assert.throws(() => f.register[kind](f.scope, f.expense,
+    { ...base, documentId: correspondence.sha256, versionId: correspondence.sha256 }), /GED_VERSION_NOT_APPROVED/);
   await assert.rejects(f.register.attachExpenseDocument({ ...f.scope, owner: digest('other') }, f.expense, base),
     /GED_NOT_FOUND/);
   await f.register.lifecycle.mutate(f.scope, root.sha256,

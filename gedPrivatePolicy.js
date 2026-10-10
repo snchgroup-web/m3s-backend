@@ -37,12 +37,12 @@ function readPolicy(env) {
   const documents = manifest.map(entry => {
     const keys = entry && Object.keys(entry).sort().join(',');
     if (!entry || !['name,sha256,size', 'category,name,sha256,size'].includes(keys) ||
-        (entry.category !== undefined && !['personal', 'finance'].includes(entry.category)) ||
+        (entry.category !== undefined && !['personal', 'finance', 'correspondence'].includes(entry.category)) ||
         !HASH.test(entry.sha256) || seen.has(entry.sha256) ||
         !Number.isSafeInteger(entry.size) || entry.size < 10 || entry.size > maxBytes ||
         typeof entry.name !== 'string' || !/^[\p{L}\p{N} ._()-]{1,140}\.(pdf|docx|jpg|jpeg|png)$/u.test(entry.name) ||
         (profile === 'pilot-v1' && !/\.(pdf|docx)$/.test(entry.name)) ||
-        (!entry.name.endsWith('.pdf') && !entry.category) ||
+        (!entry.name.endsWith('.pdf') && (!entry.category || entry.category === 'correspondence')) ||
         entry.name.startsWith('.') || entry.name.trim() !== entry.name) fail('GED_CONFIGURATION_DENIED');
     totalBytes += entry.size;
     if (totalBytes > 64 * MAX_BYTES) fail('GED_CONFIGURATION_DENIED');
