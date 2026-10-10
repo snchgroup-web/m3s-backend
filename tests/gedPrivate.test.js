@@ -167,6 +167,39 @@ test('HTTP import, list, retry and private attachment roundtrip', async t => {
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), f.bytes); assert.equal(f.counters.audits, 1);
 });
 
+test('restricted correspondence imports exact PDF bytes idempotently with unchanged owner isolation', async t => {
+  const f = fixture();
+  f.entry = { ...f.entry, name: 'Synthetic correspondence.pdf', category: 'correspondence' };
+  f.policy = readPolicy({ ...f.env, M3S_GED_IMPORT_MANIFEST_JSON: JSON.stringify([f.entry]) });
+  const http = await setup(t, { fixture: f });
+  assert.equal((await http.upload()).status, 201);
+  assert.equal((await http.upload()).status, 200);
+  const listed = await (await fetch(http.base, { headers: http.headers })).json();
+  assert.equal(listed.documents[0].category, 'correspondence');
+  assert.equal(listed.approved[0].category, 'correspondence');
+  assert.deepEqual(Buffer.from(await (await fetch(`${http.base}/${f.entry.sha256}/content`, { headers: http.headers })).arrayBuffer()), f.bytes);
+  assert.equal((await http.upload({ body: Buffer.from('%PDF-modified') })).status, 400);
+  const outsider = await setup(t, { fixture: f, principal: { ...f.principal, id: 'another-admin', role: 'Admin' } });
+  assert.equal((await fetch(outsider.base, { headers: outsider.headers })).status, 403);
+  assert.equal((await outsider.upload()).status, 403);
+  assert.equal(outsider.counters.services, 0);
+});
+
+test('correspondence remains PDF-only and manifest merge preserves all existing classifications', () => {
+  const { env, entry } = fixture();
+  const correspondence = { ...entry, category: 'correspondence' };
+  for (const name of ['Synthetic.docx', 'Synthetic.jpg', 'Synthetic.png']) {
+    assert.throws(() => readPolicy({ ...env, M3S_GED_IMPORT_PROFILE: 'scans-v2',
+      M3S_GED_IMPORT_MANIFEST_JSON: JSON.stringify([{ ...correspondence, name }]) }));
+  }
+  const { mergeManifest } = require('../scripts/ged-merge-manifest');
+  const previous = ['personal', 'finance'].map((category, index) => ({ ...entry, category, sha256: digest(`synthetic-${index}`) }));
+  const next = mergeManifest(previous, [correspondence]);
+  assert.deepEqual(next.slice(0, 2), previous);
+  assert.deepEqual(next[2], correspondence);
+  assert.throws(() => mergeManifest(previous, [{ ...previous[0], category: 'correspondence' }]));
+});
+
 test('denies absent identity and cross-origin writes before services or body processing', async t => {
   const f = await setup(t);
   assert.equal((await f.upload({ headers: { 'content-type': 'application/pdf' } })).status, 401);
