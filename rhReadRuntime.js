@@ -85,6 +85,17 @@ function createRhReadRuntime({ enabled = false, qualified = false, identityRunti
         organizationId: req.user.tenantId, revision: decision.revision });
     } catch (error) { next(error); }
   });
+  router.get('/employees/summary', async (req, res, next) => {
+    try {
+      if (Object.keys(req.query).length) fail('RH_INVALID_PAGE');
+      const scope = await scopeFor(policy, req.user, 'read');
+      const register = await getRegister();
+      if (typeof register?.count !== 'function') fail('RH_SERVICE_UNAVAILABLE');
+      const count = await register.count(scope);
+      if (!Number.isSafeInteger(count) || count < 0) fail('RH_SERVICE_UNAVAILABLE');
+      res.json({ count, source: 'rh-read-v1', scope: 'authorized-employee-files', candidate: true });
+    } catch (error) { next(error); }
+  });
   router.get('/employees', async (req, res, next) => {
     try {
       const scope = await scopeFor(policy, req.user, 'read');

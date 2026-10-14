@@ -1,5 +1,6 @@
 const assert = require('assert');
 const {
+  MANAGEMENT_TABLE_CONTRACTS,
   buildManagementPortfolioSchemaStatements,
   buildManagementPortfolioSeedOperations,
   ensureManagementPortfolio,
@@ -10,6 +11,14 @@ const createBigQuery = outcomes => {
   const calls = [];
   return {
     calls,
+    dataset() {
+      return { table(name) { return { async getMetadata() {
+        const contract = MANAGEMENT_TABLE_CONTRACTS[name];
+        return [{ schema: { fields: contract.fields },
+          ...(contract.partitionField ? { timePartitioning: { type: 'DAY', field: contract.partitionField } } : {}),
+          clustering: { fields: contract.clustering } }];
+      } }; } };
+    },
     async query(options) {
       calls.push(options);
       const outcome = outcomes.shift();
@@ -41,12 +50,25 @@ const run = async () => {
 
   const seeds = buildManagementPortfolioSeedOperations({ ...config, tenantId: 'TENANT-2SG' });
   assert.equal(seeds.length, 3);
-  assert.equal(seeds[1].params.rows.length, 7);
+  assert.equal(seeds[1].params.rows.length, 10);
   assert.equal(seeds[2].params.rows.length, 21);
   assert(seeds[1].params.rows.every(row => row.record_status === 'validated_for_integration'));
   assert(seeds[2].params.rows.every(row => row.assignment_status === 'functionally_validated'));
   assert.match(seeds[0].query, /WHEN NOT MATCHED THEN INSERT/);
   assert.doesNotMatch(seeds[0].query, /WHEN MATCHED/);
+  assert.doesNotMatch(seeds[1].query, /WHEN MATCHED|UPDATE|DELETE|CREATE|GRANT/);
+  const additions = seeds[1].params.rows.filter(row => ['GD-008', 'GD-009', 'GD-010'].includes(row.dossier_id));
+  assert.deepEqual(additions.map(row => row.dossier_id), ['GD-008', 'GD-009', 'GD-010']);
+  assert.equal(new Set(seeds[1].params.rows.map(row => row.dossier_id)).size, 10);
+  assert(additions.every(row => row.confidentiality === 'internal' &&
+    row.responsible_agent_id === '' && row.responsible_status === 'to_confirm' &&
+    row.evidence_ged_ref === '' && row.verified_on === '2026-10-14'));
+  assert.deepEqual(additions.map(row => row.source_ref), [
+    'RH_PROXIMITE_KIT_CANDIDAT.md - V0.5 - 2026-10-14',
+    'RH_PROXIMITE_CAPITALISATION.md',
+    '2SG_LIVRET_ACCUEIL_MEMBRES_V0_4_20261012.html'
+  ]);
+  assert(seeds[2].params.rows.every(row => !['GD-008', 'GD-009', 'GD-010'].includes(row.object_id)));
 
   const schemaAndSeedBq = createBigQuery(Array(6).fill([[]]));
   const result = await ensureManagementPortfolio({
@@ -57,7 +79,7 @@ const run = async () => {
   });
   assert.equal(schemaAndSeedBq.calls.length, 6);
   assert(schemaAndSeedBq.calls.every(call => call.location === 'EU'));
-  assert.equal(result.dossiersImported, 7);
+  assert.equal(result.dossiersImported, 10);
   assert.equal(result.assignmentsImported, 21);
 
   const unauthenticatedBq = createBigQuery([]);
