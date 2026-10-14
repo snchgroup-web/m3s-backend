@@ -88,6 +88,25 @@ function createRhPostgresSource({ pool, qualified = false } = {}) {
         return { revision: String(decision.revision) };
       });
     },
+    async count(scope) {
+      return transaction(scope, async client => {
+        if (!await currentEntitlement(client, scope)) throw new Error('RH_ACCESS_DENIED');
+        const result = await client.query(`SELECT count(*)::text AS count,
+          count(*) FILTER (WHERE record_status IS DISTINCT FROM 'draft'
+            OR classification IS DISTINCT FROM 'C3')::text AS invalid
+          FROM (
+            SELECT DISTINCT ON (employee_id) employee_id,record_status,classification
+            FROM rh_private.employee_revisions WHERE tenant=$1 AND owner_id=$2
+            ORDER BY employee_id,revision DESC
+          ) latest`, [scope.tenant, scope.owner]);
+        const row = result.rows[0];
+        if (result.rows.length !== 1 || row?.invalid !== '0' ||
+            typeof row.count !== 'string' || !/^(0|[1-9][0-9]{0,15})$/.test(row.count)) fail();
+        const count = Number(row.count);
+        if (!Number.isSafeInteger(count)) fail();
+        return count;
+      });
+    },
     async list(scope, { limit = 50, offset = 0 } = {}) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 100000) {
         throw new Error('RH_INVALID_PAGE');

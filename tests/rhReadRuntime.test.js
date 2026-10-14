@@ -206,3 +206,64 @@ test('invalid dates and registered non-drafts are never converted to active empl
     });
   }
 });
+
+test('employee summary returns only the current scoped count, including a proven zero', async t => {
+  const { options, state } = fixture();
+  let count = 2;
+  options.getRegister = async () => ({ count: async scope => {
+    state.storeReads++; state.scopes.push(scope); return count;
+  }, list: async () => assert.fail('A summary must not load names or dossiers') });
+  await withServer(t, options, async request => {
+    const result = await request('/employees/summary');
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body, { count: 2, source: 'rh-read-v1',
+      scope: 'authorized-employee-files', candidate: true });
+    assert.equal(result.headers.get('cache-control'), 'private, no-store');
+    assert.equal(result.text.includes(state.rows[0].display_name), false);
+    assert.match(state.scopes[0].owner, /^[a-f0-9]{64}$/);
+    count = 0;
+    assert.equal((await request('/employees/summary')).body.count, 0);
+    state.permissions = [];
+    assert.equal((await request('/employees/summary')).status, 403);
+    assert.equal(state.storeReads, 2);
+  });
+});
+
+test('summary preserves TOTP, origin, query and read-only guards without a fallback', async t => {
+  const { options, state, claims } = fixture();
+  options.getRegister = async () => ({ count: async () => { state.storeReads++; return 2; } });
+  await withServer(t, options, async request => {
+    delete claims.firebase.sign_in_second_factor;
+    assert.equal((await request('/employees/summary')).status, 401);
+    claims.firebase.sign_in_second_factor = 'totp';
+    assert.equal((await request('/employees/summary', { headers: { Origin: 'https://foreign.example.test' } })).status, 403);
+    for (const query of ['owner=foreign', 'limit=10', 'tenant=foreign']) {
+      assert.equal((await request(`/employees/summary?${query}`)).status, 400);
+    }
+    for (const method of ['POST', 'PATCH', 'DELETE', 'HEAD']) {
+      assert.equal((await request('/employees/summary', { method })).status, 405);
+    }
+    assert.equal(state.storeReads, 0);
+  });
+});
+
+test('missing, malformed and failed count sources never become zero or expose provider details', async t => {
+  for (const count of [null, '2', -1, 1.5, Number.MAX_SAFE_INTEGER + 1, { count: 2 }]) {
+    const { options } = fixture();
+    options.getRegister = async () => ({ count: async () => count });
+    await withServer(t, options, async request => {
+      const result = await request('/employees/summary');
+      assert.equal(result.status, 503);
+      assert.deepEqual(result.body, { code: 'RH_SERVICE_UNAVAILABLE' });
+    });
+  }
+  for (const register of [{ list: async () => [] }, { count: async () => { throw new Error('PRIVATE_DATABASE_DETAIL'); } }]) {
+    const { options } = fixture(); options.getRegister = async () => register;
+    await withServer(t, options, async request => {
+      const result = await request('/employees/summary');
+      assert.equal(result.status, 503);
+      assert.equal(result.text.includes('PRIVATE_DATABASE_DETAIL'), false);
+      assert.equal(Object.hasOwn(result.body, 'count'), false);
+    });
+  }
+});

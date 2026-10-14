@@ -81,3 +81,27 @@ Sauvegarde et initialisation réelles sont des opérations séparées, consigné
 dans `../../../M3S_JOURNAL_DE_BORD_2026-10-06.md`, pas acquises par ces tests.
 La sauvegarde ponctuelle du registre PostgreSQL ne sauvegarde pas les pièces
 du bucket GED, BigQuery ou les identités Google ; ce n'est pas un PITR.
+
+## Lecture agregee ajoutee le 14 octobre 2026
+
+GET `/api/rh/private/employees/summary` reutilise les memes controles
+Google/TOTP, origine, profil, decision courante et transaction READ ONLY.
+Le compte SQL, les tables, les droits et les variables restent inchanges.
+La lecture renvoie uniquement `count`, `source: rh-read-v1`,
+`scope: authorized-employee-files` et `candidate: true`, sans nom, reference
+individuelle, date personnelle, document ou salaire.
+
+Le compteur porte sur les dossiers distincts du perimetre autorise, apres
+selection de leur derniere revision. Il ne compte ni pages, revisions,
+membres, comptes techniques, brouillons locaux ou dossiers d'un autre
+depositaire. Les dossiers C3 restent en brouillon : ce nombre ne qualifie
+pas l'effectif juridique, les contrats signes ou des affiliations sociales.
+Un zero n'est rendu qu'apres lecture autorisee valide ; refus, defaut de
+configuration et source invalide restent des erreurs sans compteur.
+
+Aucune garantie d'actualisation continue ni de revocation atomique n'est
+ajoutee. Chaque nouvelle lecture recontrole la decision ; les tableaux de
+bord masquent l'ancien agregat lors d'un changement de compte/contexte.
+Il n'y a ni nouvelle habilitation, migration, purge ou collecte nominative.
+Les paragraphes du 6 octobre ci-dessus restent un historique de qualification,
+pas une demande de reprendre l'activation du lecteur deja acquise ensuite.

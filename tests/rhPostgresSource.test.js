@@ -76,6 +76,29 @@ test('qualified read preserves unknown dates and returns only draft columns', as
   assert.equal(released(), 2);
 });
 
+test('summary counts distinct current dossiers, not revision rows or another owner', async t => {
+  const { db, source, decision, seed } = await fixture(t);
+  await decision(1, true);
+  const register = await source.getRegister();
+  assert.equal(await register.count(scope), 0);
+  await seed();
+  await db.exec('RESET ROLE');
+  await db.query(`INSERT INTO rh_private.employee_revisions
+    (tenant,owner_id,employee_id,revision,display_name,record_status,classification)
+    VALUES($1,$2,$3,2,'Synthetic updated dossier','draft','C3')`, [scope.tenant, scope.owner, employee]);
+  const otherOwner = 'a'.repeat(64), otherEmployee = '22222222-2222-4222-8222-222222222222';
+  await db.query('INSERT INTO rh_private.employees(tenant,owner_id,employee_id) VALUES($1,$2,$3)',
+    [scope.tenant, otherOwner, otherEmployee]);
+  await db.query(`INSERT INTO rh_private.employee_revisions
+    (tenant,owner_id,employee_id,revision,display_name,record_status,classification)
+    VALUES($1,$2,$3,1,'Foreign synthetic dossier','draft','C3')`, [scope.tenant, otherOwner, otherEmployee]);
+  await db.exec('SET ROLE m3s_rh_reader');
+  assert.equal(await register.count(scope), 1);
+  await assert.rejects(register.count({ ...scope, owner: otherOwner }), { message: 'RH_ACCESS_DENIED' });
+  await decision(2, false);
+  await assert.rejects(register.count(scope), { message: 'RH_ACCESS_DENIED' });
+});
+
 test('current revocation is read on the next request and again before data selection', async t => {
   const { source, policy, decision, seed } = await fixture(t);
   await seed(); await decision(1, true);
@@ -172,6 +195,7 @@ test('a later public grant outside RH closes the reader before any dossier is re
   await db.exec('RESET ROLE; CREATE TABLE public.synthetic_unrelated(id integer); GRANT SELECT ON public.synthetic_unrelated TO PUBLIC; SET ROLE m3s_rh_reader');
   await assert.rejects(source.readBindings({ userId: principal.id, organizationId: principal.tenantId }), { message: 'RH_SERVICE_UNAVAILABLE' });
   await assert.rejects((await source.getRegister()).list(scope), { message: 'RH_SERVICE_UNAVAILABLE' });
+  await assert.rejects((await source.getRegister()).count(scope), { message: 'RH_SERVICE_UNAVAILABLE' });
 });
 
 test('configuration pins a distinct reader, bounded pool and verified TLS, never GED credentials', () => {
