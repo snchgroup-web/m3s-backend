@@ -101,6 +101,44 @@ are private/no-store and hide provider/SQL details. No mutation retry is automat
 
 ## Recovery and Residual Limits
 
+### Grouped Read-Only Connection Check
+
+`node scripts/checkProductionConnection.js --plan` is the safe default: no
+environment secret is needed, no connection is attempted. After the user has
+completed masked credential entry, the matching Railway variable and the
+approved LOGIN handoff, run `node scripts/checkProductionConnection.js
+--check-read-only` from the backend deployment environment. Do not put a
+password in arguments, command history, source files or chat. This command
+uses the existing pinned TLS options and role/grant guard with a single
+connection. It checks negotiated TLS, a read-only transaction and schema
+version, then rolls back and closes its pool. It never reads service records,
+changes grants/profile/LOGIN, runs DDL or writes business data. Output contains
+only a fixed status and safe check code, never provider errors or credentials.
+
+A passing check qualifies the database connection only, not source dossier
+access, the user's MFA session, HTTP/CORS or a real operational preparation.
+It is not a substitute for the authenticated release smoke test.
+
+### Coordinated Release Order
+
+1. Keep both PRs in draft and the connector NOLOGIN while secret entry is
+   deferred. Do not replay installed schema/connector migrations or grants.
+2. Complete the existing secure secret handoff and limited LOGIN gate. Publish
+   the reviewed backend before the interface, keeping the Production profile
+   absent so its routes remain closed; verify existing application health.
+3. Run the grouped read-only check in that private backend deployment, where
+   the reviewed script is now available. A failure is a stop, never a reason
+   to use administrator or RH/GED credentials. Only after it passes, enable
+   the reviewed Production profile and restart/deploy the backend. Verify
+   current Google/MFA access to both paths and governed dossier metadata.
+4. Publish the reviewed interface and verify its deployed asset. Read the
+   shared state with the authorised account; only create a real preparation
+   if its own actual scope/reference is available. Do not import the QA cycle.
+   Stage recording still requires each actual evidence reference.
+5. On a fault, disable only the Production profile and the connector LOGIN as
+   needed. Keep the new history and all existing RH/GED permissions intact;
+   retain the source/restore evidence. Do not restore over live data as a test.
+
 Disable the new profile and revoke only the relevant Production decisions to
 stop this feature; do not delete history or change RH/GED rights. Preserve the
 new schema in the next qualified independent backup scope before actual use.
