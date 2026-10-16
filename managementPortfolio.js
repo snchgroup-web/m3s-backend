@@ -1,5 +1,13 @@
 const seed = require('./referentiels/managementPortfolioSeed.json');
 const { assertBigQueryTableContract } = require('./bigQueryTableContract');
+const { PERMISSIONS } = require('./administrationRegistries');
+
+const SERVICE_SOURCE_TYPES = Object.freeze({
+  'GD-005': 'document_governance',
+  'GD-006': 'document_governance',
+  'GD-008': 'rh_proximity_framework',
+  'GD-009': 'rh_tools'
+});
 
 const field = (name, type = 'STRING', mode = 'REQUIRED') => ({ name, type, mode });
 const MANAGEMENT_TABLE_CONTRACTS = Object.freeze({
@@ -253,7 +261,60 @@ const createManagementPortfolioHandlers = ({
     }
   };
 
-  return { getSummary };
+  const getServiceFollowup = async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    const tenantId = String(req.user?.tenantId || req.user?.organizationId || '').trim();
+    if (!tenantId) return res.status(401).json({ success: false, code: 'SERVICE_FOLLOWUP_UNAUTHENTICATED' });
+    if (!Array.isArray(req.user?.permissions) || !req.user.permissions.includes(PERMISSIONS.RESOURCES_READ)) {
+      return res.status(403).json({ success: false, code: 'SERVICE_FOLLOWUP_FORBIDDEN' });
+    }
+    try {
+      // Reuse governed internal dossier metadata, never employee or correspondence contents.
+      const [rows] = await bigquery.query({
+        query: `SELECT tenant_id, portfolio_id, confidentiality, dossier_id, dossier_type,
+            display_title, status, responsible_status, verified_on, display_state,
+            display_next_action, source_ref
+          FROM ${dossiers}
+          WHERE tenant_id=@tenant_id AND portfolio_id=@portfolio_id
+            AND dossier_id IN UNNEST(@dossier_ids) AND confidentiality='internal'
+            AND record_status='validated_for_integration'
+          ORDER BY dossier_id LIMIT 5`,
+        params: { tenant_id: tenantId, portfolio_id: seed.portfolio.portfolio_id, dossier_ids: Object.keys(SERVICE_SOURCE_TYPES) },
+        location
+      });
+      const seen = new Set();
+      const data = rows.map(row => {
+        const date = row.verified_on?.value || row.verified_on;
+        const parsed = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
+        if (row.tenant_id !== tenantId || row.portfolio_id !== seed.portfolio.portfolio_id ||
+            row.confidentiality !== 'internal' || !Object.hasOwn(SERVICE_SOURCE_TYPES, row.dossier_id) ||
+            SERVICE_SOURCE_TYPES[row.dossier_id] !== row.dossier_type || seen.has(row.dossier_id) ||
+            !parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date ||
+            ['display_title', 'status', 'responsible_status', 'display_state', 'display_next_action', 'source_ref']
+              .some(key => typeof row[key] !== 'string' || !row[key].trim() || row[key].length > 2000)) {
+          throw new Error('SERVICE_FOLLOWUP_SOURCE_INVALID');
+        }
+        seen.add(row.dossier_id);
+        return {
+          dossier_id: row.dossier_id, dossier_type: row.dossier_type, display_title: row.display_title,
+          status: row.status, responsible_status: row.responsible_status, verified_on: date,
+          display_state: row.display_state, display_next_action: row.display_next_action, source_ref: row.source_ref
+        };
+      });
+      return res.json({
+        success: true, data,
+        source: { system: 'bigquery', registry: 'management_dossiers', scope: 'internal_service_preparation', read_only: true },
+        timestamp: now()
+      });
+    } catch (error) {
+      const code = isMissingTable(error) ? 'SERVICE_FOLLOWUP_SOURCE_UNAVAILABLE'
+        : error.message === 'SERVICE_FOLLOWUP_SOURCE_INVALID' ? 'SERVICE_FOLLOWUP_SOURCE_INVALID' : 'SERVICE_FOLLOWUP_ERROR';
+      logger.error('Service follow-up unavailable:', code);
+      return res.status(503).json({ success: false, code });
+    }
+  };
+
+  return { getSummary, getServiceFollowup };
 };
 
 module.exports = {
