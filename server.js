@@ -25,6 +25,7 @@ const { PREFIX: RH_PREFIX, isPrivateRhRoute } = require('./rhReadRuntime');
 const { createRhReadHost } = require('./rhReadBootstrap');
 const { createRhDocumentHost } = require('./rhDocumentBootstrap');
 const { createQualifiedReturnHost } = require('./rhReturns/rh-return-production-host.cjs');
+const { PREFIX: PRODUCTION_SERVICE_PREFIX, isProductionServiceRoute, createProductionServiceHost } = require('./productionServiceRuntime');
 const { ownAccountDiagnosticNoStore, registerHistoricalOwnAccountDiagnosticRoute,
   createSanitizedOwnAccountLoader } = require('./ownAccountDiagnostic');
 const {
@@ -277,13 +278,13 @@ app.use(cors({
 app.use('/api/finance/budget-drafts', createBudgetBodyMiddleware());
 const generalJsonBody = express.json({ limit: '50mb' });
 const generalFormBody = express.urlencoded({ limit: '50mb', extended: true });
-const hasPrivateBody = path => isPrivateGedRoute(path) || isPrivateRhRoute(path);
+const hasPrivateBody = path => isPrivateGedRoute(path) || isPrivateRhRoute(path) || isProductionServiceRoute(path);
 app.use((req, res, next) => hasPrivateBody(req.path) ? next() : generalJsonBody(req, res, next));
 app.use((req, res, next) => hasPrivateBody(req.path) ? next() : generalFormBody(req, res, next));
 
 // Logging
 app.use((req, res, next) => {
-  const route = isPrivateRhRoute(req.path) ? RH_PREFIX : isBudgetRoute(req.path)
+  const route = isProductionServiceRoute(req.path) ? PRODUCTION_SERVICE_PREFIX : isPrivateRhRoute(req.path) ? RH_PREFIX : isBudgetRoute(req.path)
     ? normalizeBudgetRoute(req.path)
     : req.path;
   console.log(`[${new Date().toISOString()}] ${req.method} ${route}`);
@@ -394,6 +395,15 @@ const verifyPassword = (account, password) => {
 
 const identityRuntime = createIdentityRuntime({ env: process.env, getAccounts: getConfiguredUsers,
   credentials: googleCredentials, authenticateLegacy });
+const productionServiceHost = createProductionServiceHost({env:process.env,identityRuntime,origins:CORS_ORIGINS,
+  warn:code=>console.warn(code),validateSources:async(user,track)=>{
+    const expected={documents:['GD-005','GD-006'],rh:['GD-008','GD-009']}[track];
+    if(!expected)return false;
+    let status=200,body;
+    await managementPortfolioHandlers.getServiceFollowup({user},{set(){return this;},status(code){status=code;return this;},json(value){body=value;return this;}});
+    return status===200&&body?.success===true&&expected.every(id=>body.data.filter(row=>row.dossier_id===id).length===1);
+  }});
+app.use(PRODUCTION_SERVICE_PREFIX,productionServiceHost.router);
 // Closed until the current RH entitlement source and restricted register are qualified.
 const rhReadHost = createRhReadHost({ env: process.env, identityRuntime,
   origins: CORS_ORIGINS, warn: code => console.warn(code) });
@@ -2300,7 +2310,7 @@ const startServer = async () => {
   });
   const stop = () => {
     server.close(async () => {
-      await Promise.allSettled([rhReturnHost.close(), rhDocumentHost.close(), rhReadHost.close()]);
+      await Promise.allSettled([productionServiceHost.close(), rhReturnHost.close(), rhDocumentHost.close(), rhReadHost.close()]);
       process.exit(0);
     });
     server.closeIdleConnections();
