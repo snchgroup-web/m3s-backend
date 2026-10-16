@@ -73,6 +73,12 @@ are private/no-store and hide provider/SQL details. No mutation retry is automat
    through the approved secure process, never chat. Do not use a PostgreSQL
    administrator or borrow GED/RH credentials. Rehearse concurrent native
    connections and backup the populated schema before operational use.
+   `sql/production_service_connector_v1.sql` creates that connector in NOLOGIN
+   first, with a two-connection limit and SET-only membership. It rejects
+   pre-existing roles and unexpected PUBLIC/direct access. The user completes
+   masked PostgreSQL credential entry and the matching Railway secret, never
+   chat; enable LOGIN only after that handoff and verification. No account
+   decision is seeded by this generic connector script.
 5. Publish only reviewed code, then configure
    `M3S_PRODUCTION_SERVICE_PROFILE=service-cycle-v1`,
    `M3S_PRODUCTION_SERVICE_DB_PASSWORD` (at least 32 characters, distinct) and
@@ -83,6 +89,15 @@ are private/no-store and hide provider/SQL details. No mutation retry is automat
    uncertain-save recovery. Do not promote existing synthetic JSON/history.
    Verify an authorised non-fictional preparation and read-only refresh before
    declaring the full application active. No real stage without its own evidence.
+   The shared UI defaults closed when unavailable and offers local preparation
+   only as an explicit, separate mode. It never imports local JSON into shared
+   storage. A shared JSON export is a read-only snapshot, not an import format.
+   Confirmation precedes each write. An uncertain response locks new writes;
+   the user may retry exactly the same request ID/body, without automatic retry.
+   Pending requests stay in the current account's in-memory session across
+   client-side navigation; leaving/reloading the document warns before losing
+   that state. No sensitive draft is persisted in browser storage. After an
+   intentional reload, inspect server records before creating another cycle.
 
 ## Recovery and Residual Limits
 

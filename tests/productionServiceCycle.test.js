@@ -132,6 +132,26 @@ test('connector checks the actual PostgreSQL role and refuses unrelated table gr
     else await assertProductionConnector(db);
   }
 });
+
+test('operator connector migration stays NOLOGIN until the separate credential handoff',async t=>{
+  const {db}=await fixture(t);
+  const ddl=await fs.readFile(path.join(__dirname,'../sql/production_service_connector_v1.sql'),'utf8');
+  await db.exec(ddl);
+  const row=(await db.query("SELECT rolcanlogin,rolconnlimit,rolinherit FROM pg_roles WHERE rolname='m3s_production_service_connector'")).rows[0];
+  assert.deepEqual(row,{rolcanlogin:false,rolconnlimit:2,rolinherit:false});
+  const membership=(await db.query("SELECT admin_option,inherit_option,set_option FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname='m3s_production_service_connector')")).rows;
+  assert.deepEqual(membership,[{admin_option:false,inherit_option:false,set_option:true}]);
+  await db.exec('ALTER ROLE m3s_production_service_connector LOGIN; SET SESSION AUTHORIZATION m3s_production_service_connector;');
+  await assertProductionConnector(db);
+});
+
+test('connector migration rolls back when PUBLIC exposes an unrelated table',async t=>{
+  const {db}=await fixture(t);
+  await db.exec('CREATE TABLE public.synthetic_public(value text); GRANT SELECT ON public.synthetic_public TO PUBLIC;');
+  const ddl=await fs.readFile(path.join(__dirname,'../sql/production_service_connector_v1.sql'),'utf8');
+  await assert.rejects(db.exec(ddl),/SERVICE_CONNECTOR_UNEXPECTED_ACCESS/);await db.exec('ROLLBACK');
+  assert.equal((await db.query("SELECT count(*)::int n FROM pg_roles WHERE rolname='m3s_production_service_connector'")).rows[0].n,0);
+});
 test('reservations require a fresh version and another handover',()=>{
   const r=advance([],real,'2026-10-17');const d=advance([r],delivery,'2026-10-17');
   const reserved=advance([r,d],{...accepted,outcome:'reserved',reservations:'Synthetic correction'},'2026-10-17');
