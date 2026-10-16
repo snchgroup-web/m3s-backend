@@ -508,6 +508,7 @@ app.put('/api/administration/correspondence/:id', authenticateRequest, administr
 app.delete('/api/administration/correspondence/:id', authenticateRequest, administrationRegistryHandlers.deleteCorrespondence);
 app.get('/api/administration/audit', authenticateRequest, administrationRegistryHandlers.listAuditEvents);
 app.get('/api/management/portfolio/summary', authenticateRequest, managementPortfolioHandlers.getSummary);
+app.get('/api/production/service-followup', authenticateRequest, managementPortfolioHandlers.getServiceFollowup);
 
 // No schema bootstrap. Budget routes never inherit the legacy Finance authentication bypass.
 const requireCurrentBudgetAccount = createBudgetAccountMiddleware({
