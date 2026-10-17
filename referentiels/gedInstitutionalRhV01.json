@@ -1,0 +1,63 @@
+{
+  "schema": "m3s.ged.institutional-rh-version.v1",
+  "bundleId": "a58ea347ee3225a66bd7e58f7bcbc5ee5be8d45ba1f9fdcd769647cf6230d9a0",
+  "version": "0.1",
+  "tenantId": "2sg",
+  "actorSha256": "a1165aaf35f9dd6b93efe7a36ddfffbaa0655a6287575a433daab9fcf59d8695",
+  "decisionReference": "AUT-GED-RH-INST-20261017-CHEIKH-V01",
+  "cycleId": "cdd7c770-b06e-416a-8d06-4299f80a71de",
+  "dossiers": [
+    "GD-008",
+    "GD-009"
+  ],
+  "files": [
+    {
+      "name": "01_PARCOURS_ET_INTERFACES_V0_1.md",
+      "sha256": "3dd3ae174a19de608e7c17a50570fab859745a0ec4dd7c1b052925fd8d4a954b",
+      "size": 6094,
+      "generation": "1792246752464877"
+    },
+    {
+      "name": "02_INDEX_SOURCES_ET_OUTILS_V0_1.md",
+      "sha256": "a68e1a224bee153548fdba6eb16a577e6029de32f4cdda9e50fd157a42a2b420",
+      "size": 4806,
+      "generation": "1792246769769628"
+    },
+    {
+      "name": "03_PRISE_EN_MAIN_ET_CONSERVATION_V0_1.md",
+      "sha256": "7e3fd9ec252ded89da4bbbc589dbcd4ef8d39e51d4e0e1c347fded1b55c95fac",
+      "size": 6461,
+      "generation": "1792246786563307"
+    },
+    {
+      "name": "04_POINTS_OUVERTS_ET_PASSAGES_V0_1.md",
+      "sha256": "6d1c2a4cdb33f8dac267ebdb53cffafd5ed4970c8b95e30807dd0bbcdc6f0d05",
+      "size": 6469,
+      "generation": "1792246804347099"
+    },
+    {
+      "name": "REFERENCES_SOURCES_V0_1.csv",
+      "sha256": "f54be5219017bc7f1d973dc17bb53227429a6a912a19db60fe4e89a974498466",
+      "size": 4984,
+      "generation": "1792246823680117"
+    },
+    {
+      "name": "SOURCES_V0_1.json",
+      "sha256": "5ddffd908dc8b0a3689b6262a832db6e9a0f531dc9de5144ee6b08bcdb30cabb",
+      "size": 6896,
+      "generation": "1792246840750251"
+    },
+    {
+      "name": "2SG_RH_PROXIMITE_CYCLE_01_V0_1.html",
+      "sha256": "ca9908ec43b9ca33c1359b64e230bc51e815ce09240a93d96e0e2b6fb5ce640a",
+      "size": 2121303,
+      "generation": "1792246858892805"
+    },
+    {
+      "name": "MANIFEST.json",
+      "sha256": "a58ea347ee3225a66bd7e58f7bcbc5ee5be8d45ba1f9fdcd769647cf6230d9a0",
+      "size": 5052,
+      "generation": "1792246876709469"
+    }
+  ]
+}

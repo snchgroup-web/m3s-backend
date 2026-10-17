@@ -22,6 +22,7 @@ const { profileNoStore, createOwnProfileHandler } = require('./ownProfile');
 const { createIdentityRuntime } = require('./identityRuntime');
 const { PREFIX: GED_PREFIX, isPrivateGedRoute, createGedRuntime } = require('./gedPrivate');
 const { PREFIX: INSTITUTIONAL_GED_PREFIX, isInstitutionalGedRoute, createInstitutionalHost } = require('./gedInstitutional');
+const { PREFIX: RH_INSTITUTIONAL_GED_PREFIX, createHost: createInstitutionalRhHost } = require('./gedInstitutionalRh');
 const { PREFIX: RH_PREFIX, isPrivateRhRoute } = require('./rhReadRuntime');
 const { createRhReadHost } = require('./rhReadBootstrap');
 const { createRhDocumentHost } = require('./rhDocumentBootstrap');
@@ -396,6 +397,9 @@ const verifyPassword = (account, password) => {
 
 const identityRuntime = createIdentityRuntime({ env: process.env, getAccounts: getConfiguredUsers,
   credentials: googleCredentials, authenticateLegacy });
+const institutionalRhHost = createInstitutionalRhHost({ env: process.env, identityRuntime, bigquery, credentials: googleCredentials,
+  projectId: PROJECT_ID, datasetId: DATASET_ID, origins: CORS_ORIGINS, warn: code => console.warn(code) });
+app.use(RH_INSTITUTIONAL_GED_PREFIX, institutionalRhHost.router);
 const institutionalGedHost = createInstitutionalHost({ env: process.env, identityRuntime, bigquery, credentials: googleCredentials,
   projectId: PROJECT_ID, datasetId: DATASET_ID, origins: CORS_ORIGINS, warn: code => console.warn(code) });
 app.use(INSTITUTIONAL_GED_PREFIX, institutionalGedHost.router);
