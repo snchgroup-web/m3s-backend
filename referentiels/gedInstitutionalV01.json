@@ -1,0 +1,45 @@
+{
+  "schema": "m3s.ged.institutional-version.v1",
+  "bundleId": "b4bd0e9ea0a1b2b9a4d980c9722f0fd05c372723f433e6275f46e34d05ce3699",
+  "version": "0.1",
+  "tenantId": "2sg",
+  "actorSha256": "a1165aaf35f9dd6b93efe7a36ddfffbaa0655a6287575a433daab9fcf59d8695",
+  "decisionReference": "AUT-GED-INST-20261017-CHEIKH-V01",
+  "cycleId": "bccde91a-fedc-469a-ad65-ab2f212db959",
+  "dossiers": [
+    "GD-005",
+    "GD-006"
+  ],
+  "files": [
+    {
+      "name": "2SG_ORGANISATION_DOCUMENTAIRE_CYCLE_01_V0_1.md",
+      "sha256": "91666f950c35ef4dc2912ef4478c5c3cf7f9a9bcdeb2d88622d512ac88bcd009",
+      "size": 16068,
+      "generation": "1792237870713987"
+    },
+    {
+      "name": "2SG_ORGANISATION_DOCUMENTAIRE_CYCLE_01_V0_1.html",
+      "sha256": "3a967fa3c596eec8e73e2d6373586a561c24466b7b75eb9bfaa55c23120c2930",
+      "size": 2062160,
+      "generation": "1792237944491508"
+    },
+    {
+      "name": "REFERENCES_SOURCES_V0_1.csv",
+      "sha256": "4bd1a9d7ded698b9966c5280ae324266b3fd58b9397eebdc2ace509f4c3688c9",
+      "size": 5294,
+      "generation": "1792237970151628"
+    },
+    {
+      "name": "SOURCES_V0_1.json",
+      "sha256": "5f647b01eccc744b84efc4f9b84cde595a2a187ad5d6aed2e86ff66c375ee748",
+      "size": 9466,
+      "generation": "1792237995757938"
+    },
+    {
+      "name": "MANIFEST.json",
+      "sha256": "b4bd0e9ea0a1b2b9a4d980c9722f0fd05c372723f433e6275f46e34d05ce3699",
+      "size": 2020,
+      "generation": "1792238020904795"
+    }
+  ]
+}
