@@ -21,6 +21,7 @@ const { buildFxRateMetadata } = require('./fxRateMetadata');
 const { profileNoStore, createOwnProfileHandler } = require('./ownProfile');
 const { createIdentityRuntime } = require('./identityRuntime');
 const { PREFIX: GED_PREFIX, isPrivateGedRoute, createGedRuntime } = require('./gedPrivate');
+const { PREFIX: INSTITUTIONAL_GED_PREFIX, isInstitutionalGedRoute, createInstitutionalHost } = require('./gedInstitutional');
 const { PREFIX: RH_PREFIX, isPrivateRhRoute } = require('./rhReadRuntime');
 const { createRhReadHost } = require('./rhReadBootstrap');
 const { createRhDocumentHost } = require('./rhDocumentBootstrap');
@@ -278,13 +279,13 @@ app.use(cors({
 app.use('/api/finance/budget-drafts', createBudgetBodyMiddleware());
 const generalJsonBody = express.json({ limit: '50mb' });
 const generalFormBody = express.urlencoded({ limit: '50mb', extended: true });
-const hasPrivateBody = path => isPrivateGedRoute(path) || isPrivateRhRoute(path) || isProductionServiceRoute(path);
+const hasPrivateBody = path => isPrivateGedRoute(path) || isInstitutionalGedRoute(path) || isPrivateRhRoute(path) || isProductionServiceRoute(path);
 app.use((req, res, next) => hasPrivateBody(req.path) ? next() : generalJsonBody(req, res, next));
 app.use((req, res, next) => hasPrivateBody(req.path) ? next() : generalFormBody(req, res, next));
 
 // Logging
 app.use((req, res, next) => {
-  const route = isProductionServiceRoute(req.path) ? PRODUCTION_SERVICE_PREFIX : isPrivateRhRoute(req.path) ? RH_PREFIX : isBudgetRoute(req.path)
+  const route = isInstitutionalGedRoute(req.path) ? INSTITUTIONAL_GED_PREFIX : isProductionServiceRoute(req.path) ? PRODUCTION_SERVICE_PREFIX : isPrivateRhRoute(req.path) ? RH_PREFIX : isBudgetRoute(req.path)
     ? normalizeBudgetRoute(req.path)
     : req.path;
   console.log(`[${new Date().toISOString()}] ${req.method} ${route}`);
@@ -395,6 +396,9 @@ const verifyPassword = (account, password) => {
 
 const identityRuntime = createIdentityRuntime({ env: process.env, getAccounts: getConfiguredUsers,
   credentials: googleCredentials, authenticateLegacy });
+const institutionalGedHost = createInstitutionalHost({ env: process.env, identityRuntime, bigquery, credentials: googleCredentials,
+  projectId: PROJECT_ID, datasetId: DATASET_ID, origins: CORS_ORIGINS, warn: code => console.warn(code) });
+app.use(INSTITUTIONAL_GED_PREFIX, institutionalGedHost.router);
 const productionServiceHost = createProductionServiceHost({env:process.env,identityRuntime,origins:CORS_ORIGINS,
   warn:code=>console.warn(code),validateSources:async(user,track)=>{
     const expected={documents:['GD-005','GD-006'],rh:['GD-008','GD-009']}[track];
