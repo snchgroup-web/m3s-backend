@@ -1,0 +1,115 @@
+{
+  "id": "a49d924c3acf9b924f118268c23e320e4919d4d4309fbdf3f83d8fd990950318",
+  "version": "2026-10-17",
+  "dossiers": [
+    "GD-005",
+    "GD-006",
+    "GD-008",
+    "GD-009"
+  ],
+  "files": [
+    {
+      "id": "367b158f1c0663d33a900d4493d76d39199f2b4b1f6ccbce33b3ab63ef869c7b",
+      "name": "2SG_SYNTHESE_OFFRES_PREPARATION_GED_20261017.md",
+      "size": 2377,
+      "version": "preparation-2026-10-17",
+      "dossiers": [
+        "GD-005",
+        "GD-006",
+        "GD-008",
+        "GD-009"
+      ]
+    },
+    {
+      "id": "ae58b407f23031565da4ee89fc2976c36761cbff28e04082ff7ea1f787253f4d",
+      "name": "2SG_FICHES_OFFRE_COPIE_LECTURE_V0_1_20261017.html",
+      "size": 39457,
+      "version": "0.1",
+      "dossiers": [
+        "GD-005",
+        "GD-006",
+        "GD-008",
+        "GD-009"
+      ]
+    },
+    {
+      "id": "d632ecba0b711dc7405bdd1e2121750a842963693b19e6b9af6b59475fa48720",
+      "name": "2SG_MESURE_PRESTATIONS_20261016.xlsx",
+      "size": 14198,
+      "version": "dated_2026-10-16",
+      "dossiers": [
+        "GD-005",
+        "GD-006",
+        "GD-008",
+        "GD-009"
+      ]
+    },
+    {
+      "id": "ebd30d9c0e19c733c0636684921d3462662fa00f9bfb832e9dc8ec88cc53b66e",
+      "name": "DEMO_DOC_001_COPIE_LECTURE_V0_1_20261017.html",
+      "size": 522198,
+      "version": "0.1",
+      "dossiers": [
+        "GD-005",
+        "GD-006"
+      ]
+    },
+    {
+      "id": "844733ab69a835d962c440aac3d11d1e94ec5c0d5b6b5846ec90e690d0d8cb5c",
+      "name": "2SG_KIT_ORGANISATION_DOCUMENTAIRE_V0_2_SANS_AUDIO.html",
+      "size": 585787,
+      "version": "0.2",
+      "dossiers": [
+        "GD-005",
+        "GD-006"
+      ]
+    },
+    {
+      "id": "e0002f2a0abd786957f62773887fedc6abf692afda6b189fd667e26dfe15cc21",
+      "name": "2SG_KIT_RH_PROXIMITE_V0_2_SANS_AUDIO.html",
+      "size": 1019234,
+      "version": "0.2",
+      "dossiers": [
+        "GD-008",
+        "GD-009"
+      ]
+    },
+    {
+      "id": "6079ffacc3fe16940bb571d5bef733c76cab3bc8e11094c928d6b1a7da6017d6",
+      "name": "2SG_LIVRET_ACCUEIL_MEMBRES_V0_4_20261012.html",
+      "size": 2070503,
+      "version": "0.4",
+      "dossiers": [
+        "GD-005"
+      ]
+    },
+    {
+      "id": "dd2c6883d0f8f313daedbae91ca616410382c6a0387fcdae79d9e451213e8b34",
+      "name": "2SG_M3S_KIT_ACCUEIL_V0_4_20261012.pdf",
+      "size": 2024575,
+      "version": "0.4",
+      "dossiers": [
+        "GD-005"
+      ]
+    },
+    {
+      "id": "fafa7f09e3906bae08029f860a38b97eedeabb32569419ad8c4ab1fcbb6d70c6",
+      "name": "2SG_M3S_KIT_ACCUEIL_V0_4_20261012.pptx",
+      "size": 1778117,
+      "version": "0.4",
+      "dossiers": [
+        "GD-005"
+      ]
+    },
+    {
+      "id": "087e2f29e86a4dba1dee8d3b89e4484c54563ea5ac5f64d7d34ad7c646e732ef",
+      "name": "2SG_ORGANISATION_DOCUMENTAIRE_CYCLE_01_V0_1_NAV1.html",
+      "size": 2063889,
+      "version": "0.1-NAV1",
+      "dossiers": [
+        "GD-005",
+        "GD-006"
+      ]
+    }
+  ]
+}
