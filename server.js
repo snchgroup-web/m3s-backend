@@ -20,6 +20,8 @@ const { createBoussoleArtifactHandler } = require('./boussoleArtifact');
 const { buildFxRateMetadata } = require('./fxRateMetadata');
 const { profileNoStore, createOwnProfileHandler } = require('./ownProfile');
 const { createIdentityRuntime } = require('./identityRuntime');
+const { createTaskRegistryHandlers } = require('./taskRegistry');
+const { createTaskReferenceSource } = require('./taskReferenceSource');
 const { PREFIX: GED_PREFIX, isPrivateGedRoute, createGedRuntime } = require('./gedPrivate');
 const { PREFIX: INSTITUTIONAL_GED_PREFIX, isInstitutionalGedRoute, createInstitutionalHost } = require('./gedInstitutional');
 const { PREFIX: RH_INSTITUTIONAL_GED_PREFIX, createHost: createInstitutionalRhHost } = require('./gedInstitutionalRh');
@@ -208,6 +210,13 @@ const administrationRegistryHandlers = createAdministrationRegistryHandlers({
   projectId: PROJECT_ID,
   datasetId: DATASET_ID,
   location: DATASET_LOCATION
+});
+const taskRegistryHandlers = createTaskRegistryHandlers({
+  bigquery, projectId: PROJECT_ID, datasetId: DATASET_ID, location: DATASET_LOCATION,
+  referenceSource: createTaskReferenceSource({ bigquery, projectId: PROJECT_ID, datasetId: DATASET_ID,
+    location: DATASET_LOCATION, directoryPath: RH001_DIRECTORY_PATH,
+    directoryEnabled: RH001_MEMBERS_DIRECTORY_ENABLED, directoryAllowedRoles: RH001_MEMBERS_DIRECTORY_ALLOWED_ROLES,
+    activationEnabled: process.env.M3S_TASK_STANDARDISATION_ENABLED === 'true' })
 });
 const managementPortfolioHandlers = createManagementPortfolioHandlers({
   bigquery,
@@ -1829,128 +1838,12 @@ app.delete('/api/inventory/:id', async (req, res) => {
 // API ROUTES - TASKS (CRM)
 // ============================================================================
 
-app.get('/api/tasks', async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 100;
-    const offset = parseInt(req.query.offset) || 0;
-
-    const preferredQuery = `
-      SELECT
-        source_id as id,
-        source_id,
-        titre as title,
-        titre,
-        description,
-        statut as status,
-        statut,
-        priorite as priority,
-        priorite,
-        responsable,
-        module,
-        projet,
-        date_debut as created_at,
-        date_debut,
-        date_fin,
-        progression,
-        team,
-        bu,
-        annee
-      FROM \`${PROJECT_ID}.${DATASET_ID}.taches_propres\`
-      ORDER BY date_debut DESC, source_id
-      LIMIT ${limit} OFFSET ${offset}
-    `;
-
-    const fallbackQuery = `
-      SELECT
-        string_field_0 as id,
-        COALESCE(string_field_1, string_field_0) as title,
-        string_field_2 as description,
-        string_field_3 as status,
-        string_field_4 as priority,
-        string_field_5 as created_at
-      FROM \`${PROJECT_ID}.${DATASET_ID}.bdd_taches\`
-      WHERE string_field_0 IS NOT NULL
-        AND TRIM(string_field_0) != ''
-        AND string_field_0 != 'Unnamed: 0'
-      ORDER BY string_field_0
-      LIMIT ${limit} OFFSET ${offset}
-    `;
-
-    const [rows] = await runQueryWithFallback({
-      preferredQuery,
-      fallbackQuery,
-      label: 'Tasks'
-    });
-
-    res.json({
-      success: true,
-      data: rows,
-      count: rows.length,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-app.get('/api/tasks/count', async (req, res) => {
-  try {
-    const preferredQuery = `
-      WITH task_statuses AS (
-        SELECT UPPER(TRIM(COALESCE(statut, ''))) as status
-        FROM \`${PROJECT_ID}.${DATASET_ID}.taches_propres\`
-      )
-      SELECT
-        COUNT(*) as total,
-        COUNTIF(status IN ('TERMINÉ', 'TERMINE', 'DONE', 'ERLEDIGT')) as completed,
-        COUNTIF(status IN ('BLOQUÉ', 'BLOQUE', 'BLOCKED', 'BLOCKIERT')) as blocked,
-        COUNTIF(status IN ('ANNULÉ', 'ANNULE', 'CANCELLED', 'CANCELED', 'ABGEBROCHEN')) as cancelled,
-        COUNTIF(status NOT IN ('TERMINÉ', 'TERMINE', 'DONE', 'ERLEDIGT', 'ANNULÉ', 'ANNULE', 'CANCELLED', 'CANCELED', 'ABGEBROCHEN')) as open
-      FROM task_statuses
-    `;
-
-    const fallbackQuery = `
-      WITH task_statuses AS (
-        SELECT UPPER(TRIM(COALESCE(string_field_3, ''))) as status
-        FROM \`${PROJECT_ID}.${DATASET_ID}.bdd_taches\`
-        WHERE string_field_0 IS NOT NULL
-          AND TRIM(string_field_0) != ''
-          AND string_field_0 != 'Unnamed: 0'
-      )
-      SELECT
-        COUNT(*) as total,
-        COUNTIF(status IN ('TERMINÉ', 'TERMINE', 'DONE', 'ERLEDIGT')) as completed,
-        COUNTIF(status IN ('BLOQUÉ', 'BLOQUE', 'BLOCKED', 'BLOCKIERT')) as blocked,
-        COUNTIF(status IN ('ANNULÉ', 'ANNULE', 'CANCELLED', 'CANCELED', 'ABGEBROCHEN')) as cancelled,
-        COUNTIF(status NOT IN ('TERMINÉ', 'TERMINE', 'DONE', 'ERLEDIGT', 'ANNULÉ', 'ANNULE', 'CANCELLED', 'CANCELED', 'ABGEBROCHEN')) as open
-      FROM task_statuses
-    `;
-    const [rows] = await runQueryWithFallback({
-      preferredQuery,
-      fallbackQuery,
-      label: 'Tasks count'
-    });
-
-    const summary = rows[0] || {};
-    res.json({
-      success: true,
-      total: Number(summary.total || 0),
-      completed: Number(summary.completed || 0),
-      open: Number(summary.open || 0),
-      blocked: Number(summary.blocked || 0),
-      cancelled: Number(summary.cancelled || 0),
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
+app.get('/api/tasks/access', authenticateRequest, taskRegistryHandlers.access);
+app.get('/api/tasks/references', authenticateRequest, taskRegistryHandlers.references);
+app.get('/api/tasks/count', authenticateRequest, taskRegistryHandlers.count);
+app.get('/api/tasks', authenticateRequest, taskRegistryHandlers.list);
+app.post('/api/tasks', authenticateRequest, taskRegistryHandlers.create);
+app.put('/api/tasks/:id', authenticateRequest, taskRegistryHandlers.update);
 
 // ============================================================================
 // API ROUTES - USERS (RH)

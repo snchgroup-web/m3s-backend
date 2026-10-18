@@ -318,6 +318,7 @@ const createManagementPortfolioHandlers = ({
 };
 
 module.exports = {
+  SERVICE_SOURCE_TYPES,
   MANAGEMENT_TABLE_CONTRACTS,
   buildManagementPortfolioSchemaStatements,
   buildManagementPortfolioSeedOperations,
