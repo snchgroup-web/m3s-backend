@@ -2,8 +2,10 @@ const { ADMINISTRATION_TABLE_CONTRACTS, PERMISSIONS } = require('./administratio
 const { hasExpectedBigQueryTableContract } = require('./bigQueryTableContract');
 const { normalizeTaskSourceLinks } = require('./taskExecutionContract');
 
-// Existing Agenda source of the approved Standardisation I18N work group.
+// Exact internal sources approved for this project; never a generic correspondence grant.
 const I18N_CORRESPONDENCE_ID = 'COR-3bce2789-dc3d-4685-a008-14baba98ddd2';
+const TOOLS_CORRESPONDENCE_ID = 'COR-0c2a6a1f-daa9-44c3-b4e5-32f41c1ae857';
+const SOURCE_IDS = new Set([I18N_CORRESPONDENCE_ID, TOOLS_CORRESPONDENCE_ID]);
 const validActor = value => typeof value === 'string' && value.trim() === value
   && value.length > 0 && value.length <= 200 && !/[\x00-\x1f\x7f-\x9f]/.test(value);
 const nativeId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,179}$/.test(value);
@@ -16,7 +18,7 @@ function createStandardisationEvidenceQualifier({ bigquery, projectId, datasetId
       if (tenantId !== '2sg' || !validActor(actorId) || !nativeId(executionProjectId)
         || !Array.isArray(permissions) || !permissions.includes(PERMISSIONS.RESOURCES_READ)
         || !permissions.includes(PERMISSIONS.CORRESPONDENCE_READ)) return null;
-      const read = async () => {
+      const read = async (sourceId = I18N_CORRESPONDENCE_ID) => {
         const [metadata] = await bigquery.dataset(datasetId).table('administration_correspondence').getMetadata();
         if (metadata.type !== 'TABLE' || metadata.expirationTime || metadata.timePartitioning?.expirationMs
           || !hasExpectedBigQueryTableContract(metadata, ADMINISTRATION_TABLE_CONTRACTS.administration_correspondence)) return false;
@@ -25,8 +27,8 @@ function createStandardisationEvidenceQualifier({ bigquery, projectId, datasetId
           FROM \`${projectId}.${datasetId}.administration_correspondence\`
           WHERE tenant_id=@tenant_id AND id=@source_id AND deleted_at IS NULL
             AND confidentiality IN ('public','internal') LIMIT 2`,
-        params: { tenant_id: tenantId, source_id: I18N_CORRESPONDENCE_ID }, location, maximumBytesBilled: '10485760' });
-        return rows.length === 1 && rows[0].id === I18N_CORRESPONDENCE_ID && rows[0].tenant_id === tenantId
+        params: { tenant_id: tenantId, source_id: sourceId }, location, maximumBytesBilled: '10485760' });
+        return rows.length === 1 && rows[0].id === sourceId && rows[0].tenant_id === tenantId
           && ['public', 'internal'].includes(rows[0].confidentiality) && rows[0].direction === 'internal'
           && rows[0].not_deleted === true && ['to_qualify', 'to_file_dms', 'in_progress', 'closed'].includes(rows[0].status);
       };
@@ -39,14 +41,15 @@ function createStandardisationEvidenceQualifier({ bigquery, projectId, datasetId
             links = normalizeTaskSourceLinks(source_links);
             origin = normalizeTaskSourceLinks([source_origin])[0];
           } catch { return false; }
-          const allowed = link => link.kind === 'correspondence' && link.reference === I18N_CORRESPONDENCE_ID;
+          const allowed = link => link.kind === 'correspondence' && SOURCE_IDS.has(link.reference)
+            && link.reference === origin.reference;
           if (!allowed(origin) || !links.every(allowed)) return false;
           // Re-read at mutation time; an earlier preview is never an authority.
-          try { return await read(); } catch { return false; }
+          try { return await read(origin.reference); } catch { return false; }
         }
       };
     }
   };
 }
 
-module.exports = { createStandardisationEvidenceQualifier, I18N_CORRESPONDENCE_ID };
+module.exports = { createStandardisationEvidenceQualifier, I18N_CORRESPONDENCE_ID, TOOLS_CORRESPONDENCE_ID };
