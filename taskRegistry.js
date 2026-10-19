@@ -312,6 +312,54 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
         ...coverage(ready), timestamp: now() });
     } catch (error) { respondError(res, error); }
   };
+  const mine = async (req, res) => {
+    noStore(res);
+    try {
+      const actor = identity(req);
+      if (!actor.canRead) throw fail('TASK_FORBIDDEN', 403);
+      if (!compatible(req) || Object.keys(req.query || {}).some(key =>
+        !['limit', 'offset', 'search', 'contract_version'].includes(key))) throw fail('TASK_INVALID');
+      const limit = req.query.limit == null ? 25 : Number(req.query.limit);
+      const offset = req.query.offset == null ? 0 : Number(req.query.offset);
+      const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset)
+        || offset < 0 || offset > 100000 || search.length > 240
+        || (req.query.search != null && typeof req.query.search !== 'string')) throw fail('TASK_INVALID');
+      if (!await sourceReady() || typeof referenceSource?.inspectForActor !== 'function') throw fail('TASK_SOURCE_UNAVAILABLE', 503);
+      const refs = await referenceSource.inspectForActor({ tenantId: actor.tenant_id,
+        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: actor.role });
+      const assignment = refs?.choices?.assignments?.[0];
+      const projectIds = new Set(refs?.choices?.phases?.map(phase => phase.project_id));
+      if (refs?.contract_version !== TASK_EXECUTION_CONTRACT_VERSION || refs.execution_catalogue_ready !== true
+        || refs.choices.assignments.length !== 1 || projectIds.size !== 1
+        || ![assignment?.assignee_agent_id, assignment?.function_id, assignment?.module, [...projectIds][0]]
+          .every(value => typeof value === 'string' && value.length > 0)) throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE', 503);
+      // Reuse the actor-bound catalogue and existing owner boundary, never historical display names.
+      const [result] = await run(`WITH assigned AS (SELECT * FROM (${operational(false)})
+        WHERE assignee_agent_id=@assignee_agent_id AND project_id=@project_id
+          AND function_id=@function_id AND module=@module AND IFNULL(team_id,'')=@team_id),
+        filtered AS (SELECT * FROM assigned WHERE @search='' OR STRPOS(LOWER(CONCAT(
+          COALESCE(title,''),' ',COALESCE(reference,''),' ',COALESCE(module,''))),LOWER(@search))>0)
+        SELECT (SELECT COUNT(*) FROM filtered) AS total,
+          ARRAY(SELECT AS STRUCT * FROM filtered ORDER BY created_at DESC,id LIMIT @limit OFFSET @offset) AS items`,
+      { ...paramsFor(actor), assignee_agent_id: assignment.assignee_agent_id, project_id: [...projectIds][0],
+        function_id: assignment.function_id, module: assignment.module, team_id: assignment.team_id ?? '', search, limit, offset });
+      const row = result[0];
+      if (!row || !Array.isArray(row.items) || row.items.length > limit || row.total == null
+        || !Number.isSafeInteger(Number(row.total)) || Number(row.total) < 0) throw fail('TASK_SOURCE_UNAVAILABLE', 503);
+      const data = row.items.map(project);
+      if (data.some(task => task.source_kind !== 'operational' || task.can_edit !== false
+        || task.assignee_agent_id !== assignment.assignee_agent_id || task.project_id !== [...projectIds][0]
+        || task.function_id !== assignment.function_id || task.module !== assignment.module
+        || (task.team_id ?? '') !== (assignment.team_id ?? ''))
+        || new Set(data.map(task => task.id)).size !== data.length) throw fail('TASK_SOURCE_UNAVAILABLE', 503);
+      res.json({ success: true, scope: 'current_account_assignments', read_only: true,
+        coverage: 'owned_and_assigned_registered_project', historical_included: false,
+        assignment: { assignee_agent_id: assignment.assignee_agent_id, project_id: [...projectIds][0] },
+        data, count: data.length, total: Number(row.total), limit, offset,
+        contract_version: TASK_EXECUTION_CONTRACT_VERSION, timestamp: now() });
+    } catch (error) { respondError(res, error); }
+  };
   const fence = `UPDATE ${state} SET revision=revision+1 WHERE id='registry' AND contract_version=@contract_version;
     ASSERT @@row_count=1 AS 'TASK_SOURCE_UNAVAILABLE';`;
   const auditInsert = action => `INSERT INTO ${audit}
@@ -410,7 +458,7 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
       res.status(update || replayed ? 200 : 201).json({ success: true, data: project(row), replayed });
     } catch (error) { respondError(res, error); }
   };
-  return { access, references, list, count, create: mutate(false), update: mutate(true) };
+  return { access, references, list, count, mine, create: mutate(false), update: mutate(true) };
 }
 
 module.exports = { TASK_TABLE_CONTRACTS, buildTaskRegistrySchemaPlan, buildTaskActivationSchemaProposal, normalizeTask, createTaskRegistryHandlers };

@@ -1841,6 +1841,7 @@ app.delete('/api/inventory/:id', async (req, res) => {
 app.get('/api/tasks/access', authenticateRequest, taskRegistryHandlers.access);
 app.get('/api/tasks/references', authenticateRequest, taskRegistryHandlers.references);
 app.get('/api/tasks/count', authenticateRequest, taskRegistryHandlers.count);
+app.get('/api/tasks/mine', authenticateRequest, taskRegistryHandlers.mine);
 app.get('/api/tasks', authenticateRequest, taskRegistryHandlers.list);
 app.post('/api/tasks', authenticateRequest, taskRegistryHandlers.create);
 app.put('/api/tasks/:id', authenticateRequest, taskRegistryHandlers.update);
