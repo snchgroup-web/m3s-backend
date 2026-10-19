@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createStandardisationEvidenceQualifier, I18N_CORRESPONDENCE_ID } = require('../taskStandardisationEvidence');
+const { createStandardisationEvidenceQualifier, I18N_CORRESPONDENCE_ID, TOOLS_CORRESPONDENCE_ID } = require('../taskStandardisationEvidence');
 const { ADMINISTRATION_TABLE_CONTRACTS, PERMISSIONS } = require('../administrationRegistries');
 const { buildTaskActivationSchemaProposal } = require('../taskRegistry');
 
@@ -15,7 +15,8 @@ function fixture(change = () => {}) {
   const q = createStandardisationEvidenceQualifier({ projectId: 'test-project', datasetId: 'test_dataset',
     bigquery: { dataset: () => ({ table: n => ({ getMetadata: async () => {
       metadataReads.push(n); if (!state.metadata) throw Error('private metadata detail'); return [state.metadata];
-    } }) }), query: async x => { queries.push(x); if (state.throw) throw Error('private query detail'); return [structuredClone(state.rows)]; } } });
+    } }) }), query: async x => { queries.push(x); if (state.throw) throw Error('private query detail');
+      return [structuredClone(x.params.source_id === TOOLS_CORRESPONDENCE_ID ? state.toolRows || [] : state.rows)]; } } });
   const actor = { tenantId: '2sg', actorId: 'actor-test', executionProjectId: 'project-test',
     permissions: [PERMISSIONS.RESOURCES_READ, PERMISSIONS.CORRESPONDENCE_READ] };
   const input = () => ({ source_origin: { kind: 'correspondence', reference: I18N_CORRESPONDENCE_ID },
@@ -97,4 +98,36 @@ test('schema review proposes only five new tables and cannot execute or alter ex
     assert.doesNotMatch(sql, /\b(DROP|ALTER|DELETE|TRUNCATE|MERGE|INSERT|GRANT)\b|IF NOT EXISTS/);
   }
   assert.throws(() => buildTaskActivationSchemaProposal({ projectId: 'bad`project', datasetId: 'test_dataset' }));
+});
+
+test('the approved tools follow-up resolves only its own durable internal source at mutation time', async () => {
+  const f = fixture();
+  f.state.toolRows = [{ ...f.state.rows[0], id: TOOLS_CORRESPONDENCE_ID }];
+  const bound = await f.q.bindForActor(f.actor);
+  const source = { kind: 'correspondence', reference: TOOLS_CORRESPONDENCE_ID };
+  assert.equal(await bound.qualifySources({ ...f.input(), source_origin: source, source_links: [source] }), true);
+  assert.equal(f.queries.at(-1).params.source_id, TOOLS_CORRESPONDENCE_ID);
+  assert.doesNotMatch(f.queries.at(-1).query, /\b(subject|sender|recipient|INSERT|UPDATE|DELETE|MERGE|GRANT)\b/);
+  f.state.toolRows[0].not_deleted = false;
+  assert.equal(await bound.qualifySources({ ...f.input(), source_origin: source }), false);
+});
+
+test('a missing, foreign, outgoing or restricted tools source never qualifies', async () => {
+  for (const patch of [null, { tenant_id: 'foreign' }, { confidentiality: 'restricted_hr' },
+    { confidentiality: 'confidential' }, { direction: 'outgoing' }, { status: 'unsupported' }]) {
+    const f = fixture(), bound = await f.q.bindForActor(f.actor);
+    f.state.toolRows = patch === null ? [] : [{ ...f.state.rows[0], id: TOOLS_CORRESPONDENCE_ID, ...patch }];
+    assert.equal(await bound.qualifySources({ ...f.input(), source_origin: { kind: 'correspondence', reference: TOOLS_CORRESPONDENCE_ID } }), false);
+  }
+});
+
+test('origins cannot mix I18N and tools evidence or fetch arbitrary correspondence', async () => {
+  const f = fixture(), bound = await f.q.bindForActor(f.actor);
+  f.state.toolRows = [{ ...f.state.rows[0], id: TOOLS_CORRESPONDENCE_ID }];
+  for (const [origin, link] of [[I18N_CORRESPONDENCE_ID, TOOLS_CORRESPONDENCE_ID],
+    [TOOLS_CORRESPONDENCE_ID, I18N_CORRESPONDENCE_ID], [TOOLS_CORRESPONDENCE_ID, 'COR-unapproved']]) {
+    assert.equal(await bound.qualifySources({ ...f.input(), source_origin: { kind: 'correspondence', reference: origin },
+      source_links: [{ kind: 'correspondence', reference: link }] }), false);
+  }
+  assert.equal(f.queries.length, 1);
 });
