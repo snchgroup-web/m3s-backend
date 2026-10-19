@@ -131,3 +131,17 @@ test('origins cannot mix I18N and tools evidence or fetch arbitrary corresponden
   }
   assert.equal(f.queries.length, 1);
 });
+
+test('source choices expose only the exact tools identity after its metadata is checked', async () => {
+  const f = fixture(), bound = await f.q.bindForActor(f.actor);
+  assert.deepEqual((await bound.readSourceOrigins()).map(s => s.reference), [I18N_CORRESPONDENCE_ID]);
+  f.state.toolRows = [{ ...f.state.rows[0], id: TOOLS_CORRESPONDENCE_ID }];
+  assert.deepEqual(await bound.readSourceOrigins(), [
+    { kind: 'correspondence', reference: I18N_CORRESPONDENCE_ID, label: 'TAC-M3S-I18N-20261015-001' },
+    { kind: 'correspondence', reference: TOOLS_CORRESPONDENCE_ID, label: 'TAC-PROD-OUTILS-20261019-001' }
+  ]);
+  f.state.toolRows[0].confidentiality = 'confidential';
+  assert.deepEqual((await bound.readSourceOrigins()).map(s => s.reference), [I18N_CORRESPONDENCE_ID]);
+  f.state.throw = true;
+  assert.deepEqual((await bound.readSourceOrigins()).map(s => s.reference), [I18N_CORRESPONDENCE_ID]);
+});
