@@ -4,7 +4,7 @@ const seed = require('./referentiels/managementPortfolioSeed.json');
 const { readDirectoryDocument, validateDirectoryDocument, isRoleAllowed } = require('./rh001Directory');
 const { TASK_EXECUTION_CONTRACT_VERSION } = require('./taskExecutionContract');
 const { createStandardisationReferenceReader } = require('./taskStandardisationReferences');
-const { createStandardisationEvidenceQualifier, I18N_CORRESPONDENCE_ID } = require('./taskStandardisationEvidence');
+const { createStandardisationEvidenceQualifier } = require('./taskStandardisationEvidence');
 
 const unavailable = status => ({ status, data: [] });
 const text = value => typeof value === 'string' && value.trim().length > 0
@@ -70,8 +70,7 @@ function createTaskReferenceSource({ bigquery, projectId, datasetId, location = 
         sources: { dossiers, members, execution_references: { status: execution.status,
           data: [], scope: 'standardisation_project_only', read_only: true } },
         choices: ready ? execution.choices : { phases: [], activities: [], operational_plans: [], assignments: [], recurrences: [] },
-        source_origins: evidence ? [{ kind: 'correspondence', reference: I18N_CORRESPONDENCE_ID,
-          label: 'TAC-M3S-I18N-20261015-001' }] : [],
+        source_origins: evidence ? await evidence.readSourceOrigins() : [],
         execution_scope: 'standardisation_project_only', execution_catalogue_ready: ready,
         source_resolution_ready: Boolean(evidence), activation_enabled: activationEnabled === true, writes_enabled: canBind,
         missing: ready ? (evidence ? [] : ['canonical_source_resolution'])

@@ -34,6 +34,14 @@ function createStandardisationEvidenceQualifier({ bigquery, projectId, datasetId
       };
       try { if (!await read()) return null; } catch { return null; }
       return {
+        async readSourceOrigins() {
+          const origins = [{ kind: 'correspondence', reference: I18N_CORRESPONDENCE_ID, label: 'TAC-M3S-I18N-20261015-001' }];
+          try {
+            if (await read(TOOLS_CORRESPONDENCE_ID)) origins.push({ kind: 'correspondence', reference: TOOLS_CORRESPONDENCE_ID,
+              label: 'TAC-PROD-OUTILS-20261019-001' });
+          } catch { /* Unavailable supplementary evidence must not replace the existing I18N source. */ }
+          return origins;
+        },
         async qualifySources({ source_links, source_origin, context }) {
           if (context?.execution_kind !== 'project' || context.project_id !== executionProjectId) return false;
           let links, origin;
