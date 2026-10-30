@@ -33,7 +33,7 @@ function createRegister(pool, { lifecyclePolicy, maxBytes = MAX_BYTES, incomeLin
   if (typeof pool?.connect !== 'function') fail('GED_REGISTER_UNAVAILABLE');
   async function transaction(scope, work) {
     if (!scope || !HASH.test(scope.tenant) || !HASH.test(scope.owner)) fail('GED_ACCESS_DENIED');
-    let client, broken = false;
+    let client, broken = false, rolledBack = false;
     try {
       client = await pool.connect();
       await client.query('BEGIN');
@@ -43,10 +43,13 @@ function createRegister(pool, { lifecyclePolicy, maxBytes = MAX_BYTES, incomeLin
       return result;
     } catch (error) {
       if (client) {
-        try { await client.query('ROLLBACK'); } catch { broken = true; }
+        try { await client.query('ROLLBACK'); rolledBack = true; } catch { broken = true; }
       }
       if (['GED_VERSION_CONFLICT','GED_INVALID_COMMAND','GED_INVALID_TITLE','GED_DOCUMENT_TRASHED','GED_DOCUMENT_NOT_TRASHED',
-        'GED_REVISION_LIMIT','GED_VERSION_NOT_APPROVED','GED_VERSION_ALREADY_LINKED','GED_VERSION_NOT_ROOT','GED_NOT_FOUND','GED_DOCUMENT_NOT_APPROVED'].includes(error?.code)) throw error;
+        'GED_REVISION_LIMIT','GED_VERSION_NOT_APPROVED','GED_VERSION_ALREADY_LINKED','GED_VERSION_NOT_ROOT','GED_NOT_FOUND','GED_DOCUMENT_NOT_APPROVED'].includes(error?.code)) {
+        if (rolledBack) Object.defineProperty(error, 'gedRollbackConfirmed', { value: true });
+        throw error;
+      }
       fail('GED_REGISTER_UNAVAILABLE');
     } finally { client?.release(broken); }
   }

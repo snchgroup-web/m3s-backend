@@ -13,7 +13,7 @@ const objectKey = (scope, id) => `ged-private/v1/${scope.tenant}/${scope.owner}/
 const reference = (scope, row) => ({ key: objectKey(scope, row.document_id), generation: row.generation,
   size: row.byte_size, sha256: row.document_id });
 
-function createGedRouter({ policy, authenticate, getServices, financeRead, financeWrite, canAttachExpense, resolveExpense,
+function createGedRouter({ policy, authenticate, getServices, financeRead, financeWrite, canAttachExpense, resolveExpense, protectDocumentMutation, recoverDocumentMutation,
   resolveIncome,
   origins = ['https://seneswiss-group.com'] }) {
   const router = express.Router();
@@ -130,9 +130,17 @@ function createGedRouter({ policy, authenticate, getServices, financeRead, finan
       if (!row) fail('GED_NOT_FOUND');
       await storage.get(reference(req.gedScope, row));
     }
-    const row = await register.lifecycle.mutate(req.gedScope, req.params.id, req.body);
+    const mutate = beforeMutation => register.lifecycle.mutate(req.gedScope, req.params.id, req.body, beforeMutation);
+    const row = typeof protectDocumentMutation === 'function' ? await protectDocumentMutation(req, mutate) : await mutate();
     res.json({ success: true, document: publicRecord(row, policy) });
   }));
+  if (typeof recoverDocumentMutation === 'function' && financeRead && financeWrite) {
+    router.post('/documents/:id/finance-gate/recover', financeRead, financeWrite, handle(async (req, res) => {
+      const services = await getServices();
+      const result = await recoverDocumentMutation(req, services, policy);
+      res.json({ success: true, ...result });
+    }));
+  }
   router.post('/documents/:id', (req, res, next) => {
     let entry;
     try { entry = approvedDocument(policy, req.params.id); } catch (error) { return next(error); }
@@ -163,7 +171,7 @@ function createGedRouter({ policy, authenticate, getServices, financeRead, finan
     res.send(bytes);
   }));
   router.use((error, _req, res, _next) => {
-    const lifecycleStatus = { GED_VERSION_CONFLICT: 409, GED_INVALID_COMMAND: 400, GED_INVALID_TITLE: 400,
+    const lifecycleStatus = { GED_ACCESS_DENIED: 403, GED_VERSION_CONFLICT: 409, GED_INVALID_COMMAND: 400, GED_INVALID_TITLE: 400,
       GED_DOCUMENT_TRASHED: 409, GED_DOCUMENT_NOT_TRASHED: 409, GED_REVISION_LIMIT: 409, GED_VERSION_NOT_APPROVED: 400,
       GED_VERSION_ALREADY_LINKED: 409, GED_VERSION_NOT_ROOT: 409, GED_NOT_FOUND: 404, GED_LIFECYCLE_NOT_ENABLED: 503 }[error?.code];
     if (lifecycleStatus) return res.status(lifecycleStatus).json({ success: false, code: error.code });
@@ -222,7 +230,7 @@ async function assertDatabaseAccess(pool, lifecycleEnabled = false, incomeLinksE
   }
 }
 
-function createGedRuntime({ env, identityRuntime, credentials, financeRead, financeWrite, canAttachExpense, canReadFinance,
+function createGedRuntime({ env, identityRuntime, credentials, financeRead, financeWrite, canAttachExpense, canReadFinance, protectDocumentMutation, recoverDocumentMutation,
   resolveExpense, resolveIncome, dependencies = {}, onRuntime }) {
   let policy;
   try { policy = readPolicy(env); } catch { policy = null; }
@@ -254,7 +262,7 @@ function createGedRuntime({ env, identityRuntime, credentials, financeRead, fina
     return ready;
   };
   const router = createGedRouter({ policy, authenticate: identityRuntime.authenticate, getServices,
-    financeRead, financeWrite, canAttachExpense, resolveExpense,
+    financeRead, financeWrite, canAttachExpense, resolveExpense, protectDocumentMutation, recoverDocumentMutation,
     resolveIncome: env.M3S_GED_INCOME_LINKS_ENABLED === 'true' ? resolveIncome : undefined });
   // Internal only: callers must also enforce their existing Finance read permission.
   router.getAuthenticatedFinanceServices = async principal => {

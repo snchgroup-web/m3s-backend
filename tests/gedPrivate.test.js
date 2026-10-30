@@ -154,13 +154,16 @@ async function setup(t, overrides = {}) {
     },
     async auditDownload() { counters.audits++; }
   };
+  if (overrides.lifecycle) register.lifecycle = overrides.lifecycle;
   const authenticate = overrides.authenticate || ((req, res, next) => {
     if (req.get('authorization') !== 'Bearer synthetic-test') return res.status(401).json({ success: false });
     req.user = overrides.principal || f.principal; return next();
   });
   const app = express();
   app.use('/api/ged/private', createGedRouter({ policy: f.policy, authenticate,
-    getServices: async () => { counters.services++; return { storage, register }; } }));
+    getServices: async () => { counters.services++; return { storage, register }; },
+    protectDocumentMutation: overrides.protectDocumentMutation, recoverDocumentMutation: overrides.recoverDocumentMutation,
+    financeRead: overrides.financeRead, financeWrite: overrides.financeWrite }));
   const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
   const base = `http://127.0.0.1:${server.address().port}/api/ged/private/documents`;
@@ -169,6 +172,61 @@ async function setup(t, overrides = {}) {
     headers: { ...headers, 'content-type': require('../gedPrivatePolicy').contentTypeFor(f.entry) }, body: f.bytes, ...extra });
   return { ...f, app, register, storage, rows, objects, counters, base, headers, upload };
 }
+
+test('GED lifecycle mutation executes through the injected guard and refuses failures', async t => {
+  const f = fixture(), calls = [];
+  const row = { document_id: f.entry.sha256, filename: f.entry.name, byte_size: f.entry.size, created_at: '2026-01-01' };
+  const lifecycle = { async mutate(_scope, id) { calls.push('mutate'); assert.equal(id, f.entry.sha256); return row; } };
+  const protectedApp = await setup(t, { fixture: f, lifecycle, protectDocumentMutation: async (_req, mutate) => {
+    calls.push('before'); const result = await mutate(); calls.push('after'); return result;
+  } });
+  const post = app => fetch(`${app.base}/${f.entry.sha256}/actions`, { method: 'POST',
+    headers: { ...app.headers, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'trash', expectedRevision: 0 }) });
+  assert.equal((await post(protectedApp)).status, 200);
+  assert.deepEqual(calls, ['before', 'mutate', 'after']);
+  calls.length = 0;
+  const denied = await setup(t, { fixture: f, lifecycle, protectDocumentMutation: async () => { throw Error('private gate failure'); } });
+  const response = await post(denied);
+  assert.equal(response.status, 503);
+  assert.deepEqual(calls, []);
+  assert.doesNotMatch(JSON.stringify(await response.json()), /private gate failure/);
+});
+
+test('a protected finance decision refuses a missing existing finance permission before the gate', async t => {
+  const f = fixture(); let gateCalls = 0, mutations = 0;
+  const { createFinancialDecisionMutationGuard } = require('../financeGedGateCandidate');
+  const guard = createFinancialDecisionMutationGuard({ documentId: f.entry.sha256, canManage: () => false,
+    gate: { async protectMutation() { gateCalls++; } } });
+  const app = await setup(t, { fixture: f, protectDocumentMutation: guard,
+    lifecycle: { async mutate() { mutations++; } } });
+  const response = await fetch(`${app.base}/${f.entry.sha256}/actions`, { method: 'POST',
+    headers: { ...app.headers, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'trash', expectedRevision: 0 }) });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, 'GED_ACCESS_DENIED');
+  assert.equal(gateCalls, 0); assert.equal(mutations, 0);
+});
+
+test('finance gate recovery is optional and requires authentication, origin and both existing finance guards', async t => {
+  const f = fixture(); let called = 0;
+  const recover = async req => { called++; assert.equal(req.user.id, f.principal.id);
+    return { status: 'verified_and_reopened', document_revision: 0, document_trashed: false, gate_revision: 5 }; };
+  const allow = (_req, _res, next) => next();
+  const deny = (_req, res) => res.status(403).json({ success: false });
+  const post = (app, headers = app.headers) => fetch(`${app.base}/${f.entry.sha256}/finance-gate/recover`, { method: 'POST', headers });
+  const absent = await setup(t, { fixture: f });
+  assert.equal((await post(absent)).status, 404);
+  const deniedRead = await setup(t, { fixture: f, recoverDocumentMutation: recover, financeRead: deny, financeWrite: allow });
+  const deniedWrite = await setup(t, { fixture: f, recoverDocumentMutation: recover, financeRead: allow, financeWrite: deny });
+  assert.equal((await post(deniedRead)).status, 403);
+  assert.equal((await post(deniedWrite)).status, 403);
+  const allowed = await setup(t, { fixture: f, recoverDocumentMutation: recover, financeRead: allow, financeWrite: allow });
+  assert.equal((await post(allowed, { origin: allowed.headers.origin })).status, 401);
+  assert.equal((await post(allowed, { ...allowed.headers, origin: 'https://foreign.test' })).status, 403);
+  const response = await post(allowed);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).status, 'verified_and_reopened');
+  assert.equal(called, 1);
+});
 
 test('HTTP import, list, retry and private attachment roundtrip', async t => {
   const f = await setup(t);

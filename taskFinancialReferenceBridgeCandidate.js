@@ -75,6 +75,7 @@ function createFinancialReferenceBridgeCandidate({ standardSource, financialSour
       const finance = await financeFor(actor);
       if (!finance) return base;
       return { contract_version: TASK_EXECUTION_CONTRACT_VERSION, writes_enabled: true,
+        financialWriteGuard: finance.financialWriteGuard,
         catalogue: { async get(kind, nativeId, tenantId) {
           if (kind === 'operational_plan') return finance.catalogue.get(kind, nativeId, tenantId);
           if (kind === 'portfolio' || kind === 'dossier') {

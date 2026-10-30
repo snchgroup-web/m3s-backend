@@ -48,6 +48,7 @@ test('registration preview keeps plan, assignment and audit under the existing f
   assert.equal(p.executable, false);
   assert.match(p.sql, /BEGIN TRANSACTION/);
   assert.match(p.sql, /UPDATE `mon-projet-data-2sg\.m3s_2sg\.administration_task_registry_state`/);
+  assert.match(p.sql, /id='registry' AND revision>=0 AND contract_version=@contract_version/);
   assert.match(p.sql, /FINANCE_PLAN_DUPLICATE/);
   assert.match(p.sql, /FINANCE_ASSIGNMENT_DUPLICATE/);
   assert.match(p.sql, /FINANCE_CONSULTATION_UNAVAILABLE/);

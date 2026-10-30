@@ -101,6 +101,11 @@ function createFinancialOperationReferenceReader({ source }) {
         const catalogues = { operational_plan: [plan], portfolio: [portfolio],
           ...(plan.dossier_id != null ? { dossier: [dossier] } : {}) };
         return {
+          financialWriteGuard: Object.freeze({ planId: plan.id, assignmentId: assignment.id,
+            decisionReference: plan.decision_reference, decisionVersion: plan.decision_version,
+            decisionSha256: plan.decision_sha256, registration: plan.registration_reference,
+            sourceReference: RAILWAY_SOURCE, planSourceKey: plan.source_key, planLabel: plan.label,
+            portfolioRegistration: portfolio.registration_reference }),
           choices: { operational_plans: [{ id: plan.id, label: plan.label, portfolio_id: portfolio.id,
               function_id: plan.function_id }],
             assignments: [{ id: assignment.id, label: person.label, assignee_agent_id: person.id, team_id: person.team_id,

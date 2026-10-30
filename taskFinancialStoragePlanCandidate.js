@@ -80,7 +80,7 @@ function buildFinancialRegistrationPreview() {
     registration: 'REG-FIN-2SG-20261029-001' });
   const sql = `BEGIN TRANSACTION;
     UPDATE ${table('administration_task_registry_state')} SET revision=revision+1
-      WHERE id='registry' AND contract_version=@contract_version;
+      WHERE id='registry' AND revision>=0 AND contract_version=@contract_version;
     ASSERT @@row_count=1 AS 'FINANCE_REGISTRY_UNAVAILABLE';
     ASSERT (SELECT COUNT(*) FROM ${table('management_portfolios')} WHERE tenant_id='2sg'
       AND portfolio_id='PORT-2SG-GLOBAL' AND function_id='management_governance'

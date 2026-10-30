@@ -103,6 +103,9 @@ test('end-to-end candidate composes pinned native authority, scoped GED and the 
     financialSourceForActor: async () => source });
   const bound = await bridge.bindForActor(f.actor);
   assert.ok(bound);
+  assert.equal(bound.financialWriteGuard.planSourceKey, 'finance/plan-test');
+  assert.equal(bound.financialWriteGuard.decisionSha256, hash);
+  assert.equal(bound.financialWriteGuard.portfolioRegistration, 'proof');
   assert.equal((await bound.catalogue.get('operational_plan', f.plan.id, '2sg')).id, f.plan.id);
   event.trashed = true;
   assert.equal(await bound.catalogue.get('operational_plan', f.plan.id, '2sg'), null);
