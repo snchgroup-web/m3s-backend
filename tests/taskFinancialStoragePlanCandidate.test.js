@@ -51,9 +51,14 @@ test('registration preview keeps plan, assignment and audit under the existing f
   assert.match(p.sql, /FINANCE_PLAN_DUPLICATE/);
   assert.match(p.sql, /FINANCE_ASSIGNMENT_DUPLICATE/);
   assert.match(p.sql, /FINANCE_CONSULTATION_UNAVAILABLE/);
+  assert.match(p.sql, /FINANCE_SOURCE_UNAVAILABLE/);
+  assert.match(p.sql, /FINANCE_ACTOR_UNQUALIFIED/);
+  assert.match(p.sql, /actor_user_id=@actor AND assignee_agent_id='PER-2SG-0001'/);
   assert.match(p.sql, /INSERT INTO `mon-projet-data-2sg\.m3s_2sg\.management_operational_plans`/);
   assert.match(p.sql, /INSERT INTO `mon-projet-data-2sg\.m3s_2sg\.management_operational_assignments`/);
   assert.match(p.sql, /INSERT INTO `mon-projet-data-2sg\.m3s_2sg\.administration_audit_log`/);
+  assert.equal((p.sql.match(/INSERT INTO `mon-projet-data-2sg\.m3s_2sg\.administration_audit_log`/g) || []).length, 2);
+  assert.match(p.sql, /'operational_assignment',@assignment_id/);
   assert.match(p.sql, /COMMIT TRANSACTION/);
   assert.doesNotMatch(p.sql, /\b(?:GRANT|REVOKE|DELETE|DROP|ALTER)\b/i);
   assert.ok(p.pending.includes('server_authority_and_ged_verified'));

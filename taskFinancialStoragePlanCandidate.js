@@ -88,6 +88,13 @@ function buildFinancialRegistrationPreview() {
     ASSERT (SELECT COUNT(*) FROM ${table('administration_correspondence')} WHERE tenant_id='2sg'
       AND id='COR-de403d44-4f7d-4926-ba0d-f3ac6e20687f' AND direction='incoming'
       AND deleted_at IS NULL)=1 AS 'FINANCE_CONSULTATION_UNAVAILABLE';
+    ASSERT (SELECT COUNT(*) FROM ${table('administration_correspondence')} WHERE tenant_id='2sg'
+      AND id='COR-88832bd5-2231-42f3-a7d6-4f4e13a8cbe3' AND direction='internal'
+      AND confidentiality IN ('internal','public') AND deleted_at IS NULL
+      AND status IN ('to_qualify','to_file_dms','in_progress','closed'))=1 AS 'FINANCE_SOURCE_UNAVAILABLE';
+    ASSERT (SELECT COUNT(*) FROM ${table('management_task_assignments')} WHERE tenant_id='2sg'
+      AND actor_user_id=@actor AND assignee_agent_id='PER-2SG-0001' AND team_id='TZH'
+      AND governance_status='approved' AND status='active')=1 AS 'FINANCE_ACTOR_UNQUALIFIED';
     ASSERT (SELECT COUNT(*) FROM ${table('management_operational_plans')} WHERE tenant_id='2sg'
       AND (id=@plan_id OR source_key=@plan_source OR LOWER(TRIM(label))=LOWER(TRIM(@label))))=0
       AS 'FINANCE_PLAN_DUPLICATE';
@@ -107,6 +114,10 @@ function buildFinancialRegistrationPreview() {
     INSERT INTO ${table('administration_audit_log')}
       (id,tenant_id,actor_user_id,actor_name,entity_type,entity_id,action,event_at,metadata_json)
     VALUES (@audit_id,'2sg',@actor,NULL,'operational_plan',@plan_id,'create',CURRENT_TIMESTAMP(),@audit_metadata);
+    INSERT INTO ${table('administration_audit_log')}
+      (id,tenant_id,actor_user_id,actor_name,entity_type,entity_id,action,event_at,metadata_json)
+    VALUES (CONCAT(@audit_id,'-assignment'),'2sg',@actor,NULL,'operational_assignment',@assignment_id,
+      'create',CURRENT_TIMESTAMP(),@audit_metadata);
     COMMIT TRANSACTION;`;
   return { status: 'preview_only', executable: false, ids, sql,
     pending: ['fresh_backup_and_restore_check', 'server_authority_and_ged_verified', 'authenticated_actor_binding',
