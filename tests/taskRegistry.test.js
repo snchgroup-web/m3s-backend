@@ -30,7 +30,7 @@ const rowFromParams = (params, extra = {}) => {
     source_start_date: null, source_due_date: null, created_at: event_at, updated_at: event_at,
     replayed: false, ...extra };
 };
-function fixture({ missing = false, queryResult, metadataChange, withoutSource = false,
+function fixture({ missing = false, queryResult, metadataChange, withoutSource = false, finance = false,
   assignmentChange, sourceAllowed = true, sourceThrows = false, bindingChange } = {}) {
   const calls = [];
   const contracts = { ...TASK_TABLE_CONTRACTS, administration_audit_log: ADMINISTRATION_TABLE_CONTRACTS.administration_audit_log };
@@ -46,6 +46,7 @@ function fixture({ missing = false, queryResult, metadataChange, withoutSource =
         if (result !== undefined) return result;
       }
       if (options.query.includes("COUNTIF(id='registry'")) return [[{ total: 1, valid: 1, invalid_task_versions: 0 }]];
+      if (options.query.startsWith('SELECT revision,contract_version FROM')) return [[{ revision: 12, contract_version: VERSION }]];
       if (options.query.startsWith('SELECT id FROM (')) return [[]];
       if (options.query.includes('BEGIN TRANSACTION')) return [[rowFromParams(options.params)]];
       if (options.query.includes('ARRAY(SELECT AS STRUCT')) return [[{ total: 655,
@@ -64,7 +65,7 @@ function fixture({ missing = false, queryResult, metadataChange, withoutSource =
       dossier: record('dossier-test', { portfolio_id: 'portfolio-test' }),
       portfolio: record('portfolio-test'),
       activity: record('activity-test', { phase_id: 'phase-test' }),
-      operational_plan: record('plan-test', { portfolio_id: 'portfolio-test', function_id: 'function-test' }),
+      operational_plan: record('plan-test', { portfolio_id: 'portfolio-test', function_id: finance ? 'finance' : 'function-test' }),
       recurrence: record('recurrence-test', { operational_plan_id: 'plan-test', cadence_validated: true,
         cadence_reference: 'synthetic-cadence-approval' })
     };
@@ -150,6 +151,23 @@ test('missing or expiring schema disables persistence and preserves historical c
     assert.doesNotMatch(query, /FROM `test-project.test_data.administration_tasks`/);
   }
 });
+test('a frozen registry remains readable while task writes and editing stay disabled', async () => {
+  const f = fixture({ queryResult: options => {
+    if (options.query.includes("COUNTIF(id='registry'")) return [[{ total: 1,
+      valid: options.query.includes('revision>=0') ? 0 : 1, invalid_task_versions: 0 }]];
+  } });
+  const access = await f.call('access');
+  assert.equal(access.body.can_read, true);
+  assert.equal(access.body.can_write, false);
+  const list = await f.call('list');
+  assert.equal(list.body.operational_available, true);
+  assert.match(f.calls.at(-1).query, /'operational' AS source_kind,FALSE AS can_edit/);
+  const count = await f.call('count');
+  assert.equal(count.body.operational_available, true);
+  const write = await f.call('create');
+  assert.equal(write.statusCode, 503);
+  assert.equal(f.calls.some(call => call.query.includes('BEGIN TRANSACTION')), false);
+});
 test('list is globally paged and searched in SQL, not counted from the loaded page', async () => {
   const f = fixture();
   const res = await f.call('list', { query: { limit: '10', offset: '20', search: "test' OR TRUE" } });
@@ -206,6 +224,7 @@ test('create derives a stable tenant reference id, serializes writers and insert
   const request = f.calls.find(o => o.query.includes('BEGIN TRANSACTION'));
   assert.match(request.params.id, /^TASK-[a-f0-9]{64}$/);
   assert.match(request.query, /UPDATE `test-project.test_data.administration_task_registry_state`/);
+  assert.match(request.query, /id='registry' AND revision>=0\s+AND contract_version=@contract_version/);
   assert.match(request.query, /ASSERT @@row_count=1/);
   assert.match(request.query, /INSERT INTO `test-project.test_data.administration_audit_log`/);
   assert.match(request.query, /reference_key=@reference_key/);
@@ -359,7 +378,7 @@ test('project ancestry and responsible display are derived from actor-bound refe
   assert.equal(request.params.operational_plan_id, null);
   assert.equal(request.params.responsable, 'Responsable interne');
   assert.equal(request.params.progression, null);
-  assert.deepEqual(f.boundActors[0], { tenantId: 'tenant-a', actorId: 'user-a', permissions: user().permissions, role: 'Manager' });
+  assert.deepEqual(f.boundActors[0], { tenantId: 'tenant-a', actorId: 'user-a', permissions: user().permissions, role: 'Manager', principal: user() });
   assert.equal(f.assignmentInputs[0].context.project_id, 'project-test');
   assert.equal(f.assignmentInputs[0].context.phase_id, 'phase-test');
   assert.deepEqual(f.sourceInputs[0].context, f.assignmentInputs[0].context);
@@ -371,6 +390,93 @@ test('project ancestry and responsible display are derived from actor-bound refe
 
 const operation = (key = null) => ({ execution_kind: 'operation', phase_id: null, activity_id: null,
   operational_plan_id: 'plan-test', recurrence_id: key ? 'recurrence-test' : null, occurrence_key: key });
+
+test('finance task write rechecks the native plan, decision and assignment inside its transaction', async () => {
+  const hash = 'a'.repeat(64);
+  const f = fixture({ finance: true, assignmentChange: assignment => ({ ...assignment, id: 'assignment-test' }),
+    bindingChange: binding => ({ ...binding, financialWriteGuard: { planId: 'plan-test', assignmentId: 'assignment-test',
+      decisionReference: hash, decisionSha256: hash, decisionVersion: '0', registration: 'registration-test', sourceReference: 'COR-TEST',
+      planSourceKey: 'finance/plan', planLabel: 'Finance', portfolioRegistration: 'portfolio-proof' } }) });
+  const res = await f.call('create', { body: { ...body(), function_id: 'finance', module: 'FINANCES', execution_context: operation() } });
+  assert.equal(res.statusCode, 201);
+  const tx = f.calls.find(call => call.query.includes('BEGIN TRANSACTION'));
+  assert.ok(tx.query.indexOf('TASK_FINANCIAL_CONTEXT_CHANGED') < tx.query.indexOf('INSERT INTO `test-project.test_data.administration_tasks`'));
+  assert.match(tx.query, /a\.actor_user_id=@owner_user_id/);
+  assert.match(tx.query, /p\.decision_sha256=@finance_decision/);
+  assert.match(tx.query, /revision=@finance_observed_revision/);
+  assert.equal(tx.params.finance_observed_revision, 12);
+  assert.match(tx.query, /p\.source_key=@finance_plan_source AND p\.label=@finance_plan_label/);
+  assert.match(tx.query, /source_ref=@finance_portfolio_registration/);
+  assert.match(tx.query, /id=@finance_source_reference/);
+  assert.match(tx.query, /portfolio_id=@portfolio_id AND function_id='management_governance'/);
+  assert.equal(tx.params.finance_assignment_id, 'assignment-test');
+  assert.equal(tx.params.finance_decision, hash);
+  assert.deepEqual(JSON.parse(tx.params.metadata_json).financial_context, { plan_id: 'plan-test',
+    assignment_id: 'assignment-test', decision_sha256: hash, decision_revision: '0',
+    registration_reference: 'registration-test', source_reference: 'COR-TEST' });
+});
+
+test('finance task fails closed if the trusted write guard is missing or the transaction detects a change', async () => {
+  const request = { body: { ...body(), function_id: 'finance', module: 'FINANCES', execution_context: operation() } };
+  const absent = fixture({ finance: true });
+  assert.equal((await absent.call('create', request)).statusCode, 503);
+  assert.equal(absent.calls.some(call => call.query.includes('BEGIN TRANSACTION')), false);
+  const hash = 'b'.repeat(64);
+  const changed = fixture({ finance: true, assignmentChange: a => ({ ...a, id: 'assignment-test' }),
+    bindingChange: binding => ({ ...binding, financialWriteGuard: { planId: 'plan-test', assignmentId: 'assignment-test',
+      decisionReference: hash, decisionSha256: hash, decisionVersion: '0', registration: 'registration-test', sourceReference: 'COR-TEST',
+      planSourceKey: 'finance/plan', planLabel: 'Finance', portfolioRegistration: 'portfolio-proof' } }),
+    queryResult: options => { if (options.query.includes('BEGIN TRANSACTION')) throw Error('TASK_FINANCIAL_CONTEXT_CHANGED'); } });
+  const res = await changed.call('create', request);
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.code, 'TASK_CONFLICT');
+});
+
+test('finance task refuses a frozen or invalid shared revision before qualifying the GED', async () => {
+  const request = { body: { ...body(), function_id: 'finance', module: 'FINANCES', execution_context: operation() } };
+  for (const value of [-1, null, 'not-a-revision']) {
+    const f = fixture({ finance: true, queryResult: options => options.query.startsWith('SELECT revision,contract_version FROM')
+      ? [[{ revision: value, contract_version: VERSION }]] : undefined });
+    const res = await f.call('create', request);
+    assert.equal(res.statusCode, 503);
+    assert.equal(f.boundActors.length, 0);
+    assert.equal(f.calls.some(call => call.query.includes('BEGIN TRANSACTION')), false);
+  }
+});
+
+test('simulated GED change between verification and task write invalidates the captured finance revision', async () => {
+  const { createFinanceGedGateCandidate } = require('../financeGedGateCandidate');
+  let revision = 12, documentRevision = 0, writes = 0;
+  const gateStore = { async query({ query }) {
+    if (query.includes('SET revision=-revision-1')) { revision = -revision - 1; return [[{ revision }]]; }
+    if (query.includes('SET revision=-revision')) { revision = -revision; return [[{ revision }]]; }
+    throw Error('unexpected synthetic query');
+  } };
+  const gate = createFinanceGedGateCandidate({ bigquery: gateStore, projectId: 'test-project', datasetId: 'test_data' });
+  const hash = 'c'.repeat(64);
+  const f = fixture({ finance: true, assignmentChange: a => ({ ...a, id: 'assignment-test' }),
+    bindingChange: async binding => {
+      await gate.protectMutation({ tenantId: '2sg', actorId: 'user-a', documentId: hash, expectedRevision: 0 },
+        async () => { documentRevision++; });
+      return { ...binding, financialWriteGuard: { planId: 'plan-test', assignmentId: 'assignment-test',
+        decisionReference: hash, decisionSha256: hash, decisionVersion: '0', registration: 'registration-test',
+        sourceReference: 'COR-TEST', planSourceKey: 'finance/plan', planLabel: 'Finance', portfolioRegistration: 'portfolio-proof' } };
+    },
+    queryResult: options => {
+      if (options.query.startsWith('SELECT revision,contract_version FROM')) return [[{ revision, contract_version: VERSION }]];
+      if (options.query.includes('BEGIN TRANSACTION')) {
+        if (options.params.finance_observed_revision !== revision) throw Error('TASK_FINANCIAL_CONTEXT_CHANGED');
+        writes++;
+      }
+    } });
+  const res = await f.call('create', { body: { ...body(), function_id: 'finance', module: 'FINANCES', execution_context: operation() } });
+  assert.equal(res.statusCode, 409);
+  assert.equal(documentRevision, 1);
+  assert.equal(revision, 13);
+  assert.equal(writes, 0);
+});
+
+test.todo('GED revision and BigQuery task write remain ordered after a process or connection failure');
 
 test('operations require a governed plan and never acquire an artificial project or phase', async () => {
   const f = fixture();

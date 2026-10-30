@@ -137,7 +137,7 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
     const owner = String(user?.id || '').trim();
     if (!tenant || !owner) throw fail('TASK_UNAUTHENTICATED', 401);
     const permissions = Array.isArray(user.permissions) ? [...user.permissions] : [];
-    return { tenant_id: tenant, owner_user_id: owner, permissions, role: user.role,
+    return { tenant_id: tenant, owner_user_id: owner, permissions, role: user.role, principal: user,
       canRead: tenant === historicalTenantId && permissions.includes(PERMISSIONS.RESOURCES_READ),
       canWrite: tenant === historicalTenantId && permissions.includes(PERMISSIONS.RESOURCES_READ) && permissions.includes(PERMISSIONS.RESOURCES_WRITE) };
   };
@@ -146,13 +146,13 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
     let code = /^(TASK_(INVALID|CONTRACT_MISMATCH|CONFLICT|DUPLICATE_REFERENCE|POTENTIAL_HISTORICAL_DUPLICATE|SOURCE_UNAVAILABLE|FORBIDDEN|UNAUTHENTICATED|CONTEXT_INVALID|CONTEXT_SOURCE_UNAVAILABLE|CONTEXT_REFERENCE_UNQUALIFIED|SOURCE_LINK_INVALID|SOURCE_LINK_DUPLICATE|ASSIGNMENT_UNQUALIFIED|SOURCE_UNQUALIFIED))$/.test(error.code || '')
       ? error.code : 'TASK_SOURCE_UNAVAILABLE';
     if (/TASK_DUPLICATE_REFERENCE/.test(error.message)) code = 'TASK_DUPLICATE_REFERENCE';
-    else if (/TASK_CONFLICT|concurrent update|transaction.*aborted/i.test(error.message)) code = 'TASK_CONFLICT';
+    else if (/TASK_CONFLICT|TASK_FINANCIAL_CONTEXT_CHANGED|concurrent update|transaction.*aborted/i.test(error.message)) code = 'TASK_CONFLICT';
     const unavailable = ['TASK_SOURCE_UNAVAILABLE', 'TASK_CONTEXT_SOURCE_UNAVAILABLE'].includes(code);
     const status = error.status || (unavailable ? 503 : ['TASK_CONFLICT', 'TASK_DUPLICATE_REFERENCE'].includes(code) ? 409 : 400);
     logger.warn?.('Task registry request failed', code);
     return res.status(status).json({ success: false, code, error: code });
   };
-  const sourceReady = async () => {
+  const sourceReady = async (allowFrozen = false) => {
     try {
       for (const [name, contract] of Object.entries({ ...TASK_TABLE_CONTRACTS,
         administration_audit_log: ADMINISTRATION_TABLE_CONTRACTS.administration_audit_log })) {
@@ -161,7 +161,7 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
           || metadata.timePartitioning?.expirationMs) return false;
       }
       const [rows] = await run(`SELECT COUNT(*) AS total,
-        COUNTIF(id='registry' AND revision>=0 AND contract_version=@contract_version) AS valid,
+        COUNTIF(id='registry' AND ${allowFrozen ? 'revision IS NOT NULL' : 'revision>=0'} AND contract_version=@contract_version) AS valid,
         (SELECT COUNT(*) FROM ${tasks} WHERE contract_version!=@contract_version) AS invalid_task_versions FROM ${state}`,
       { contract_version: TASK_EXECUTION_CONTRACT_VERSION });
       return Number(rows[0]?.total) === 1 && Number(rows[0]?.valid) === 1
@@ -172,7 +172,7 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
     if (!actor.canWrite || typeof referenceSource?.bindForActor !== 'function') return null;
     try {
       const bound = await referenceSource.bindForActor({ tenantId: actor.tenant_id,
-        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: actor.role });
+        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: actor.role, principal: actor.principal });
       return bound?.contract_version === TASK_EXECUTION_CONTRACT_VERSION && bound.writes_enabled === true
         && typeof bound.catalogue?.get === 'function' && typeof bound.resolveAssignment === 'function'
         && typeof bound.qualifySources === 'function' ? bound : null;
@@ -242,8 +242,9 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
   const access = async (req, res) => {
     noStore(res);
     try {
-      const actor = identity(req), ready = actor.canRead && await sourceReady();
-      const bound = ready ? await bind(actor) : null;
+      const actor = identity(req), ready = actor.canRead && await sourceReady(true);
+      const writable = ready && await sourceReady();
+      const bound = writable ? await bind(actor) : null;
       res.json({ success: true, enabled: ready, can_read: ready,
         can_write: Boolean(ready && bound && compatible(req)), scope: 'current_account',
         identity_scope: 'tenant_reference', write_contract_ready: Boolean(bound),
@@ -260,7 +261,7 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
       if (!actor.canRead) throw fail('TASK_FORBIDDEN', 403);
       if (typeof referenceSource?.inspectForActor !== 'function') throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE', 503);
       const data = await referenceSource.inspectForActor({ tenantId: actor.tenant_id,
-        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: req.user.role });
+        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: req.user.role, principal: actor.principal });
       if (data?.contract_version !== TASK_EXECUTION_CONTRACT_VERSION) throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE', 503);
       res.json({ success: true, ...data });
     } catch (error) { respondError(res, error); }
@@ -275,8 +276,8 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
       const search = String(req.query?.search || '').trim();
       if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset)
         || offset < 0 || offset > 100000 || search.length > 240) throw fail('TASK_INVALID');
-      const ready = actor.canRead && await sourceReady();
-      const editable = Boolean(ready && compatible(req) && await bind(actor));
+      const ready = actor.canRead && await sourceReady(true);
+      const editable = Boolean(ready && compatible(req) && await sourceReady() && await bind(actor));
       const [result] = await withHistoricalFallback(fallback => run(`WITH all_tasks AS (
         ${historical(fallback)} ${ready ? `UNION ALL ${operational(editable)}` : ''}
         ), filtered AS (SELECT * FROM all_tasks WHERE @search='' OR STRPOS(LOWER(CONCAT(
@@ -296,7 +297,7 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
     try {
       const actor = identity(req);
       if (!actor.canRead) throw fail('TASK_FORBIDDEN', 403);
-      const ready = await sourceReady();
+      const ready = await sourceReady(true);
       const [rows] = await withHistoricalFallback(fallback => run(`WITH all_tasks AS (
         ${historical(fallback)} ${ready ? `UNION ALL ${operational(false)}` : ''}
         ), statuses AS (SELECT UPPER(TRIM(COALESCE(status,''))) AS status,source_kind FROM all_tasks)
@@ -325,9 +326,10 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset)
         || offset < 0 || offset > 100000 || search.length > 240
         || (req.query.search != null && typeof req.query.search !== 'string')) throw fail('TASK_INVALID');
-      if (!await sourceReady() || typeof referenceSource?.inspectForActor !== 'function') throw fail('TASK_SOURCE_UNAVAILABLE', 503);
-      const refs = await referenceSource.inspectForActor({ tenantId: actor.tenant_id,
-        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: actor.role });
+      if (!await sourceReady(true) || typeof referenceSource?.inspectForActor !== 'function') throw fail('TASK_SOURCE_UNAVAILABLE', 503);
+      const personalReferences = referenceSource.inspectForPersonalTasks || referenceSource.inspectForActor;
+      const refs = await personalReferences.call(referenceSource, { tenantId: actor.tenant_id,
+        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: actor.role, principal: actor.principal });
       const assignment = refs?.choices?.assignments?.[0];
       const projectIds = new Set(refs?.choices?.phases?.map(phase => phase.project_id));
       if (refs?.contract_version !== TASK_EXECUTION_CONTRACT_VERSION || refs.execution_catalogue_ready !== true
@@ -360,8 +362,9 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
         contract_version: TASK_EXECUTION_CONTRACT_VERSION, timestamp: now() });
     } catch (error) { respondError(res, error); }
   };
-  const fence = `UPDATE ${state} SET revision=revision+1 WHERE id='registry' AND contract_version=@contract_version;
-    ASSERT @@row_count=1 AS 'TASK_SOURCE_UNAVAILABLE';`;
+  const fence = finance => `UPDATE ${state} SET revision=revision+1 WHERE id='registry' AND revision>=0
+    ${finance ? 'AND revision=@finance_observed_revision' : ''} AND contract_version=@contract_version;
+    ASSERT @@row_count=1 AS '${finance ? 'TASK_FINANCIAL_CONTEXT_CHANGED' : 'TASK_SOURCE_UNAVAILABLE'}';`;
   const auditInsert = action => `INSERT INTO ${audit}
     (id,tenant_id,actor_user_id,actor_name,entity_type,entity_id,action,event_at,metadata_json)
     VALUES (@audit_id,@tenant_id,@owner_user_id,NULL,'task',@id,'${action}',TIMESTAMP(@event_at),@metadata_json);`;
@@ -378,6 +381,17 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
       const task = normalizeTask(update ? req.body.task : req.body, !update);
       if (update) expected_revision = req.body.expected_revision;
       if (!await sourceReady()) throw fail('TASK_SOURCE_UNAVAILABLE', 503);
+      const financeMutation = task.execution_context.execution_kind === 'operation' && task.function_id === 'finance';
+      let financeObservedRevision;
+      if (financeMutation) {
+        const [rows] = await run(`SELECT revision,contract_version FROM ${state} WHERE id='registry' LIMIT 2`);
+        const rawRevision = rows?.[0]?.revision?.value ?? rows?.[0]?.revision;
+        const revision = Number(rawRevision);
+        if (!Array.isArray(rows) || rows.length !== 1 || rawRevision == null || rawRevision === '' ||
+            !Number.isSafeInteger(revision) || revision < 0 ||
+            rows[0].contract_version !== TASK_EXECUTION_CONTRACT_VERSION) throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE', 503);
+        financeObservedRevision = revision;
+      }
       const bound = await bind(actor);
       if (!bound) throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE', 503);
       const context = await resolveTaskExecutionContext(task.execution_context,
@@ -410,6 +424,51 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
         payload_hash: digest(persisted), event_at: now(), audit_id: `AUD-${crypto.randomUUID()}`,
         metadata_json: JSON.stringify({ contract_version: TASK_EXECUTION_CONTRACT_VERSION, changed_fields: DATA_NAMES }) };
       const types = Object.fromEntries(DATA_FIELDS.map(f => [f.name, f.type === 'INTEGER' ? 'INT64' : 'STRING']));
+      let financeFence = '';
+      if (financeMutation) {
+        const guard = bound.financialWriteGuard;
+        if (!plain(guard) || guard.planId !== context.operational_plan_id || guard.assignmentId !== assignment.id ||
+            !/^[a-f0-9]{64}$/.test(guard.decisionReference || '') || guard.decisionReference !== guard.decisionSha256 ||
+            typeof guard.decisionVersion !== 'string' || !/^\d{1,5}$/.test(guard.decisionVersion) ||
+            typeof guard.registration !== 'string' || !guard.registration.trim() ||
+            typeof guard.planSourceKey !== 'string' || !guard.planSourceKey.trim() ||
+            typeof guard.planLabel !== 'string' || !guard.planLabel.trim() ||
+            typeof guard.portfolioRegistration !== 'string' || !guard.portfolioRegistration.trim() ||
+            task.source_origin?.kind !== 'correspondence' || guard.sourceReference !== task.source_origin.reference)
+          throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE', 503);
+        Object.assign(params, { finance_assignment_id: guard.assignmentId, finance_decision: guard.decisionReference,
+          finance_decision_version: guard.decisionVersion, finance_registration: guard.registration,
+          finance_source_reference: guard.sourceReference, finance_plan_source: guard.planSourceKey,
+          finance_plan_label: guard.planLabel, finance_portfolio_registration: guard.portfolioRegistration,
+          finance_observed_revision: financeObservedRevision });
+        Object.assign(types, { finance_assignment_id: 'STRING', finance_decision: 'STRING',
+          finance_decision_version: 'STRING', finance_registration: 'STRING', finance_source_reference: 'STRING',
+          finance_plan_source: 'STRING', finance_plan_label: 'STRING', finance_portfolio_registration: 'STRING',
+          finance_observed_revision: 'INT64' });
+        params.metadata_json = JSON.stringify({ contract_version: TASK_EXECUTION_CONTRACT_VERSION, changed_fields: DATA_NAMES,
+          financial_context: { plan_id: guard.planId, assignment_id: guard.assignmentId,
+            decision_sha256: guard.decisionSha256, decision_revision: guard.decisionVersion,
+            registration_reference: guard.registration, source_reference: guard.sourceReference } });
+        financeFence = `ASSERT (SELECT COUNT(*) FROM ${table('management_operational_plans')} p
+          JOIN ${table('management_operational_assignments')} a ON a.tenant_id=p.tenant_id AND a.operational_plan_id=p.id
+          WHERE p.tenant_id=@tenant_id AND p.id=@operational_plan_id AND p.portfolio_id=@portfolio_id
+            AND p.source_key=@finance_plan_source AND p.label=@finance_plan_label AND p.dossier_id IS NULL
+            AND p.function_id='finance' AND p.status='active' AND p.governance_status='approved'
+            AND p.registration_reference=@finance_registration AND p.decision_reference=@finance_decision
+            AND p.decision_sha256=@finance_decision AND p.decision_version=@finance_decision_version
+            AND a.id=@finance_assignment_id AND a.actor_user_id=@owner_user_id
+            AND a.assignee_agent_id=@assignee_agent_id AND a.team_id=@team_id
+            AND a.function_id=@function_id AND a.module=@module AND a.status='active'
+            AND a.governance_status='approved' AND a.registration_reference=@finance_registration)=1
+          AS 'TASK_FINANCIAL_CONTEXT_CHANGED';
+          ASSERT (SELECT COUNT(*) FROM ${table('management_portfolios')} WHERE tenant_id=@tenant_id
+            AND portfolio_id=@portfolio_id AND function_id='management_governance' AND status='active'
+            AND confidentiality='internal' AND source_ref=@finance_portfolio_registration)=1 AS 'TASK_FINANCIAL_CONTEXT_CHANGED';
+          ASSERT (SELECT COUNT(*) FROM ${table('administration_correspondence')} WHERE tenant_id=@tenant_id
+            AND id=@finance_source_reference AND direction='internal' AND confidentiality IN ('internal','public')
+            AND deleted_at IS NULL AND status IN ('to_qualify','to_file_dms','in_progress','closed'))=1
+            AS 'TASK_FINANCIAL_CONTEXT_CHANGED';`;
+      }
       const [duplicates] = await withHistoricalFallback(fallback => run(`SELECT id FROM (${historical(fallback)})
         WHERE LOWER(REGEXP_REPLACE(NORMALIZE(TRIM(reference),NFKC),r'\\s+',' '))=@reference_key
           OR (@check_title AND LOWER(REGEXP_REPLACE(NORMALIZE(TRIM(title),NFKC),r'\\s+',' '))=@title_key) LIMIT 1`,
@@ -445,7 +504,8 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
       }
       const [rows] = await run(`DECLARE ${replayName} BOOL DEFAULT FALSE;
         BEGIN TRANSACTION;
-        ${fence}
+        ${fence(financeMutation)}
+        ${financeFence}
         ASSERT NOT EXISTS(SELECT 1 FROM ${tasks} WHERE ${claimConflict}) AS 'TASK_DUPLICATE_REFERENCE';
         ${command}
         CREATE TEMP TABLE task_result AS SELECT scoped.*, ${replayName} AS replayed

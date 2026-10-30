@@ -67,9 +67,19 @@ function createLifecycle({ transaction, read, policy }) {
       for (const event of [initial, ...events]) result.push({ ...event, row: await read(client, scope, event.current_document_id) });
       return result;
     }),
-    mutate: (scope, id, command) => transaction(scope, async client => {
+    withLockedRoot: (scope, id, work) => transaction(scope, async client => {
+      if (typeof work !== 'function') fail('GED_INVALID_COMMAND');
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [scope.tenant + scope.owner]);
+      const { current } = await load(client, scope, id);
+      return work(await record(client, scope, current));
+    }),
+    mutate: (scope, id, command, beforeMutation) => transaction(scope, async client => {
       // Serialize an owner's revision/link operations; immutable originals require no UPDATE privilege.
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [scope.tenant + scope.owner]);
+      if (beforeMutation !== undefined) {
+        if (typeof beforeMutation !== 'function') fail('GED_INVALID_COMMAND');
+        await beforeMutation();
+      }
       const { current } = await load(client, scope, id);
       let version;
       if (command?.action === 'version') {
