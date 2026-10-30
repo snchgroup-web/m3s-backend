@@ -137,7 +137,7 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
     const owner = String(user?.id || '').trim();
     if (!tenant || !owner) throw fail('TASK_UNAUTHENTICATED', 401);
     const permissions = Array.isArray(user.permissions) ? [...user.permissions] : [];
-    return { tenant_id: tenant, owner_user_id: owner, permissions, role: user.role,
+    return { tenant_id: tenant, owner_user_id: owner, permissions, role: user.role, principal: user,
       canRead: tenant === historicalTenantId && permissions.includes(PERMISSIONS.RESOURCES_READ),
       canWrite: tenant === historicalTenantId && permissions.includes(PERMISSIONS.RESOURCES_READ) && permissions.includes(PERMISSIONS.RESOURCES_WRITE) };
   };
@@ -172,7 +172,7 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
     if (!actor.canWrite || typeof referenceSource?.bindForActor !== 'function') return null;
     try {
       const bound = await referenceSource.bindForActor({ tenantId: actor.tenant_id,
-        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: actor.role });
+        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: actor.role, principal: actor.principal });
       return bound?.contract_version === TASK_EXECUTION_CONTRACT_VERSION && bound.writes_enabled === true
         && typeof bound.catalogue?.get === 'function' && typeof bound.resolveAssignment === 'function'
         && typeof bound.qualifySources === 'function' ? bound : null;
@@ -260,7 +260,7 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
       if (!actor.canRead) throw fail('TASK_FORBIDDEN', 403);
       if (typeof referenceSource?.inspectForActor !== 'function') throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE', 503);
       const data = await referenceSource.inspectForActor({ tenantId: actor.tenant_id,
-        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: req.user.role });
+        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: req.user.role, principal: actor.principal });
       if (data?.contract_version !== TASK_EXECUTION_CONTRACT_VERSION) throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE', 503);
       res.json({ success: true, ...data });
     } catch (error) { respondError(res, error); }
@@ -326,8 +326,9 @@ function createTaskRegistryHandlers({ bigquery, projectId, datasetId, location =
         || offset < 0 || offset > 100000 || search.length > 240
         || (req.query.search != null && typeof req.query.search !== 'string')) throw fail('TASK_INVALID');
       if (!await sourceReady() || typeof referenceSource?.inspectForActor !== 'function') throw fail('TASK_SOURCE_UNAVAILABLE', 503);
-      const refs = await referenceSource.inspectForActor({ tenantId: actor.tenant_id,
-        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: actor.role });
+      const personalReferences = referenceSource.inspectForPersonalTasks || referenceSource.inspectForActor;
+      const refs = await personalReferences.call(referenceSource, { tenantId: actor.tenant_id,
+        actorId: actor.owner_user_id, permissions: [...actor.permissions], role: actor.role, principal: actor.principal });
       const assignment = refs?.choices?.assignments?.[0];
       const projectIds = new Set(refs?.choices?.phases?.map(phase => phase.project_id));
       if (refs?.contract_version !== TASK_EXECUTION_CONTRACT_VERSION || refs.execution_catalogue_ready !== true

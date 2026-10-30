@@ -222,8 +222,8 @@ async function assertDatabaseAccess(pool, lifecycleEnabled = false, incomeLinksE
   }
 }
 
-function createGedRuntime({ env, identityRuntime, credentials, financeRead, financeWrite, canAttachExpense,
-  resolveExpense, resolveIncome, dependencies = {} }) {
+function createGedRuntime({ env, identityRuntime, credentials, financeRead, financeWrite, canAttachExpense, canReadFinance,
+  resolveExpense, resolveIncome, dependencies = {}, onRuntime }) {
   let policy;
   try { policy = readPolicy(env); } catch { policy = null; }
   let ready;
@@ -253,9 +253,18 @@ function createGedRuntime({ env, identityRuntime, credentials, financeRead, fina
     if (!ready) ready = initialize().catch(error => { ready = null; throw error; });
     return ready;
   };
-  return createGedRouter({ policy, authenticate: identityRuntime.authenticate, getServices,
+  const router = createGedRouter({ policy, authenticate: identityRuntime.authenticate, getServices,
     financeRead, financeWrite, canAttachExpense, resolveExpense,
     resolveIncome: env.M3S_GED_INCOME_LINKS_ENABLED === 'true' ? resolveIncome : undefined });
+  // Internal only: callers must also enforce their existing Finance read permission.
+  router.getAuthenticatedFinanceServices = async principal => {
+    if (typeof canReadFinance !== 'function' || canReadFinance(principal) !== true) fail('GED_ACCESS_DENIED');
+    scopeFor(policy, principal);
+    const services = await getServices();
+    return { policy, ...services };
+  };
+  if (typeof onRuntime === 'function') onRuntime(router);
+  return router;
 }
 
 module.exports = { PREFIX, isPrivateGedRoute, createGedRouter, createGedRuntime, databaseOptions, assertDatabaseAccess };

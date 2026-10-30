@@ -359,7 +359,7 @@ test('project ancestry and responsible display are derived from actor-bound refe
   assert.equal(request.params.operational_plan_id, null);
   assert.equal(request.params.responsable, 'Responsable interne');
   assert.equal(request.params.progression, null);
-  assert.deepEqual(f.boundActors[0], { tenantId: 'tenant-a', actorId: 'user-a', permissions: user().permissions, role: 'Manager' });
+  assert.deepEqual(f.boundActors[0], { tenantId: 'tenant-a', actorId: 'user-a', permissions: user().permissions, role: 'Manager', principal: user() });
   assert.equal(f.assignmentInputs[0].context.project_id, 'project-test');
   assert.equal(f.assignmentInputs[0].context.phase_id, 'phase-test');
   assert.deepEqual(f.sourceInputs[0].context, f.assignmentInputs[0].context);

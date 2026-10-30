@@ -20,6 +20,23 @@ function fixture() {
   return { bytes, entry, owner, env, principal, policy: readPolicy(env) };
 }
 
+test('internal finance GED service rejects another principal before database initialization', async () => {
+  const f = fixture();
+  let runtime;
+  createGedRuntime({ env: f.env, identityRuntime: { authenticate: () => assert.fail('not used') }, canReadFinance: () => true,
+    onRuntime: value => { runtime = value; } });
+  assert.ok(runtime);
+  await assert.rejects(runtime.getAuthenticatedFinanceServices({ ...f.principal, id: 'different-user' }),
+    { code: 'GED_ACCESS_DENIED' });
+});
+
+test('internal finance GED service rejects missing finance permission before database initialization', async () => {
+  const f = fixture(); let runtime;
+  createGedRuntime({ env: f.env, identityRuntime: { authenticate: () => assert.fail('not used') },
+    onRuntime: value => { runtime = value; } });
+  await assert.rejects(runtime.getAuthenticatedFinanceServices(f.principal), { code: 'GED_ACCESS_DENIED' });
+});
+
 test('pilot is off by default and refuses incomplete or unbound configuration', () => {
   assert.equal(readPolicy({}), null);
   const { env } = fixture();
