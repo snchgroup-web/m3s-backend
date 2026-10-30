@@ -64,6 +64,9 @@ function createFinancialReferenceBridgeCandidate({ standardSource, financialSour
         execution_catalogue_ready: true, finance_catalogue_ready: true,
         execution_scope: base.execution_catalogue_ready === true ? 'standardisation_project_and_finance_operation' : 'finance_operation_only',
         missing: [],
+        standardisation_writes_enabled: base.writes_enabled === true,
+        finance_activation_enabled: true,
+        activation_enabled: true,
         writes_enabled: base.writes_enabled === true || (actor.permissions.includes(PERMISSIONS.RESOURCES_WRITE) && enabled) };
     },
     async bindForActor(actor) {

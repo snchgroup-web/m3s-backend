@@ -42,6 +42,10 @@ test('financial bridge connects a qualified operational plan without allowing a 
   assert.equal(inspect.choices.operational_plans[0].function_id, 'finance');
   assert.equal(inspect.source_origins.filter(origin => origin.reference === RAILWAY_SOURCE).length, 1);
   assert.equal(inspect.execution_catalogue_ready, true);
+  assert.equal(inspect.activation_enabled, true);
+  assert.equal(inspect.finance_activation_enabled, true);
+  assert.equal(inspect.standardisation_writes_enabled, false);
+  assert.equal(inspect.writes_enabled, true);
   const bound = await bridge.bindForActor(f.actor);
   const context = { execution_kind: 'operation', operational_plan_id: f.plan.id };
   assert.equal((await bound.resolveAssignment({ ...f.assignment, context })).id, f.assignment.id);
