@@ -108,7 +108,10 @@ function createFinancialReferenceBridgeCandidate({ standardSource, financialSour
             if (row) return row;
           }
           return base?.catalogue?.get(kind, nativeId, tenantId) || null;
-        } },
+        },
+          async getOperationContext(nativeId, tenantId) {
+            return finance.catalogue.getOperationContext(nativeId, tenantId);
+          } },
         async resolveAssignment(input) {
           if (input?.context?.execution_kind === 'operation') return finance.resolveAssignment(input);
           return base?.resolveAssignment?.(input) || null;

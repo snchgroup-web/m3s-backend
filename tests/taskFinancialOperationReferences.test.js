@@ -37,6 +37,26 @@ test('governed financial plan and assignment resolve without a fictional project
   assert.equal(await bound.qualifySources({ source_links: [link], source_origin: link, context }), false);
 });
 
+test('one current reference read resolves plan and portfolio while later checks remain fresh', async () => {
+  const f = fixture(); let loads = 0, correspondenceReads = 0;
+  const load = f.source.load, read = f.source.readCorrespondence;
+  f.source.load = async (...args) => { loads++; return load(...args); };
+  f.source.readCorrespondence = async (...args) => { correspondenceReads++; return read(...args); };
+  const bound = await createFinancialOperationReferenceReader({ source: f.source }).bindForActor(actor);
+  const resolved = await resolveTaskExecutionContext(context, { tenantId: tenant, catalogue: bound.catalogue });
+  assert.equal(resolved.portfolio_id, 'PORT-2SG-GLOBAL');
+  assert.equal(loads, 2); // Initial binding plus one current read for both records.
+  assert.ok(await bound.resolveAssignment({ ...f.data.assignment, context }));
+  const link = { kind: 'correspondence', reference: RAILWAY_SOURCE };
+  assert.equal(await bound.qualifySources({ source_links: [], source_origin: link, context }), true);
+  assert.equal(loads, 4);
+  assert.equal(correspondenceReads, 2);
+  f.data.plan.status = 'inactive';
+  await assert.rejects(resolveTaskExecutionContext(context, { tenantId: tenant, catalogue: bound.catalogue }),
+    /TASK_CONTEXT_REFERENCE_UNQUALIFIED/);
+  assert.equal(await bound.catalogue.getOperationContext('plan-test', 'other-tenant'), null);
+});
+
 test('missing plans, unapproved assignments and actors outside scope fail closed', async () => {
   for (const mutate of [d => { d.plan = null; }, d => { d.assignment.status = 'inactive'; },
     d => { d.assignment.actor_user_id = 'other'; }, d => { d.assignment.function_id = 'other'; },

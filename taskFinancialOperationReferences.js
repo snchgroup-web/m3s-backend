@@ -114,7 +114,11 @@ function createFinancialOperationReferenceReader({ source }) {
             if (!await bindingStillValid()) return null;
             const row = tenant === tenantId && catalogues[kind]?.find(item => item.id === nativeId);
             return row ? { ...row } : null;
-          } },
+          },
+            async getOperationContext(nativeId, tenant) {
+              if (tenant !== tenantId || nativeId !== plan.id || !await bindingStillValid()) return null;
+              return { plan: { ...plan }, portfolio: { ...portfolio } };
+            } },
           async resolveAssignment(input) {
             const context = input?.context;
             return context?.execution_kind === 'operation' && context.operational_plan_id === plan.id &&

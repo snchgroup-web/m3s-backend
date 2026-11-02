@@ -110,6 +110,24 @@ test('operation derives function and portfolio without creating a project or pha
   assert.equal(context.phase_id, null);
   assert.equal(context.occurrence_identity, null);
 });
+test('batched operation context enforces the same tenant, status and portfolio checks', async () => {
+  const f = fixture();
+  f.catalogue.getOperationContext = async (id, tenant) => {
+    assert.equal(id, 'plan-test'); assert.equal(tenant, 'tenant-test');
+    return { plan: { ...f.records.operational_plan }, portfolio: { ...f.records.portfolio } };
+  };
+  const result = await resolve(operation(), f);
+  assert.equal(result.portfolio_id, 'portfolio-test');
+  assert.equal(f.calls.length, 0);
+  for (const mutation of [r => { r.operational_plan.status = 'inactive'; },
+    r => { r.portfolio.tenant_id = 'other'; }, r => { r.portfolio.id = 'other'; }]) {
+    const current = fixture(); mutation(current.records);
+    current.catalogue.getOperationContext = async () => ({ plan: current.records.operational_plan, portfolio: current.records.portfolio });
+    await assert.rejects(resolve(operation(), current), { code: 'TASK_CONTEXT_REFERENCE_UNQUALIFIED' });
+  }
+  f.catalogue.getOperationContext = async () => { throw Error('private'); };
+  await assert.rejects(resolve(operation(), f), { code: 'TASK_CONTEXT_SOURCE_UNAVAILABLE' });
+});
 test('optional operation dossier must belong to its portfolio', async () => {
   const f = fixture(r => { r.operational_plan.dossier_id = 'dossier-test'; r.dossier.portfolio_id = 'different'; });
   await assert.rejects(resolve(operation(), f), { code: 'TASK_CONTEXT_REFERENCE_UNQUALIFIED' });

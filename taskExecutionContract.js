@@ -63,15 +63,18 @@ async function resolveTaskExecutionContext(input, { tenantId, catalogue } = {}) 
   const context = normalizeTaskExecutionContext(input);
   const tenant = identifier(tenantId);
   if (!catalogue || typeof catalogue.get !== 'function') throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE');
-  const get = async (kind, id) => {
-    let record;
-    try { record = await catalogue.get(kind, identifier(id), tenant); }
-    catch { throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE'); }
+  const qualified = (record, id) => {
     if (!plain(record) || record.id !== id || record.tenant_id !== tenant
       || record.governance_status !== 'approved' || record.status !== 'active') {
       throw fail('TASK_CONTEXT_REFERENCE_UNQUALIFIED');
     }
     return record;
+  };
+  const get = async (kind, id) => {
+    let record;
+    try { record = await catalogue.get(kind, identifier(id), tenant); }
+    catch { throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE'); }
+    return qualified(record, id);
   };
   const result = { ...context, project_id: null, dossier_id: null,
     portfolio_id: null, function_id: null, occurrence_identity: null };
@@ -86,8 +89,17 @@ async function resolveTaskExecutionContext(input, { tenantId, catalogue } = {}) 
     }
     return { ...result, project_id: project.id, dossier_id: dossier.id, portfolio_id: portfolio.id };
   }
-  const plan = await get('operational_plan', context.operational_plan_id);
-  const portfolio = await get('portfolio', plan.portfolio_id);
+  let plan, portfolio;
+  if (typeof catalogue.getOperationContext === 'function') {
+    let pair;
+    try { pair = await catalogue.getOperationContext(identifier(context.operational_plan_id), tenant); }
+    catch { throw fail('TASK_CONTEXT_SOURCE_UNAVAILABLE'); }
+    plan = qualified(pair?.plan, context.operational_plan_id);
+    portfolio = qualified(pair?.portfolio, identifier(plan.portfolio_id));
+  } else {
+    plan = await get('operational_plan', context.operational_plan_id);
+    portfolio = await get('portfolio', plan.portfolio_id);
+  }
   result.portfolio_id = portfolio.id;
   result.function_id = identifier(plan.function_id);
   if (plan.dossier_id != null) {
