@@ -22,7 +22,7 @@ const { profileNoStore, createOwnProfileHandler, resolveOwnPersonLink } = requir
 const { createIdentityRuntime } = require('./identityRuntime');
 const { createTaskRegistryHandlers } = require('./taskRegistry');
 const { createTaskReferenceSource } = require('./taskReferenceSource');
-const { createFinancialReferenceBridgeCandidate, createFinancialSourceForActorCandidate } = require('./taskFinancialReferenceBridgeCandidate');
+const { createFinancialReferenceBridgeCandidate, createFinancialSourceForActorCandidate, financeReferencesEnabled } = require('./taskFinancialReferenceBridgeCandidate');
 const { RAILWAY_SOURCE, buildFinancialOperationRegistrationPreparation } = require('./taskFinancialOperationReferences');
 const { PREFIX: GED_PREFIX, isPrivateGedRoute, createGedRuntime } = require('./gedPrivate');
 const { PREFIX: INSTITUTIONAL_GED_PREFIX, isInstitutionalGedRoute, createInstitutionalHost } = require('./gedInstitutional');
@@ -208,8 +208,7 @@ const intelligenceDashboardRepository = createIntelligenceDashboardRepository({
   datasetId: DATASET_ID,
   location: DATASET_LOCATION
 });
-const financialReferencesRequested = process.env.M3S_TASK_FINANCE_ENABLED === 'true';
-const financialReferencesEnabled = financialReferencesRequested;
+const financialReferencesEnabled = financeReferencesEnabled(process.env);
 const administrationRegistryHandlers = createAdministrationRegistryHandlers({
   bigquery,
   projectId: PROJECT_ID,

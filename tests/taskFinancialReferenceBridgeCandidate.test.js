@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createFinancialReferenceBridgeCandidate, createFinancialSourceForActorCandidate } = require('../taskFinancialReferenceBridgeCandidate');
+const { createFinancialReferenceBridgeCandidate, createFinancialSourceForActorCandidate, financeReferencesEnabled } = require('../taskFinancialReferenceBridgeCandidate');
 const { PERMISSIONS } = require('../administrationRegistries');
 const { RAILWAY_SOURCE } = require('../taskFinancialOperationReferences');
 const { createNativeFinancialSourceCandidate } = require('../taskFinancialOperationReferences');
@@ -31,6 +31,21 @@ test('financial bridge is disabled by default and never changes the standard res
   const bridge = createFinancialReferenceBridgeCandidate({ standardSource: f.base });
   assert.deepEqual(await bridge.inspectForActor(f.actor), await f.base.inspectForActor(f.actor));
   assert.equal(await bridge.bindForActor(f.actor), null);
+});
+
+test('server default enables the qualified plan while explicit opt-out and missing permissions stay closed', async () => {
+  const f = fixture(); let loads = 0;
+  const makeBridge = env => createFinancialReferenceBridgeCandidate({ standardSource: f.base,
+    enabled: financeReferencesEnabled(env), financialSourceForActor: async () => { loads++; return f.source; } });
+  assert.equal((await makeBridge({}).inspectForActor(f.actor)).finance_catalogue_ready, true);
+  assert.equal(loads, 1);
+  for (const value of ['false', '', 'unexpected']) {
+    const result = await makeBridge({ M3S_TASK_FINANCE_ENABLED: value }).inspectForActor(f.actor);
+    assert.deepEqual(result, await f.base.inspectForActor(f.actor));
+  }
+  assert.equal(loads, 1);
+  assert.equal(await makeBridge({}).bindForActor({ ...f.actor, permissions: [PERMISSIONS.RESOURCES_READ] }), null);
+  assert.equal(loads, 1);
 });
 
 test('financial bridge connects a qualified operational plan without allowing a project fallback', async () => {

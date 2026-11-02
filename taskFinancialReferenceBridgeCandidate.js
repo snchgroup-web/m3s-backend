@@ -7,6 +7,13 @@ const { createRegisteredFinancialPlanVerifierCandidate, createInitialFinancialAp
   createFinancialRegistrationPreflightCandidate } = require('./taskFinancialDecisionSourceCandidate');
 const { FINANCE_DECISION_SHA256, buildFinancialStoragePlanCandidate, buildFinancialRegistrationPreview } = require('./taskFinancialStoragePlanCandidate');
 
+// The approved Finance plan is available by default; an explicit false or any
+// unrecognized value keeps the existing rollback switch closed.
+function financeReferencesEnabled(env = process.env) {
+  const setting = env.M3S_TASK_FINANCE_ENABLED;
+  return setting === undefined || setting === 'true';
+}
+
 // Composes existing authenticated services for a review only. The anchor and
 // approval reference must come from trusted server code, never an HTTP body.
 // It cannot register or enable a feature, or establish current approval. The
@@ -125,4 +132,4 @@ function createFinancialReferenceBridgeCandidate({ standardSource, financialSour
 }
 
 module.exports = { createFinancialReferenceBridgeCandidate, createFinancialSourceForActorCandidate,
-  createFinancialRegistrationReviewCandidate, FINANCE_DECISION_SHA256 };
+  createFinancialRegistrationReviewCandidate, financeReferencesEnabled, FINANCE_DECISION_SHA256 };
