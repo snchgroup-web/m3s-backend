@@ -358,6 +358,10 @@ const respondError = (res, error, logger) => {
   if (error instanceof RegistryValidationError) {
     return res.status(400).json({ success: false, code: error.code, error: error.message });
   }
+  if (String(error?.message || '').includes('ADMIN_REGISTRY_COORDINATION_UNAVAILABLE')) {
+    return res.status(503).json({ success: false, code: 'ADMIN_REGISTRY_COORDINATION_UNAVAILABLE',
+      error: 'Coordination temporarily unavailable' });
+  }
   if (isMissingTable(error)) {
     return res.status(503).json({
       success: false,
@@ -387,13 +391,29 @@ const createAdministrationRegistryHandlers = ({
   projectId,
   datasetId,
   location = 'US',
+  coordinatedCorrespondenceId,
+  coordinatedCorrespondenceIds = [],
   now = () => new Date().toISOString(),
   idGenerator = prefix => `${prefix}-${crypto.randomUUID()}`,
   logger = console
 }) => {
+  if (!Array.isArray(coordinatedCorrespondenceIds) || coordinatedCorrespondenceIds.length > 16 ||
+      coordinatedCorrespondenceIds.some(id => typeof id !== 'string' || !id.trim() || id !== id.trim()) ||
+      (coordinatedCorrespondenceId !== undefined &&
+        (typeof coordinatedCorrespondenceId !== 'string' || !coordinatedCorrespondenceId.trim() ||
+         coordinatedCorrespondenceId !== coordinatedCorrespondenceId.trim()))) {
+    throw new Error('ADMIN_REGISTRY_COORDINATION_INVALID');
+  }
+  const coordinatedIds = new Set(coordinatedCorrespondenceIds);
+  if (coordinatedCorrespondenceId !== undefined) coordinatedIds.add(coordinatedCorrespondenceId);
   const resourcesTable = `\`${projectId}.${datasetId}.administration_resources\``;
   const correspondenceTable = `\`${projectId}.${datasetId}.administration_correspondence\``;
   const auditTable = `\`${projectId}.${datasetId}.administration_audit_log\``;
+  const taskStateTable = `\`${projectId}.${datasetId}.administration_task_registry_state\``;
+  const correspondenceFence = id => coordinatedIds.has(id)
+    ? `UPDATE ${taskStateTable} SET revision=revision+1 WHERE id='registry' AND revision>=0
+        AND contract_version='m3s.task-execution.v2';
+       ASSERT @@row_count=1 AS 'ADMIN_REGISTRY_COORDINATION_UNAVAILABLE';` : '';
   const run = (query, params) => bigquery.query({ query, params, location });
   const commonParams = identity => ({
     tenant_id: identity.tenantId,
@@ -657,6 +677,7 @@ const createAdministrationRegistryHandlers = ({
       const params = { id, ...payload, ...commonParams(identity), updated_at: now(), ...auditParams(identity, 'correspondence', id, 'update', Object.keys(payload)), deadline: payload.deadline || '1970-01-01' };
       const [rows] = await run(`
         BEGIN TRANSACTION;
+        ${correspondenceFence(id)}
         UPDATE ${correspondenceTable}
         SET receipt_date=DATE(@receipt_date), direction=@direction, channel=@channel,
           sender=@sender, recipient=@recipient, subject=@subject, category=@category,
@@ -699,6 +720,7 @@ const createAdministrationRegistryHandlers = ({
       const params = { id, ...commonParams(identity), deleted_at: now(), ...auditParams(identity, 'correspondence', id, 'delete', ['deleted_at']) };
       await run(`
         BEGIN TRANSACTION;
+        ${correspondenceFence(id)}
         UPDATE ${correspondenceTable}
         SET deleted_at=TIMESTAMP(@deleted_at), updated_by_user_id=@user_id,
           updated_at=TIMESTAMP(@deleted_at)
