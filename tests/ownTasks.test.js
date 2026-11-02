@@ -9,7 +9,7 @@ const row = () => ({ id: 'TASK-test', reference: 'TEST-001', contract_version: v
   title: 'Synthetic task', status: 'in_progress', priority: 'normal', ...assignment,
   project_id: 'test-project-id', execution_kind: 'project', phase_id: 'test-phase',
   source_kind: 'operational', can_edit: false, revision: 2, source_links_json: '[]', source_origin_json: 'null' });
-function setup({ items = [row()], total = items.length, ready = true, refsPatch = {} } = {}) {
+function setup({ items = [row()], total = items.length, ready = true, refsPatch = {}, personalRefs } = {}) {
   const calls = [], actors = [];
   const contracts = { ...TASK_TABLE_CONTRACTS, administration_audit_log: ADMINISTRATION_TABLE_CONTRACTS.administration_audit_log };
   const bigquery = { dataset: () => ({ table: name => ({ getMetadata: async () => {
@@ -26,6 +26,7 @@ function setup({ items = [row()], total = items.length, ready = true, refsPatch 
     return { contract_version: version, execution_catalogue_ready: true,
       choices: { assignments: [assignment], phases: [{ id: 'test-phase', project_id: 'test-project-id' }] }, ...refsPatch };
   } };
+  if (personalRefs) referenceSource.inspectForPersonalTasks = async actor => { actors.push(actor); return personalRefs; };
   const handlers = createTaskRegistryHandlers({ bigquery, projectId: 'test-project', datasetId: 'test_data',
     historicalTenantId: 'test-tenant', referenceSource, logger: { warn() {} } });
   return { calls, actors, async call(patch = {}) {
@@ -45,7 +46,7 @@ test('own tasks reuse explicit read rights, actor-bound assignment and SQL pagin
   assert.equal(res.body.historical_included, false);
   assert.equal(res.body.total, 12); assert.equal(res.body.count, 1);
   assert.equal(res.body.data[0].can_edit, false);
-  assert.deepEqual(f.actors[0], { tenantId: user.tenantId, actorId: user.id, permissions: user.permissions, role: user.role });
+  assert.deepEqual(f.actors[0], { tenantId: user.tenantId, actorId: user.id, permissions: user.permissions, role: user.role, principal: user });
   const q = f.calls.at(-1);
   assert.equal(q.params.owner_user_id, user.id); assert.equal(q.params.tenant_id, user.tenantId);
   assert.equal(q.params.assignee_agent_id, assignment.assignee_agent_id);
@@ -87,6 +88,16 @@ test('unexpected foreign, historical, editable and duplicate source rows never l
 test('a genuine empty result remains distinct from source failure', async () => {
   const res = await setup({ items: [] }).call();
   assert.equal(res.statusCode, 200); assert.equal(res.body.total, 0); assert.deepEqual(res.body.data, []);
+});
+test('personal task scope stays on its existing project when another assignment is available', async () => {
+  const personalRefs = { contract_version: version, execution_catalogue_ready: true,
+    choices: { assignments: [assignment], phases: [{ id: 'test-phase', project_id: 'test-project-id' }] } };
+  const f = setup({ personalRefs, refsPatch: { choices: { assignments: [assignment, { ...assignment, function_id: 'finance' }],
+    phases: personalRefs.choices.phases } } });
+  const res = await f.call();
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.data[0].project_id, 'test-project-id');
+  assert.equal(f.calls.at(-1).params.function_id, assignment.function_id);
 });
 test('own tasks route is GET only and uses the existing authentication middleware', () => {
   const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../server.js'), 'utf8');

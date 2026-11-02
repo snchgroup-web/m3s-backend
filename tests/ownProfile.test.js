@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const http = require('node:http');
 const express = require('express');
-const { createOwnProfileHandler, profileNoStore, jpegPhoto } = require('../ownProfile');
+const { createOwnProfileHandler, resolveOwnPersonLink, profileNoStore, jpegPhoto } = require('../ownProfile');
 const { signJwtToken, verifyJwtToken } = require('../authConfiguration');
 
 const principal = { id: 'fixture-account', tenantId: 'fixture-org' };
@@ -18,6 +18,19 @@ const directory = { schema_version: 'rh001-directory-v1', classification: 'C2',
     member_type: 'Fondateur', team: 'TZH', subgroup: null, position: 'Synthetic function', active: true },
   { person_id: 'PER-2SG-9002', display_name: 'Other Person', preferred_name: 'Other',
     member_type: 'Associe', team: 'TSN', subgroup: null, position: 'Other function', active: true }] };
+
+test('internal profile link requires the same configured account and active directory person', async () => {
+  const base = { principal, getAccounts: () => [account], readDirectory: async () => structuredClone(directory), env };
+  const linked = await resolveOwnPersonLink(base);
+  assert.equal(linked.status, 'ok');
+  assert.equal(linked.person.person_id, 'PER-2SG-9001');
+  assert.equal((await resolveOwnPersonLink({ ...base, principal: { ...principal, id: 'other' } })).status, 'denied');
+  assert.equal((await resolveOwnPersonLink({ ...base, principal: { ...principal, tenantId: 'other' } })).status, 'denied');
+  assert.equal((await resolveOwnPersonLink({ ...base, getAccounts: () => [account, account] })).status, 'denied');
+  const inactive = structuredClone(directory); inactive.records[0].active = false;
+  assert.equal((await resolveOwnPersonLink({ ...base, readDirectory: async () => inactive })).status, 'not_linked');
+  assert.equal((await resolveOwnPersonLink({ ...base, readDirectory: async () => { throw Error('private'); } })).status, 'unavailable');
+});
 
 async function scenario(run) {
   const state = { accounts: structuredClone([account]), env: { ...env }, directory: structuredClone(directory) };

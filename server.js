@@ -18,10 +18,12 @@ const { createCorsOriginValidator, createCorsErrorHandler } = require('./corsPol
 const { createDebugAccessMiddleware, createDebugSampleGuard } = require('./debugAccess');
 const { createBoussoleArtifactHandler } = require('./boussoleArtifact');
 const { buildFxRateMetadata } = require('./fxRateMetadata');
-const { profileNoStore, createOwnProfileHandler } = require('./ownProfile');
+const { profileNoStore, createOwnProfileHandler, resolveOwnPersonLink } = require('./ownProfile');
 const { createIdentityRuntime } = require('./identityRuntime');
 const { createTaskRegistryHandlers } = require('./taskRegistry');
 const { createTaskReferenceSource } = require('./taskReferenceSource');
+const { createFinancialReferenceBridgeCandidate, createFinancialSourceForActorCandidate } = require('./taskFinancialReferenceBridgeCandidate');
+const { RAILWAY_SOURCE, buildFinancialOperationRegistrationPreparation } = require('./taskFinancialOperationReferences');
 const { PREFIX: GED_PREFIX, isPrivateGedRoute, createGedRuntime } = require('./gedPrivate');
 const { PREFIX: INSTITUTIONAL_GED_PREFIX, isInstitutionalGedRoute, createInstitutionalHost } = require('./gedInstitutional');
 const { PREFIX: RH_INSTITUTIONAL_GED_PREFIX, createHost: createInstitutionalRhHost } = require('./gedInstitutionalRh');
@@ -38,6 +40,7 @@ const {
   isFeatureEnabled,
   parseAllowedRoles,
   readDirectoryDocument,
+  isRoleAllowed,
 } = require('./rh001Directory');
 const {
   createIntelligenceDashboardRepository,
@@ -205,19 +208,18 @@ const intelligenceDashboardRepository = createIntelligenceDashboardRepository({
   datasetId: DATASET_ID,
   location: DATASET_LOCATION
 });
+const financialReferencesRequested = process.env.M3S_TASK_FINANCE_ENABLED === 'true';
+const financialReferencesEnabled = financialReferencesRequested;
 const administrationRegistryHandlers = createAdministrationRegistryHandlers({
   bigquery,
   projectId: PROJECT_ID,
   datasetId: DATASET_ID,
-  location: DATASET_LOCATION
+  location: DATASET_LOCATION,
+  coordinatedCorrespondenceIds: financialReferencesEnabled
+    ? [RAILWAY_SOURCE, buildFinancialOperationRegistrationPreparation().consultation.correspondence_reference]
+    : []
 });
-const taskRegistryHandlers = createTaskRegistryHandlers({
-  bigquery, projectId: PROJECT_ID, datasetId: DATASET_ID, location: DATASET_LOCATION,
-  referenceSource: createTaskReferenceSource({ bigquery, projectId: PROJECT_ID, datasetId: DATASET_ID,
-    location: DATASET_LOCATION, directoryPath: RH001_DIRECTORY_PATH,
-    directoryEnabled: RH001_MEMBERS_DIRECTORY_ENABLED, directoryAllowedRoles: RH001_MEMBERS_DIRECTORY_ALLOWED_ROLES,
-    activationEnabled: process.env.M3S_TASK_STANDARDISATION_ENABLED === 'true' })
-});
+let taskRegistryHandlers;
 const managementPortfolioHandlers = createManagementPortfolioHandlers({
   bigquery,
   projectId: PROJECT_ID,
@@ -460,6 +462,27 @@ app.use(GED_PREFIX, createGedRuntime({ env: process.env, identityRuntime, creden
     return rows.length === 1 ? { id: rows[0].id, source: table.replace(/`/g, '') } : null;
   }
 }));
+const standardTaskReferences = createTaskReferenceSource({ bigquery, projectId: PROJECT_ID, datasetId: DATASET_ID,
+  location: DATASET_LOCATION, directoryPath: RH001_DIRECTORY_PATH,
+  directoryEnabled: RH001_MEMBERS_DIRECTORY_ENABLED, directoryAllowedRoles: RH001_MEMBERS_DIRECTORY_ALLOWED_ROLES,
+  activationEnabled: process.env.M3S_TASK_STANDARDISATION_ENABLED === 'true' });
+const financialSourceForActor = async actor => {
+  const sourceForActor = createFinancialSourceForActorCandidate({ bigquery, projectId: PROJECT_ID, datasetId: DATASET_ID,
+    location: DATASET_LOCATION,
+    canReadFinance: principal => financePermissionsForUser(principal).includes(FINANCE_PERMISSIONS.READ),
+    loadPerson: async ({ tenantId, assigneeAgentId }) => {
+      if (tenantId !== '2sg' || assigneeAgentId !== 'PER-2SG-0001' || !RH001_MEMBERS_DIRECTORY_ENABLED ||
+          !isRoleAllowed(actor.role, RH001_MEMBERS_DIRECTORY_ALLOWED_ROLES)) return null;
+      const link = await resolveOwnPersonLink({ principal: actor.principal, getAccounts: getConfiguredUsers,
+        readDirectory: () => readDirectoryDocument(RH001_DIRECTORY_PATH) });
+      if (link.status !== 'ok' || link.person.person_id !== assigneeAgentId || link.person.team !== 'TZH') return null;
+      return { id: link.person.person_id, label: link.person.display_name, team_id: link.person.team, active: true };
+    } });
+  return sourceForActor(actor);
+};
+taskRegistryHandlers = createTaskRegistryHandlers({ bigquery, projectId: PROJECT_ID, datasetId: DATASET_ID,
+  location: DATASET_LOCATION, referenceSource: createFinancialReferenceBridgeCandidate({
+    standardSource: standardTaskReferences, financialSourceForActor, enabled: financialReferencesEnabled }) });
 app.get('/api/auth/provider', profileNoStore, (_req, res) => res.json(identityRuntime.publicConfig));
 app.get('/api/auth/me', identityRuntime.currentAccount);
 
